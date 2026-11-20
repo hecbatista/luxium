@@ -178,6 +178,11 @@ GNU Lesser General Public License version 3
   (pipeline.programs.ShaderKey PARTICLES, PARTICLES_TRANS), and the render stage
   (WorldRenderingPhase.PARTICLES).
 
+  Weather (render/EntityTakeover.java, mixin/WeatherEffectRendererMixin.java) follows Iris for
+  the program chain (ProgramId: weather -> textured_lit -> textured -> basic), the alpha test
+  (ShaderKey WEATHER one tenth, unless alphaTest.<program> says otherwise) and the render stage
+  (WorldRenderingPhase.RAIN_SNOW).
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3

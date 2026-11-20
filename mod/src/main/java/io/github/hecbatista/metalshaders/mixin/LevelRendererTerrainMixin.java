@@ -151,6 +151,26 @@ abstract class LevelRendererTerrainMixin {
         }
     }
 
+    /** Rain and snow (WeatherEffectRenderer.render): routed to the pack's weather program. */
+    @WrapOperation(method = "executeClassicTransparency", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/client/renderer/WeatherEffectRenderer;render(Lnet/minecraft/client/renderer/state/level/WeatherRenderState;Lcom/mojang/renderpearl/api/commands/RenderPass;)V"))
+    private void luxium$weather(final net.minecraft.client.renderer.WeatherEffectRenderer weather,
+                                final net.minecraft.client.renderer.state.level.WeatherRenderState state, final RenderPass pass,
+                                final Operation<Void> original) {
+        io.github.hecbatista.metalshaders.render.RoutingPass routing = EntityTakeover.routeWeather(pass, MetalShadersClient::value);
+        if (routing == null) {
+            original.call(weather, state, pass);
+            return;
+        }
+        try {
+            original.call(weather, state, routing);
+        } finally {
+            routing.finish();
+            EntityTakeover.endParticles();
+            EntityTakeover.closeWindow();
+        }
+    }
+
     /** The level's "after terrain" features (translucent particles): the pack's translucent window again. */
     @WrapOperation(method = "executeClassicTransparency", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;executeTranslucentAfterTerrain(Lcom/mojang/renderpearl/api/commands/RenderPass;)V"))

@@ -361,6 +361,17 @@ public final class MetalShadersClient implements ClientModInitializer {
                 break;
             }
         }
+        // Weather, through Iris's fallbacks (weather -> textured_lit -> textured -> basic).
+        for (String candidate : List.of("gbuffers_weather", "gbuffers_textured_lit", "gbuffers_textured", "gbuffers_basic")) {
+            var v = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".vsh", defines);
+            var f = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".fsh", defines);
+            if (PackChain.ready() && v.ok() && f.ok()) {
+                LOGGER.info("Weather: {}", candidate);
+                io.github.hecbatista.metalshaders.render.EntityTakeover.prepareWeather(candidate,
+                        new String[]{v.result().text(), f.result().text()}, props);
+                break;
+            }
+        }
         var ptV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_particles_translucent.vsh", defines);
         var ptF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_particles_translucent.fsh", defines);
         boolean ownTranslucent = ptV.ok() && ptF.ok();

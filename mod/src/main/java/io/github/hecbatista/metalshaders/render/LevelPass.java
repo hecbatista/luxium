@@ -154,6 +154,11 @@ public final class LevelPass implements RenderPass {
 
     @Override
     public void drawIndexed(int indexCount, int instanceCount, int firstIndex, int vertexOffset, int firstInstance) {
+        if (indexCount == 0 || instanceCount == 0) {
+            // An empty draw does nothing, but Metal's validation refuses it and Metallum passes it
+            // on (vanilla's weather draws snow with 0 columns while it only rains).
+            return;
+        }
         real().drawIndexed(indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
     }
 
@@ -180,6 +185,9 @@ public final class LevelPass implements RenderPass {
 
     @Override
     public void draw(int vertexCount, int instanceCount, int firstVertex, int firstInstance) {
+        if (vertexCount == 0 || instanceCount == 0) {
+            return;   // see drawIndexed
+        }
         real().draw(vertexCount, instanceCount, firstVertex, firstInstance);
     }
 

@@ -20,7 +20,7 @@ import java.util.stream.Stream;
  * <p>
  * The scene, made with commands at noon in clear weather: a stone floor and a sealed glass box
  * full of water, an oak-log block, a gold block, a leaves block, a pig and a chest. Shot 1 looks at the box from
- * outside; shot 2 is from inside the water; shot 3 is the pig just hurt.
+ * outside; shot 2 is from inside the water; shot 3 is the pig just hurt; shot 4 is rain.
  */
 @SuppressWarnings("UnstableApiUsage")
 public class ScreenshotTest implements FabricClientGameTest {
@@ -74,6 +74,13 @@ public class ScreenshotTest implements FabricClientGameTest {
             server.runCommand("tp @a 0 102 0 0 0");
             context.waitTicks(60);
             context.takeScreenshot("luxium-2-underwater");
+
+            // Shot 4: rain, from shot 1's spot (the rain level ramps up over a few seconds).
+            server.runCommand("weather rain");
+            server.runCommand("tp @a 0 104 -14 0 25");
+            context.waitTicks(140);
+            context.takeScreenshot("luxium-4-rain");
+            server.runCommand("weather clear");
         }
     }
 

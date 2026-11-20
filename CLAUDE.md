@@ -194,14 +194,20 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
   - Families: particles (solid window, with the coverage mask) and particles_translucent (a window around `executeTranslucentAfterTerrain`, where 26.3 draws translucent particles). Both use the PARTICLE format and alpha > 0.1, and the program is found through Iris's fallbacks (Complementary: gbuffers_textured for both, targets 0, 6, 3).
   - Each `EntityTakeover` family now has its own vertex format.
   - Game test: flame and happy_villager particles in shot 1 are drawn by the pack (pipeline opaque_particle). 0 validation messages, 74 unit tests pass, scoreboard 90/90.
+- **6d-4, fifth slice (2026-11-20, ✅): weather.**
+  - `WeatherEffectRenderer.render` (PARTICLE format, pipeline WEATHER; it sets the pipeline, binds DynamicTransforms and Sampler2, then draws rain and snow with their textures) is routed like particles: a `RoutingPass` and its own window, inside the catch.
+  - The program comes through Iris's fallbacks (Complementary: gbuffers_weather, targets 0 and 4). The alpha test follows the pack's `alphaTest.gbuffers_weather` (> 0.0001); stage RAIN_SNOW = 21.
+  - **Metallum / vanilla bug found:** during rain with no snow, vanilla draws snow with `drawIndexed(0, …)`. Metallum passes that to Metal, and Metal's validation aborts the game ("indexCount(0) must be non-zero"). It happens without our takeover too (`LUXIUM_NO_ENTITIES=1`). `LevelPass` and `RoutingPass` now skip zero-count draws. Worth reporting to Metallum.
+  - Game test shot 4 (rain): Complementary's rain look (overcast sky, wet floor, streaks). 0 validation messages, 74 unit tests pass, scoreboard 90/90.
 - **6d-4 handoff (start here next session): what's left of 6d-4.**
+  - **The hand** (the biggest piece left).
+    - Today `GameRenderer.render3dHud` clears the depth (GameRenderer.java:689) and draws the hand *after* the chain (the chain runs before render3dHud), so the pack never sees it.
+    - The pack expects `gbuffers_hand` before the deferred/composite passes. Complementary's composite1 tells hand pixels by depth (`z0 <= 0.56`), so the hand needs its own depth range in depthtex0.
+    - Read Iris `pathways/HandRenderer.java` and Vitrail frame.md "The hand is the one family the engine has to move rather than intercept".
+    - The game test needs a non-spectator player holding something.
   - `currentRenderedItemId` (items and held items: `submitItem` → `ItemFeatureRenderer`, render types inside `ItemQuads`) is still 0.
   - The `current_player` entity name isn't special-cased yet.
-  - Then:
-    - the hand (`render3dHud`, after the chain today; Vitrail moves it into the level);
-    - weather (gbuffers_weather: `WeatherEffectRenderer.render` in `executeClassicTransparency`, its own pipeline and format);
-    - glint, beacon beam, lightning, spider eyes (gbuffers_spidereyes);
-    - translucent particles (a pipeline other than opaque_particle) aren't seen in the test yet.
+  - Glint, beacon beam, lightning, spider eyes (gbuffers_spidereyes); translucent particle layers aren't in the test scene yet.
   - Watch: `LevelPass` covers "Main" and the catch only. The OIT path (improved transparency) is untouched.
 - **6e: shadow pass.**
 - Metallum's only Sodium mixin picks the graphics API (`metallum.sodium.mixins.json`: `SodiumPreferredGraphicsApiMixin`). Sodium already draws through the game's RenderPearl API, so Vitrail's Sodium-level hooks should apply on Metal too.

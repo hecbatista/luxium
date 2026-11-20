@@ -18,6 +18,7 @@
     "RenderTypeFeatureRendererMixin",
     "SkyRendererMixin",
     "SubmitNodeCollectionMixin",
+    "WeatherEffectRendererMixin",
     "sodium.BlockRendererMixin",
     "sodium.ChunkMeshFormatsMixin",
     "sodium.ChunkVertexMixin",

@@ -133,7 +133,11 @@ public final class EntityTakeover {
         }
 
         float alphaFor(RenderPipeline pipeline) {
-            if (translucent || alwaysTenth) {
+            if (alwaysTenth) {
+                // Iris ONE_TENTH_ALPHA, unless the pack's alphaTest.<program> says otherwise
+                return TerrainTakeover.alphaTest(properties, blendProgram != null ? blendProgram : program, 0.1f);
+            }
+            if (translucent) {
                 return 0.1f;   // Iris: translucent entities ONE_TENTH_ALPHA
             }
             return pipeline.getShaderDefines().values().containsKey("ALPHA_CUTOUT") ? 0.1f : Float.NaN;
@@ -149,7 +153,9 @@ public final class EntityTakeover {
     private static final Family PARTICLES = new Family("gbuffers_particles", false, 19, DefaultVertexFormat.PARTICLE, PARTICLE_ELEMENTS, true);
     private static final Family PARTICLES_TRANSLUCENT = new Family("gbuffers_particles_translucent", true, 19,
             DefaultVertexFormat.PARTICLE, PARTICLE_ELEMENTS, true);
-    private static final List<Family> ALL = List.of(SOLID, BLOCK, TRANSLUCENT, PARTICLES, PARTICLES_TRANSLUCENT);
+    /** Rain and snow (Iris ShaderKey WEATHER: the PARTICLE format, one tenth; WorldRenderingPhase.RAIN_SNOW = 21). */
+    private static final Family WEATHER = new Family("gbuffers_weather", true, 21, DefaultVertexFormat.PARTICLE, PARTICLE_ELEMENTS, true);
+    private static final List<Family> ALL = List.of(SOLID, BLOCK, TRANSLUCENT, PARTICLES, PARTICLES_TRANSLUCENT, WEATHER);
 
     /** Which part of the level's features is being drawn. */
     private enum Phase { SOLID, TRANSLUCENT }
@@ -198,6 +204,11 @@ public final class EntityTakeover {
     public static void prepareParticles(String name, String[] particles, String translucentName, String[] translucent, Properties properties) {
         prepareFamily(PARTICLES, particles, properties, name);
         prepareFamily(PARTICLES_TRANSLUCENT, translucent, properties, translucentName);
+    }
+
+    /** The weather program, already resolved through Iris's fallbacks (weather -> textured_lit -> textured -> basic). */
+    public static void prepareWeather(String name, String[] weather, Properties properties) {
+        prepareFamily(WEATHER, weather, properties, name);
     }
 
     private static void prepareFamily(Family f, String[] glsl, Properties properties, String program) {
@@ -423,7 +434,23 @@ public final class EntityTakeover {
 
     /** A routing pass for a particle group in the open window, or null to leave it to the game. */
     public static RoutingPass routeParticles(RenderPass pass) {
-        Family f = window == Phase.SOLID ? PARTICLES : window == Phase.TRANSLUCENT ? PARTICLES_TRANSLUCENT : null;
+        return route(pass, window == Phase.SOLID ? PARTICLES : window == Phase.TRANSLUCENT ? PARTICLES_TRANSLUCENT : null);
+    }
+
+    /**
+     * A routing pass for the weather (WeatherEffectRenderer.render, inside the level's translucent
+     * phase, after the deferred cut), or null to leave it to the game.
+     */
+    public static RoutingPass routeWeather(RenderPass pass, Function<String, Object> values) {
+        if (!(pass instanceof LevelPass level) || !active(WEATHER)) {
+            return null;
+        }
+        level.suspend();   // the window resolves textures: no pass may be open
+        open(Phase.TRANSLUCENT, values, List.of(WEATHER));
+        return route(pass, WEATHER);
+    }
+
+    private static RoutingPass route(RenderPass pass, Family f) {
         if (!(pass instanceof LevelPass level) || f == null || !active(f) || !targetsReady(f)) {
             return null;
         }
