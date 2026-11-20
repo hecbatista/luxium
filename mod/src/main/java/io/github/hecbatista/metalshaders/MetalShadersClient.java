@@ -57,6 +57,59 @@ public final class MetalShadersClient implements ClientModInitializer {
                 metallumVersion, shaderpacks);
 
         logPacks(shaderpacks);
+        readMeshDirectives(shaderpacks);
+    }
+
+    /** What the chunk meshes were last built with: separateAo and the block.properties map. */
+    private static String meshKey = "";
+
+    /**
+     * What changes how chunks are meshed (separateAo, block.properties ids). Read at startup, so a
+     * pack that's there from the start needs no rebuild, and again when the pack loads (a pack can
+     * arrive later, as in the game test); sections keep what they were meshed with, so if the
+     * answer changed, all chunks are rebuilt (the F3+A door, LevelExtractor.allChanged).
+     *
+     * @return whether the answer changed
+     */
+    private static boolean readMeshDirectives(Path shaderpacks) {
+        try {
+            List<Path> packs = PackReader.findPacks(shaderpacks);
+            if (packs.isEmpty()) {
+                return false;
+            }
+            String properties = PackReader.open(packs.getFirst(), (name, root, shaders) ->
+                    PackReader.readText(shaders, "/shaders.properties").orElse(""));
+            java.util.Properties props = new java.util.Properties();
+            props.load(new java.io.StringReader(PropertiesPreprocessor.preprocess(properties, StandardDefines.forMac())));
+            boolean separateAo = props.getProperty("separateAo", "false").strip().equals("true");
+            io.github.hecbatista.metalshaders.sodium.LuxiumChunkVertex.setSeparateAo(separateAo);
+            LOGGER.info("Chunk meshes: separateAo={} (from {})", separateAo, packs.getFirst().getFileName());
+
+            // block.properties -> mc_Entity, preprocessed like the other .properties files.
+            Map<String, String> defines = new LinkedHashMap<>(StandardDefines.forMac());
+            Map<String, String> options = PackReader.open(packs.getFirst(), (name, root, shaders) -> OptionDefaults.read(shaders));
+            options.forEach(defines::putIfAbsent);
+            String blocks = PackReader.open(packs.getFirst(), (name, root, shaders) ->
+                    PackReader.readText(shaders, "/block.properties").orElse(""));
+            io.github.hecbatista.metalshaders.pack.BlockIds blockIds =
+                    io.github.hecbatista.metalshaders.pack.BlockIds.parse(PropertiesPreprocessor.preprocess(blocks, defines));
+            int states = io.github.hecbatista.metalshaders.sodium.BlockStateIds.load(blockIds);
+            LOGGER.info("block.properties: {} ids, {} block states numbered, {} names not in this game, {} entries skipped (tags)",
+                    blockIds.lines().size(), states, io.github.hecbatista.metalshaders.sodium.BlockStateIds.unknownNames(),
+                    blockIds.skipped().size());
+            LOGGER.info("block.properties ids: stone={} oak_leaves={} gold_block={} oak_log={}",
+                    io.github.hecbatista.metalshaders.sodium.BlockStateIds.idOf("minecraft:stone"),
+                    io.github.hecbatista.metalshaders.sodium.BlockStateIds.idOf("minecraft:oak_leaves"),
+                    io.github.hecbatista.metalshaders.sodium.BlockStateIds.idOf("minecraft:gold_block"),
+                    io.github.hecbatista.metalshaders.sodium.BlockStateIds.idOf("minecraft:oak_log"));
+            String key = packs.getFirst() + "|" + separateAo + "|" + states;
+            boolean changed = !key.equals(meshKey);
+            meshKey = key;
+            return changed;
+        } catch (Exception e) {
+            LOGGER.error("Couldn't read the pack's mesh directives", e);
+            return false;
+        }
     }
 
     // ---- Step 5: game values, updated once per frame ----------------------------------------
@@ -76,6 +129,10 @@ public final class MetalShadersClient implements ClientModInitializer {
         }
         if (!packLoaded) {
             packLoaded = true;
+            if (readMeshDirectives(FabricLoader.getInstance().getGameDir().resolve("shaderpacks"))) {
+                LOGGER.info("Chunk mesh directives changed since startup: rebuilding all chunks");
+                mc.levelExtractor.allChanged();
+            }
             loadPackValues();
         }
         if (customUniforms != null) {
@@ -248,6 +305,16 @@ public final class MetalShadersClient implements ClientModInitializer {
                     new String[]{skytexV.result().text(), skytexF.result().text()});
         } else {
             LOGGER.warn("Sky takeover skipped (the pack lacks a sky program, or the chain isn't ready)");
+        }
+
+        // Step 6d-2: solid and cutout terrain, drawn by the pack's gbuffers_terrain through Sodium.
+        var terrainV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_terrain.vsh", defines);
+        var terrainF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_terrain.fsh", defines);
+        if (PackChain.ready() && terrainV.ok() && terrainF.ok()) {
+            io.github.hecbatista.metalshaders.render.TerrainTakeover.prepare(
+                    new String[]{terrainV.result().text(), terrainF.result().text()});
+        } else {
+            LOGGER.warn("Terrain takeover skipped (the pack lacks gbuffers_terrain, or the chain isn't ready)");
         }
     }
 

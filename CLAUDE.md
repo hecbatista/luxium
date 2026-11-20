@@ -5,7 +5,7 @@ GitHub repo: `hecbatista/luxium` (renamed from `metal-shaders` on 2026-11-20; Gi
 ## Goal
 Load and run Iris/OptiFine-format shader packs (the `shaderpacks/` format) on Minecraft's **Metal** backend provided by the Metallum mod, on Apple Silicon macOS.
 
-Status (2026-11-20): steps 1–4 of 7 done; nothing draws yet. `mod/` loads next to Metallum and, at startup, logs each pack in `shaderpacks/`: its shaders folder, world-to-folder map and program-file counts (`pack/PackReader.java`). Two pieces run in tests only, not yet in the game:
+Status (2026-11-20): steps 1–5 done and step 6 well along: the pack's sky, opaque terrain and deferred/composite/final chain draw in game (see the step 6 notes below). The text right below describes the early steps. `mod/` loads next to Metallum and, at startup, logs each pack in `shaderpacks/`: its shaders folder, world-to-folder map and program-file counts (`pack/PackReader.java`). Two pieces run in tests only, not yet in the game:
 - The preprocessor: `pack/IncludeExpander.java`, then `pack/GlslPreprocessor.java` (using JCPP), with `pack/StandardDefines.java`.
 - The translator: `glsl/GlslTokenizer.java` → `glsl/Declarations.java` → `glsl/ProgramTranslator.java`, our own code with no glsl-transformer.
 
@@ -105,24 +105,39 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
   - **Big bug found and fixed:** the chain ran after `GameRenderer.renderLevel()`, but `render3dHud` clears the depth (`GameRenderer.java:689`) before drawing the hand. So the chain always saw depth 0 (CPU readback: 100% zeros), and composites treated everything as sky. The chain now runs before `render3dHud`. This also fixed the near-black underwater shot.
   - Debug: `LUXIUM_SHOW=rawdepth|maindepth`, `LUXIUM_SHOW_SCALE=<n>`, `LUXIUM_DEPTH_PROBE=1` (CPU readback of the game's depth).
   - Result: land shows the scene under Complementary's sky gradient (the white streak is gone), underwater is visible and tinted, and there are 0 validation messages.
-- **6d-2 handoff (start here next session):**
-  - Read Vitrail `docs/internals/terrain.md` fully, then find the matching Sodium 0.9.2 classes. The Sodium jar is in the Gradle cache: `find ~/.gradle/caches -name 'sodium*mc26.3*.jar'`; decompile with `javap -c` or read sources if present.
-  - Reuse the 6d-1 pieces:
-    - `ProgramTranslator.translateForFormat` (vertex inputs by element name, plus the reversed-Z epilogue). Extend it for Sodium's compact chunk vertex, decoded the way Iris's SodiumTransformer does (`_vert_position` etc.).
-    - The SkyTakeover pattern: per-pipeline compile copying vanilla state, a per-draw MappableRingBuffer UBO, and inputs resolved at `PackChain.beginFrame`.
-    - The coverage mask: terrain must write its fragment depth into the mask as an extra output, so the seed keeps pack-drawn terrain.
-  - Pack data needed: block.properties → mc_Entity ids (parse like `pack/ItemIds`), plus at_tangent and mc_midTexCoord.
-  - Complementary's gbuffers_terrain DRAWBUFFERS lists several targets (check it), so the render pass needs several attachments.
-  - Run deferred1 at "after opaque", before translucents (Vitrail frame.md "The chain is cut in three"). Today the whole chain still runs before render3dHud.
-- **6d-2: terrain through Sodium.** Vitrail hooks in at a handful of points without rewriting Sodium's meshing:
-  - the per-pass pipeline compile (memoised by render pass)
-  - the chunk vertex-format accessor (only at renderer rebuild; Sodium 0.9.2's shared geometry arena bakes the stride and needs its own mixin)
-  - the call that opens Sodium's render pass, which needs the pack's targets
-  - the draw context, for binding uniforms and samplers
-  - the quad-writing sites, to carry block id, block position and light emission
-  - Also needed: block.properties ids (mc_Entity), mc_midTexCoord and at_tangent, and decoding Sodium's compact vertex into gl_Vertex etc. (Iris SodiumTransformer).
-  - Traps: a pipeline's declared vertex stride must match the mesh's ("stretched coloured spikes"), and view bobbing is in the projection while packs expect it in the model-view (terrain.md:381).
-- **6d-3: water and translucent terrain**, drawn on the halves the deferred stage already wrote.
+- **6d-2 result (2026-11-20, ✅): solid and cutout terrain drawn by the pack's `gbuffers_terrain` through Sodium.**
+  - Sodium facts (0.9.2, decompiled with the Vineflower jar in the Gradle cache: `find ~/.gradle/caches -name 'vineflower*.jar'`):
+    - On Metal, Sodium's `DrawBackend` is `OPENGL` (it only picks the VK backends for `VulkanDevice`), so draws go through `GLDrawContext` → `RenderPass.multiDrawIndexed`.
+    - The pass is handed in: 26.3 opens one "Main" pass in `LevelRenderer.addMainPass`'s lambda (`lambda$addMainPass$0`), and `executeSolid` draws the opaque terrain first.
+    - `DefaultChunkRenderer.render` always calls `pass.pushConstants` (20 bytes: region offset, time, region id). Its GLSL takes the `#ifdef VULKAN` push-constant branch (glslang defines VULKAN), and Metallum supports push constants.
+    - 26.3's `PipelineBuilder` binds vertex inputs **by element name**, with the location from the shader. So a shader may declare a subset of the format, and Vitrail's 26.2 "silent shift" trap doesn't apply.
+  - Pieces:
+    - `sodium/LuxiumChunkVertex.java` (36 bytes = Sodium's 20, written the same way, + block id, mid-texcoord, normal, tangent) is used **all session** via `mixin/sodium/ChunkMeshFormatsMixin` (also covers ArenaAggregator's stride).
+    - `ProgramTranslator.translateForTerrain` (Iris SodiumTransformer decode; alpha test per pass; extra `luxium_Coverage` output = `gl_FragCoord.z`).
+    - `render/TerrainTakeover.java` + `mixin/LevelRendererTerrainMixin` (draws Sodium's OPAQUE group into its own pass on colortex0/6/4 + coverage + the game's depth, just before "Main" opens, then skips the game's opaque call) + `mixin/sodium/DefaultChunkRendererMixin` (swaps the pipeline, binds the UBO and textures after `setPipeline`).
+    - Block ids: `pack/BlockIds.java` + `sodium/BlockStateIds.java` + `mixin/sodium/BlockRendererMixin` (thread-local id per `renderModel`). Complementary: 418 ids, 35,551 states (stone=10080, oak_leaves=10009).
+    - `separateAo` and block ids are read at startup and again at pack load; if they changed, `mc.levelExtractor.allChanged()` rebuilds the chunks (needed in the game test, which copies the pack in after startup).
+    - `sampler2DShadow` now goes through the "arithmetic road" (plain sampler2D + `luxium_shadowCompare`, four gathered texels LEQUAL), because the API has no compare samplers.
+    - Fixed: `PropertiesPreprocessor` treated `# If you want…` as `#if`; it now uses Iris's exact directive test.
+  - Game test (scene now has a leaves block for the cutout pass): both passes draw, **0 validation messages**.
+    - With `LUXIUM_NO_TERRAIN=1` (new debug switch) the stone is flat grey; with the pack it's warm and sunlit, and the leaves get Complementary's bright, waving foliage.
+    - `LUXIUM_SHOW=colortex4` shows correct world-space normals.
+    - Unit tests pass, including `TerrainTranslationTest` (Complementary terrain → glslang → spirv-cross → `xcrun metal`); scoreboard 90/90.
+  - Known gaps:
+    - `oldLighting=false` isn't applied: Sodium still bakes the per-face shade into AO (tops are 1.0, so the stone floor test can't see it).
+    - Tag entries (`%tag`) in block.properties are skipped.
+    - `at_midBlock` is zero.
+    - `fogColor` is still 0.
+    - The view-bob split isn't done.
+- **6d-3 handoff (start here next session): water and translucent terrain.**
+  - The visible problem today: the game still draws translucents (water, glass) into its own image, over the **clear colour**, because the terrain went to colortex0, not the main target. So terrain behind water/glass doesn't show in the land shot.
+  - Plan:
+    - Take over Sodium's TRANSLUCENT group the same way, with the pack's `gbuffers_water`. Find where `executeClassicTransparency` calls `renderGroup(TRANSLUCENT, …)` (LevelRenderer.java:689) and draw it in a pack pass before or after "Main" (it's inside "Main" today, after the solid features).
+    - Run deferred1 before it (Vitrail frame.md "The chain is cut in three"): deferred must see opaque terrain only.
+    - Blend state comes from the pack (Iris default for water is translucent blending).
+    - Water is drawn by Sodium's `DefaultFluidRenderer`, not BlockRenderer, so the fluid id (low bit 1) needs a mixin there.
+    - Translucent quads are written later by the translucent sorter (`TranslucentGeometryCollector`), so the thread-local block id doesn't reach them. Carry it on `ChunkVertexEncoder.Vertex` (Vitrail ChunkVertexMixin + `copyVertexTo`).
+    - Decide how the seed treats translucent pixels the pack draws (write the coverage mask from gbuffers_water too).
 - **6d-4: entities, block entities, hand, particles, weather, clouds.** Vitrail entities.md: "the door is a group of draws", plus its own vertex format.
 - **6e: shadow pass.**
 - Metallum's only Sodium mixin picks the graphics API (`metallum.sodium.mixins.json`: `SodiumPreferredGraphicsApiMixin`). Sodium already draws through the game's RenderPearl API, so Vitrail's Sodium-level hooks should apply on Metal too.

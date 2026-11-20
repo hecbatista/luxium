@@ -114,6 +114,34 @@ GNU Lesser General Public License version 3
   gcolor..gaux4, keys <name>Format / Clear / ClearColor, defaults RGBA and cleared, and the
   32-buffer limit of net.irisshaders.iris.gl.IrisLimits.
 
+  src/main/java/io/github/hecbatista/metalshaders/glsl/ProgramTranslator.java, terrain mode
+  (translateForTerrain), follows net.irisshaders.iris.pipeline.transform.transformer.
+  SodiumTransformer: decoding Sodium's compact chunk vertex (the 20-bit interleaved position,
+  the region offset plus the section's place in its region, the texture coordinate with
+  u_TexCoordShrink), gl_MultiTexCoord1/2 as the raw light pair scaled by gl_TextureMatrix[1],
+  mc_Entity as (id + 1) << 1 | fluid with -1 for an unmapped block, and mc_midTexCoord in
+  1/32768 units, each converted to the type the pack declares. The decode helpers themselves
+  are Sodium's (see the Sodium entry). The alpha test per pass (solid OFF, cutout HALF_ALPHA)
+  comes from net.irisshaders.iris.pipeline.programs.ShaderKey and gl.blending.AlphaTests.
+  src/main/java/io/github/hecbatista/metalshaders/render/TerrainTakeover.java uses Iris's
+  lightmap texture matrix (uniforms.builtin.BuiltinReplacementUniforms) and its render stage
+  numbers (pipeline.WorldRenderingPhase).
+
+  src/main/java/io/github/hecbatista/metalshaders/sodium/LuxiumChunkVertex.java follows
+  net.irisshaders.iris.vertices.sodium.terrain.XHFPTerrainVertex and XHFPModelVertexType for
+  what the extra words hold: the mid-texture coordinate encoding, the block id encoding, and
+  separateAo's colour (tint with AO in alpha). Our layout differs: the normal and tangent are
+  plain signed bytes instead of Iris's octahedral word, and the light pair keeps Sodium's +8.
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/BlockIds.java and
+  sodium/BlockStateIds.java follow Iris's block.properties rules (shaderpack.IdMap.parseBlockMap,
+  shaderpack.materialmap.BlockEntry.parse, BlockMaterialMapping.addBlockStates, and the key order
+  of shaderpack.option.OrderBackedProperties): entry shapes with optional namespace and
+  property filters, file order, first match wins. Tag entries aren't supported yet.
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/PropertiesPreprocessor.java uses Iris's
+  exact test for which '#' lines are directives (PropertiesPreprocessor.preprocessSource).
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3
@@ -132,6 +160,29 @@ GNU Lesser General Public License version 3
   promoted to four, old fixed-point formats map to 8-bit RGBA, and RGB9_E5 maps to a float
   format. The mapping table itself is ours.
 
+  The terrain takeover (render/TerrainTakeover.java, mixin/sodium/*, mixin/
+  LevelRendererTerrainMixin.java, sodium/LuxiumChunkVertex.java) follows designs described in
+  Vitrail's docs/internals/terrain.md: hooking Sodium at a few points instead of rewriting its
+  meshing, widening the chunk vertex with extra elements placed after Sodium's own, one pack
+  program per terrain pass, the face normal by Newell's method, the tangent squared up against
+  the normal with a handedness sign, and reading the block atlas NEAREST as under Iris. The
+  "arithmetic road" for sampler2DShadow in glsl/ProgramTranslator.java (SHADOW_COMPARE: a plain
+  sampler2D, four gathered texels compared LEQUAL and blended with the bilinear weights) follows
+  Vitrail's glsl/GlslTranslator (ofShadowCompare) as described in its comments. No Vitrail code
+  was copied; the GLSL and Java are ours.
+
 JCPP, https://github.com/shevek/jcpp (org.anarres:jcpp 1.4.14)
 Apache License 2.0
   Used as a library dependency, unmodified.
+
+Sodium, https://github.com/CaffeineMC/sodium (0.9.2 for Minecraft 26.3)
+Copyright the Sodium contributors
+PolyForm Shield License 1.0.0
+  src/main/java/io/github/hecbatista/metalshaders/sodium/LuxiumChunkVertex.java writes
+  Sodium's compact chunk vertex words the same way as Sodium's CompactChunkVertex (position
+  quantisation and interleaving, texture shrink bit, light + 8, light/material/section word),
+  so Sodium's own shader can still read our mesh. glsl/ProgramTranslator.java's terrain
+  header decodes that vertex as Sodium's shaders/include/chunk_vertex.glsl and
+  blocks/block_layer_opaque.vsh do, and declares Sodium's u_Globals block and push-constant
+  layout so the pack's program binds to what Sodium already sets. These are re-written
+  short formulas needed to interoperate with Sodium's data format; no Sodium file is shipped.

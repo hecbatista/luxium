@@ -271,6 +271,7 @@ public final class PackChain {
             // pack's: the sky stands at the far plane, which is reversed-Z 0.
             encoder.clearColorTexture(coverage, new Vector4f(SkyTakeover.active() ? 0.0f : COVERAGE_NOTHING));
             SkyTakeover.beginFrame(device, encoder);
+            TerrainTakeover.beginFrame();
         } catch (RuntimeException e) {
             fail("beginFrame threw", e);
         }
@@ -474,6 +475,20 @@ public final class PackChain {
         return halfViews.containsKey(index) ? view(index, true) : null;
     }
 
+    /** Buffers pack geometry programs write, which must exist even if no full-screen pass names them. */
+    private static final Set<Integer> geometryTargets = new TreeSet<>();
+
+    static void requireTargets(java.util.Collection<Integer> indices) {
+        if (geometryTargets.addAll(indices)) {
+            width = -1;   // reallocate at the next frame with these included
+        }
+    }
+
+    /** The coverage mask, as an attachment for pack geometry passes. */
+    static GpuTextureView coverageTarget() {
+        return coverageView;
+    }
+
     public static GpuFormat targetFormat(int index) {
         return plan.target(index).format();
     }
@@ -553,6 +568,7 @@ public final class PackChain {
         width = w;
         height = h;
         Set<Integer> used = new TreeSet<>(plan.declared().keySet());
+        used.addAll(geometryTargets);
         for (Pass p : passes) {
             used.addAll(p.writes());
             p.program().samplers().forEach(s -> {

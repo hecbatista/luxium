@@ -8,7 +8,11 @@
     "BiomesMixin",
     "GameRendererMixin",
     "GameRendererRenderMixin",
-    "SkyRendererMixin"
+    "LevelRendererTerrainMixin",
+    "SkyRendererMixin",
+    "sodium.BlockRendererMixin",
+    "sodium.ChunkMeshFormatsMixin",
+    "sodium.DefaultChunkRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -230,7 +230,7 @@ public final class ProgramTranslator {
 
     /** @param scale the pack's scale.<program> value (1 = whole screen); only used in FULLSCREEN mode */
     public static Result translate(String vertexSource, String fragmentSource, Mode mode, float scale) throws TranslationException {
-        return translate(vertexSource, fragmentSource, mode, scale, null);
+        return translate(vertexSource, fragmentSource, mode, scale, null, null);
     }
 
     /** Vanilla vertex-format element names and the GLSL type each arrives as. */
@@ -245,10 +245,145 @@ public final class ProgramTranslator {
      * gl_Color is the vertex color times the draw's color modulator, as Iris's VanillaTransformer does.
      */
     public static Result translateForFormat(String vertexSource, String fragmentSource, Set<String> elements) throws TranslationException {
-        return translate(vertexSource, fragmentSource, Mode.GBUFFERS, 1.0f, Set.copyOf(elements));
+        return translate(vertexSource, fragmentSource, Mode.GBUFFERS, 1.0f, Set.copyOf(elements), null);
     }
 
-    private static Result translate(String vertexSource, String fragmentSource, Mode mode, float scale, Set<String> elements) throws TranslationException {
+    // ---- Terrain: Sodium's chunk vertex ------------------------------------------------------
+
+    /** The uniform block Sodium binds for its chunk passes (sodium:include/globals.glsl, 0.9.2). */
+    public static final String SODIUM_GLOBALS = "u_Globals";
+    /** Bytes Sodium pushes per region (DefaultChunkRenderer.PUSH_CONSTANT_RANGE). */
+    public static final int SODIUM_PUSH_CONSTANT_SIZE = 20;
+    /** Name of the fragment output carrying the coverage mask in terrain mode. */
+    public static final String COVERAGE_OUTPUT = "luxium_Coverage";
+
+    /**
+     * How a terrain program is drawn.
+     *
+     * @param alphaTest the pass's alpha test on output 0 ({@code > alphaTest} keeps the fragment),
+     *                  or NaN for none (Iris: solid terrain OFF, cutout HALF_ALPHA = 0.5)
+     */
+    public record Terrain(float alphaTest) {
+    }
+
+    /**
+     * The vertex elements of Luxium's chunk vertex: Sodium 0.9.2's compact vertex (CompactChunkVertex,
+     * 20 bytes) followed by the values packs read that it lacks. Names match
+     * {@code io.github.hecbatista.metalshaders.sodium.LuxiumChunkVertex}.
+     */
+    static final Map<String, String> TERRAIN_ELEMENT_TYPES = Map.of(
+            "a_Position", "uvec2", "a_Color", "vec4", "a_TexCoord", "uvec2", "a_LightAndData", "uvec4",
+            "luxium_BlockId", "uint", "luxium_MidTexCoord", "uvec2", "luxium_NormalIn", "vec4", "luxium_TangentIn", "vec4");
+
+    /**
+     * Translates a geometry program to draw Sodium's chunk meshes, with Luxium's extended vertex.
+     * The decoding follows Sodium's chunk_vertex.glsl and Iris's SodiumTransformer (see NOTICE):
+     * position from 20-bit interleaved coordinates plus the region offset (a push constant) and the
+     * section's place in the region; texture coordinate with Sodium's shrink bias; the light pair raw
+     * (0..240), scaled by gl_TextureMatrix[1] as in Iris. The fragment stage writes the coverage
+     * mask (its own depth) as one extra output after the pack's draw buffers.
+     */
+    public static Result translateForTerrain(String vertexSource, String fragmentSource, Terrain terrain) throws TranslationException {
+        return translate(vertexSource, fragmentSource, Mode.GBUFFERS, 1.0f, null, terrain);
+    }
+
+    /** Terrain-mode header: Sodium's blocks and the decoding helpers (from sodium chunk_vertex.glsl). */
+    private static final String TERRAIN_VERTEX_HEADER = """
+            layout(std140) uniform u_Globals {
+                mat4 u_ProjectionMatrix;
+                mat4 u_ModelViewMatrix;
+                vec4 u_FogColor;
+                vec2 u_EnvironmentFog;
+                vec2 u_RenderFog;
+                vec2 u_TexelSize;
+                vec2 u_TexCoordShrink;
+                float u_FadePeriodInv;
+                bool u_UseRGSS;
+            };
+            layout(push_constant) uniform LuxiumSodiumRegion {
+                vec3 u_RegionOffset;
+                int u_CurrentTime;
+                uint u_RegionID;
+            };
+            uvec3 luxium_deinterleave_u20x3(uvec2 data) {
+                uvec3 hi = (uvec3(data.x) >> uvec3(0u, 10u, 20u)) & 0x3FFu;
+                uvec3 lo = (uvec3(data.y) >> uvec3(0u, 10u, 20u)) & 0x3FFu;
+                return (hi << 10u) | lo;
+            }
+            vec3 luxium_draw_translation(uint pos) {
+                return vec3(uvec3(pos) >> uvec3(5u, 0u, 2u) & uvec3(7u, 3u, 7u)) * vec3(16.0);
+            }
+            vec4 luxium_terrain_vertex() {
+                vec3 p = vec3(luxium_deinterleave_u20x3(a_Position)) * (32.0 / 1048576.0) - 8.0;
+                return vec4(p + u_RegionOffset + luxium_draw_translation(a_LightAndData.w), 1.0);
+            }
+            """;
+    private static final String TERRAIN_TEXCOORD = "vec2 luxium_terrain_texcoord() {\n"
+            + "    vec2 uv = vec2(a_TexCoord & 32767u) / 32768.0;\n"
+            + "    vec2 bias = mix(vec2(-1.0), vec2(1.0), bvec2(a_TexCoord >> 15u));\n"
+            + "    return bias * u_TexCoordShrink + uv;\n"
+            + "}\n";
+    /** Sodium adds 8 (half a lightmap texel) to each light level; Iris's own mesh stores it raw. */
+    private static final String TERRAIN_LIGHT = "vec4(vec2(a_LightAndData.xy) - 8.0, 0.0, 1.0)";
+
+    /** Built-in vertex inputs of terrain mode -> expression. */
+    private static String terrainExpression(String name) {
+        return switch (name) {
+            case "gl_Vertex" -> "luxium_terrain_vertex()";
+            case "gl_Color" -> "a_Color";
+            case "gl_MultiTexCoord0" -> "vec4(luxium_terrain_texcoord(), 0.0, 1.0)";
+            case "gl_MultiTexCoord1", "gl_MultiTexCoord2" -> TERRAIN_LIGHT;
+            case "gl_Normal" -> "luxium_NormalIn.xyz";
+            default -> name.matches("gl_MultiTexCoord[3-7]") ? "vec4(0.0, 0.0, 0.0, 1.0)" : null;
+        };
+    }
+
+    /**
+     * Pack attributes the terrain mesh carries, as a vec4 expression. mc_Entity is Iris's encoding
+     * (id + 1, shifted up one bit, low bit = fluid), so an unmapped block reads -1;
+     * mc_midTexCoord is in 1/32768 units (SodiumTransformer.replaceMidTexCoord).
+     */
+    private static String terrainAttribute(String name) {
+        return switch (name) {
+            case "mc_Entity" -> "vec4(float(int(luxium_BlockId >> 1u) - 1), float(luxium_BlockId & 1u), 0.0, 1.0)";
+            case "mc_midTexCoord" -> "vec4(vec2(luxium_MidTexCoord) / 32768.0, 0.0, 1.0)";
+            case "at_tangent" -> "luxium_TangentIn";
+            default -> null;
+        };
+    }
+
+    /** The mesh element a pack attribute (or built-in) reads in terrain mode. */
+    private static String terrainElementFor(String name) {
+        return switch (name) {
+            case "mc_Entity" -> "luxium_BlockId";
+            case "mc_midTexCoord" -> "luxium_MidTexCoord";
+            case "at_tangent" -> "luxium_TangentIn";
+            case "gl_Normal" -> "luxium_NormalIn";
+            case "gl_Color" -> "a_Color";
+            case "gl_MultiTexCoord0" -> "a_TexCoord";
+            default -> null;
+        };
+    }
+
+    /** A vec4 expression converted to a declared GLSL type (float, vec3, ivec2...). */
+    static String fromVec4(String type, String vec4) {
+        Matcher m = Pattern.compile("^(|i|u|b)(vec|)([234]?)$|^(float|int|uint|bool)$").matcher(type);
+        if (!m.matches()) {
+            return type + "(0)";
+        }
+        if (m.group(4) != null) {
+            return m.group(4) + "((" + vec4 + ").x)";
+        }
+        String n = m.group(3);
+        String swizzle = switch (n) {
+            case "2" -> "xy";
+            case "3" -> "xyz";
+            default -> "xyzw";
+        };
+        return type + "((" + vec4 + ")." + swizzle + ")";
+    }
+
+    private static Result translate(String vertexSource, String fragmentSource, Mode mode, float scale, Set<String> elements, Terrain terrain) throws TranslationException {
         StageScan vs = new StageScan(Stage.VERTEX, vertexSource);
         StageScan fs = new StageScan(Stage.FRAGMENT, fragmentSource);
         List<String> warnings = new ArrayList<>();
@@ -336,8 +471,35 @@ public final class ProgramTranslator {
                 }
             }
         }
+        if (terrain != null) {
+            // Inputs are elements of the chunk mesh, by name (PipelineBuilder binds each declared
+            // input to the element of the same name). Position and the light/data word are always
+            // read: the section index in the latter places the vertex.
+            Set<String> used = new LinkedHashSet<>(List.of("a_Position", "a_LightAndData"));
+            for (String name : List.of("gl_Color", "gl_MultiTexCoord0", "gl_Normal")) {
+                if (vs.identifiers.contains(name)) {
+                    used.add(terrainElementFor(name));
+                }
+            }
+            for (Declaration d : vs.declarations) {
+                if (d.storage().equals("attribute") || d.storage().equals("in")) {
+                    for (Declarator x : d.declarators()) {
+                        String element = terrainElementFor(x.name());
+                        if (element != null && vs.mentions(x.name())) {
+                            used.add(element);
+                        }
+                    }
+                }
+            }
+            for (String name : List.of("a_Position", "a_Color", "a_TexCoord", "a_LightAndData",
+                    "luxium_BlockId", "luxium_MidTexCoord", "luxium_NormalIn", "luxium_TangentIn")) {
+                if (used.contains(name)) {
+                    vertexInputs.put(name, new Slot(name, TERRAIN_ELEMENT_TYPES.get(name), "", nextInput++));
+                }
+            }
+        }
         for (Map.Entry<String, Builtin> b : BUILTIN_INPUTS.entrySet()) {
-            if (fullscreen || elements != null) {
+            if (fullscreen || elements != null || terrain != null) {
                 break;   // full-screen programs get no vertex data; format programs get the format's
             }
             if (vs.identifiers.contains(b.getKey()) || (b.getKey().equals("gl_Vertex") && vs.identifiers.contains("ftransform"))) {
@@ -345,7 +507,7 @@ public final class ProgramTranslator {
             }
         }
         for (Map.Entry<String, Builtin> b : CORE_INPUTS.entrySet()) {
-            if (elements == null && vs.identifiers.contains(b.getKey()) && !vs.declaredNames.contains(b.getKey())) {
+            if (elements == null && terrain == null && vs.identifiers.contains(b.getKey()) && !vs.declaredNames.contains(b.getKey())) {
                 usedInputs.put(b.getValue().name(), b.getValue());
             }
         }
@@ -354,7 +516,7 @@ public final class ProgramTranslator {
             nextInput += slots(b.type(), b.array(), warnings);
         }
         for (Declaration d : vs.declarations) {
-            if (d.storage().equals("attribute") || d.storage().equals("in")) {
+            if (terrain == null && (d.storage().equals("attribute") || d.storage().equals("in"))) {
                 for (Declarator x : d.declarators()) {
                     if (elements != null && !elements.contains(x.name())) {
                         continue;   // the format doesn't carry it: becomes a zero constant in rewrite()
@@ -403,15 +565,15 @@ public final class ProgramTranslator {
 
         // 4. Rewrite each stage.
         List<Slot> fragmentOutputs = new ArrayList<>();
-        String vertex = rewrite(vs, mode, scale, elements, uniforms, vertexInputs, varyings, fragmentOutputs, warnings);
-        String fragment = rewrite(fs, mode, scale, elements, uniforms, vertexInputs, varyings, fragmentOutputs, warnings);
+        String vertex = rewrite(vs, mode, scale, elements, terrain, uniforms, vertexInputs, varyings, fragmentOutputs, warnings);
+        String fragment = rewrite(fs, mode, scale, elements, terrain, uniforms, vertexInputs, varyings, fragmentOutputs, warnings);
 
         return new Result(vertex, fragment, List.copyOf(uniforms.values()), List.copyOf(vertexInputs.values()),
                 List.copyOf(varyings.values()), List.copyOf(fragmentOutputs), drawBuffers(fs.tokens),
                 List.copyOf(samplers.values()), List.copyOf(warnings));
     }
 
-    private static String rewrite(StageScan s, Mode mode, float scale, Set<String> elements, Map<String, Uniform> uniforms, Map<String, Slot> vertexInputs,
+    private static String rewrite(StageScan s, Mode mode, float scale, Set<String> elements, Terrain terrain, Map<String, Uniform> uniforms, Map<String, Slot> vertexInputs,
                                   Map<String, Slot> varyings, List<Slot> fragmentOutputs, List<String> warnings)
             throws TranslationException {
         List<Token> t = s.tokens;
@@ -425,7 +587,7 @@ public final class ProgramTranslator {
             String replacement = switch (d.storage()) {
                 // Loose uniforms move into the block; samplers stay, minus the ones this stage never mentions.
                 case "uniform" -> isOpaque(d.type()) ? mentionedSamplers(d, s) : "";
-                case "attribute", "in" -> vertex ? (elements != null ? formatInputs(d, vertexInputs) : slotDeclarations(d, "in", vertexInputs))
+                case "attribute", "in" -> vertex ? (terrain != null ? terrainAttributes(d) : elements != null ? formatInputs(d, vertexInputs) : slotDeclarations(d, "in", vertexInputs))
                         : slotDeclarations(d, "in", varyings);
                 case "out", "varying" -> vertex ? slotDeclarations(d, "out", varyings)
                         : d.storage().equals("varying") ? slotDeclarations(d, "in", varyings) : null;
@@ -456,6 +618,14 @@ public final class ProgramTranslator {
                 continue;
             }
             String name = tok.text();
+            if (name.equals("sampler2DShadow")) {
+                t.set(i, new Token(Kind.IDENT, "sampler2D"));
+                continue;
+            }
+            if ((name.equals("texture") || name.equals("textureLod")) && firstArgumentIsShadow(t, i, s)) {
+                t.set(i, new Token(Kind.IDENT, "luxium_shadowCompare"));
+                continue;
+            }
             if (fullscreen) {
                 String expr = fullscreenBoth(scale).get(name);
                 if (expr == null && vertex) {
@@ -482,9 +652,16 @@ public final class ProgramTranslator {
                     continue;
                 }
             }
-            if (elements != null && vertex && name.equals("main")) {
+            if ((elements != null || terrain != null) && name.equals("main") && (vertex || terrain != null)) {
                 t.set(i, new Token(Kind.IDENT, "luxium_pack_main"));   // wrapped by the epilogue below
                 continue;
+            }
+            if (terrain != null && vertex) {
+                String expr = terrainExpression(name);
+                if (expr != null) {
+                    t.set(i, new Token(Kind.IDENT, "(" + expr + ")"));
+                    continue;
+                }
             }
             if (elements != null && vertex) {
                 String expr = switch (name) {
@@ -554,14 +731,23 @@ public final class ProgramTranslator {
         }
         if (vertex) {
             for (Slot in : vertexInputs.values()) {
-                if (in.name().startsWith("luxium_") || CORE_INPUTS.containsKey(in.name()) || (elements != null && ELEMENT_TYPES.containsKey(in.name()))) {
+                if (in.name().startsWith("luxium_") || CORE_INPUTS.containsKey(in.name()) || terrain != null
+                        || (elements != null && ELEMENT_TYPES.containsKey(in.name()))) {
                     h.append("layout(location = ").append(in.location()).append(") in ")
                             .append(in.type()).append(' ').append(in.name()).append(in.array()).append(";\n");
+                }
+            }
+            if (terrain != null) {
+                h.append(TERRAIN_VERTEX_HEADER);
+                if (vertexInputs.containsKey("a_TexCoord")) {
+                    h.append(TERRAIN_TEXCOORD);
                 }
             }
             if (s.identifiers.contains("ftransform")) {
                 h.append(fullscreen
                         ? "vec4 luxium_ftransform() { return (" + fsProjection(scale) + " * mat4(1.0)) * vec4(" + FS_CORNER + ", 0.0, 1.0); }\n"
+                        : terrain != null
+                        ? "vec4 luxium_ftransform() { return luxium_ModelViewProjectionMatrix * luxium_terrain_vertex(); }\n"
                         : elements != null
                         ? "vec4 luxium_ftransform() { return luxium_ModelViewProjectionMatrix * vec4(Position, 1.0); }\n"
                         : "vec4 luxium_ftransform() { return luxium_ModelViewProjectionMatrix * luxium_Vertex; }\n");
@@ -571,14 +757,49 @@ public final class ProgramTranslator {
                 h.append("layout(location = ").append(index).append(") out vec4 luxium_FragData").append(index).append(";\n");
                 fragmentOutputs.add(new Slot("luxium_FragData" + index, "vec4", "", index));
             }
+            if (terrain != null) {
+                int location = coverageLocation(s.tokens, outputsUsed);
+                h.append("layout(location = ").append(location).append(") out vec4 ").append(COVERAGE_OUTPUT).append(";\n");
+                fragmentOutputs.add(new Slot(COVERAGE_OUTPUT, "vec4", "", location));
+            }
+        }
+        if (s.identifiers.contains("sampler2DShadow")) {
+            h.append(SHADOW_COMPARE);
         }
         if (s.identifiers.contains("shadow2D")) {
-            h.append("vec4 luxium_shadow2D(sampler2DShadow s, vec3 c) { return vec4(texture(s, c)); }\n");
+            h.append("vec4 luxium_shadow2D(sampler2D s, vec3 c) { return vec4(luxium_shadowCompare(s, c)); }\n");
         }
         if (s.identifiers.contains("shadow2DLod")) {
-            h.append("vec4 luxium_shadow2DLod(sampler2DShadow s, vec3 c, float lod) { return vec4(textureLod(s, c, lod)); }\n");
+            h.append("vec4 luxium_shadow2DLod(sampler2D s, vec3 c, float lod) { return vec4(luxium_shadowCompare(s, c)); }\n");
         }
         String body = GlslTokenizer.join(t);
+        if (terrain != null && vertex) {
+            // Prologue: the pack's mesh attributes, decoded from Luxium's chunk vertex. Epilogue: the
+            // reversed-Z depth fix, as in format mode below.
+            StringBuilder main = new StringBuilder("\nvoid main() {\n");
+            for (Declaration d : s.declarations) {
+                if (d.storage().equals("attribute") || d.storage().equals("in")) {
+                    for (Declarator x : d.declarators()) {
+                        String v = terrainAttribute(x.name());
+                        if (v != null && vertexInputs.containsKey(terrainElementFor(x.name()))) {
+                            main.append("    ").append(x.name()).append(" = ").append(fromVec4(d.type(), v)).append(";\n");
+                        }
+                    }
+                }
+            }
+            main.append("    luxium_pack_main();\n    gl_Position.z = (gl_Position.w - gl_Position.z) * 0.5;\n}\n");
+            body += main;
+        }
+        if (terrain != null && !vertex) {
+            // Epilogue: the pass's alpha test on output 0 (Iris tests what reaches draw buffer 0),
+            // then the coverage mask: this fragment's depth, so the seed keeps the pack's pixel.
+            StringBuilder main = new StringBuilder("\nvoid main() {\n    luxium_pack_main();\n");
+            if (!Float.isNaN(terrain.alphaTest()) && outputsUsed.contains(0)) {
+                main.append("    if (!(luxium_FragData0.a > ").append(terrain.alphaTest()).append(")) discard;\n");
+            }
+            main.append("    ").append(COVERAGE_OUTPUT).append(" = vec4(gl_FragCoord.z, 0.0, 0.0, 1.0);\n}\n");
+            body += main;
+        }
         if (elements != null && vertex) {
             // Vertex epilogue: the pack writes OpenGL clip depth (-w..w, near = -w); the pass shares
             // the game's depth buffer, which is reversed-Z in 0..1 (far = 0). z' = (w - z) / 2 maps
@@ -586,6 +807,71 @@ public final class ProgramTranslator {
             body += "\nvoid main() {\n    luxium_pack_main();\n    gl_Position.z = (gl_Position.w - gl_Position.z) * 0.5;\n}\n";
         }
         return h + body;
+    }
+
+    /**
+     * A depth comparison without a comparison sampler ({@code GpuSampler} can't describe one, and
+     * Metal's {@code sample_compare} needs one). Vitrail's "arithmetic road" (glsl/GlslTranslator,
+     * ofShadowCompare; see NOTICE): {@code sampler2DShadow} becomes {@code sampler2D} and each
+     * lookup compares the four texels bilinear filtering would read, then blends the results with
+     * the bilinear weights, which is what hardware filtering with GL_LINEAR does. The sense is
+     * LEQUAL (passes when the reference is no farther than the stored depth), OptiFine's setting.
+     */
+    static final String SHADOW_COMPARE = """
+            float luxium_shadowCompare(sampler2D s, vec3 c) {
+                vec2 size = vec2(textureSize(s, 0));
+                vec2 t = c.xy * size - 0.5;
+                vec2 f = fract(t);
+                vec4 d = textureGather(s, (floor(t) + 1.0) / size);
+                vec4 r = step(vec4(c.z), d);
+                return mix(mix(r.w, r.z, f.x), mix(r.x, r.y, f.x), f.y);
+            }
+            float luxium_shadowCompare(sampler2D s, vec3 c, float biasOrLod) { return luxium_shadowCompare(s, c); }
+            """;
+
+    /** Whether the call at {@code i} (texture(, textureLod() reads a sampler declared sampler2DShadow. */
+    private static boolean firstArgumentIsShadow(List<Token> t, int i, StageScan s) {
+        int open = nextCode(t, i + 1);
+        if (open < 0 || !t.get(open).is("(")) {
+            return false;
+        }
+        int arg = nextCode(t, open + 1);
+        if (arg < 0 || t.get(arg).kind() != Kind.IDENT) {
+            return false;
+        }
+        String name = t.get(arg).text();
+        for (Declaration d : s.declarations) {
+            if (d.type().equals("sampler2DShadow")) {
+                for (Declarator x : d.declarators()) {
+                    if (x.name().equals(name)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Where the coverage output goes: after the pack's draw buffers and after every output it writes. */
+    private static int coverageLocation(List<Token> tokens, Set<Integer> outputsUsed) {
+        int after = drawBuffers(tokens).size();
+        for (int used : outputsUsed) {
+            after = Math.max(after, used + 1);
+        }
+        return after;
+    }
+
+    /** A pack attribute in terrain mode: a plain global the prologue fills, or a zero constant. */
+    private static String terrainAttributes(Declaration d) {
+        StringBuilder sb = new StringBuilder();
+        for (Declarator x : d.declarators()) {
+            sb.append(d.type()).append(' ').append(x.name()).append(x.arraySuffix());
+            if (terrainAttribute(x.name()) == null) {
+                sb.append(" = ").append(d.type()).append("(0)");
+            }
+            sb.append(";\n");
+        }
+        return sb.toString();
     }
 
     /** A sampler declaration without its unmentioned names; null keeps it as written, "" drops it. */
@@ -599,7 +885,8 @@ public final class ProgramTranslator {
             if (!d.layout().isEmpty()) {
                 sb.append(d.layout()).append(' ');
             }
-            sb.append("uniform ").append(d.type()).append(' ').append(x.name()).append(x.arraySuffix()).append(";\n");
+            sb.append("uniform ").append(d.type().equals("sampler2DShadow") ? "sampler2D" : d.type()).append(' ')
+                    .append(x.name()).append(x.arraySuffix()).append(";\n");
         }
         return sb.toString();
     }

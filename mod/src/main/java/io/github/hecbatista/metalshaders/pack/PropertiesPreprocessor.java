@@ -4,6 +4,7 @@ import org.anarres.cpp.DefaultPreprocessorListener;
 import org.anarres.cpp.Feature;
 import org.anarres.cpp.LexerException;
 import org.anarres.cpp.Preprocessor;
+import org.anarres.cpp.PreprocessorCommand;
 import org.anarres.cpp.Source;
 import org.anarres.cpp.StringLexerSource;
 import org.anarres.cpp.Token;
@@ -12,7 +13,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Runs {@code #if}/{@code #define} over a .properties file (shaders.properties and friends), the
@@ -20,18 +20,31 @@ import java.util.Set;
  * <ul>
  *   <li>Every line is trimmed and blank lines are dropped.</li>
  *   <li>In .properties files '#' also starts a comment, so a '#' line that isn't a preprocessor
- *       directive is removed, and a '#' inside any other line is deleted.</li>
+ *       directive (by Iris's test: {@link #isDirective}) is removed, and a '#' inside any other
+ *       line is deleted.</li>
  *   <li>Backslashes are hidden from JCPP and restored afterwards, so line continuations survive.</li>
  * </ul>
  * Not done yet: the pack's own settings (option values like {@code COLORED_LIGHTING}) should be
  * defined here too, as Iris does. Until the settings step, only the game's defines are.
  */
 public final class PropertiesPreprocessor {
-    private static final Set<String> DIRECTIVES = Set.of(
-            "define", "undef", "if", "ifdef", "ifndef", "elif", "else", "endif", "error", "warning", "line", "pragma", "include");
     private static final String BACKSLASH = "LUXIUM_BACKSLASH";
 
     private PropertiesPreprocessor() {
+    }
+
+    /**
+     * Iris's test, exactly: the line starts with '#' and a JCPP command name in lower case, with no
+     * space between (PropertiesPreprocessor.preprocessSource). So "# If you want..." in a comment
+     * header stays a comment.
+     */
+    static boolean isDirective(String line) {
+        for (PreprocessorCommand command : PreprocessorCommand.values()) {
+            if (line.startsWith("#" + command.name().replace("PP_", "").toLowerCase(Locale.ROOT))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static String preprocess(String source, Map<String, String> defines) throws GlslPreprocessor.PreprocessException {
@@ -45,8 +58,7 @@ public final class PropertiesPreprocessor {
                 continue;
             }
             if (line.startsWith("#")) {
-                String word = line.substring(1).stripLeading().split("[^A-Za-z]", 2)[0].toLowerCase(Locale.ROOT);
-                lines.add(DIRECTIVES.contains(word) ? line : "");
+                lines.add(isDirective(line) ? line : "");
             } else {
                 lines.add(line.replace("#", ""));
             }
