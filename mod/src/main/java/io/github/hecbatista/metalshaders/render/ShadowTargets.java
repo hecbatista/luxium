@@ -28,8 +28,8 @@ import java.util.Optional;
  * The shadow map (step 6e): a square depth image at the pack's shadowMapResolution, the
  * shadowcolor buffers the shadow program writes, and a float copy of the depth for the pack's
  * shadowtex0/1 (read with Luxium's arithmetic shadow comparison). Forward depth, cleared to 1
- * (Vitrail sky-and-shadows.md). v1 draws opaque terrain only, so shadowtex0 and shadowtex1 are the
- * same image (shadowtex1 is "without translucents").
+ * (Vitrail sky-and-shadows.md). shadowtex1 is a copy taken before the translucent terrain is drawn
+ * into the map, shadowtex0 the whole map.
  */
 public final class ShadowTargets {
     /** Iris's default shadowcolor format (RGBA, 8 bits a channel). */
@@ -40,6 +40,9 @@ public final class ShadowTargets {
     private static GpuTextureView depthView;
     private static GpuTexture depthSampled;
     private static GpuTextureView depthSampledView;
+    /** shadowtex1: the map before translucents were drawn into it. */
+    private static GpuTexture opaqueSampled;
+    private static GpuTextureView opaqueSampledView;
     private static final Map<Integer, GpuTexture> colors = new HashMap<>();
     private static final Map<Integer, GpuTextureView> colorViews = new HashMap<>();
     private static CompiledRenderPipeline copyPipeline;
@@ -56,8 +59,10 @@ public final class ShadowTargets {
             int usage = GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST;
             depth = device.createTexture("Luxium shadow depth", usage, GpuFormat.D32_FLOAT, size, size, 1, 1);
             depthView = device.createTextureView(depth);
-            depthSampled = device.createTexture("Luxium shadowtex (sampled)", usage, GpuFormat.R32_FLOAT, size, size, 1, 1);
+            depthSampled = device.createTexture("Luxium shadowtex0 (sampled)", usage, GpuFormat.R32_FLOAT, size, size, 1, 1);
             depthSampledView = device.createTextureView(depthSampled);
+            opaqueSampled = device.createTexture("Luxium shadowtex1 (sampled, no translucents)", usage, GpuFormat.R32_FLOAT, size, size, 1, 1);
+            opaqueSampledView = device.createTextureView(opaqueSampled);
             MetalShadersClient.LOGGER.info("Shadow map allocated at {}x{}", size, size);
         }
         for (int index : writes) {
@@ -77,6 +82,8 @@ public final class ShadowTargets {
             depth.close();
             depthSampledView.close();
             depthSampled.close();
+            opaqueSampledView.close();
+            opaqueSampled.close();
         }
         colorViews.values().forEach(GpuTextureView::close);
         colors.values().forEach(GpuTexture::close);
@@ -102,8 +109,19 @@ public final class ShadowTargets {
         return depthView;
     }
 
-    /** After the shadow pass: the depth copied into a float image the pack's passes sample. */
+    /** Between the opaque and translucent halves: the depth so far becomes shadowtex1. */
+    static void publishOpaque() {
+        copyDepth(opaqueSampledView);
+    }
+
+    /** After the shadow pass: the whole depth becomes shadowtex0. */
     static void publish() {
+        copyDepth(depthSampledView);
+        drawn = true;
+    }
+
+    /** The depth copied into a float image the pack's passes sample. */
+    private static void copyDepth(GpuTextureView into) {
         GpuDevice device = RenderSystem.getDevice();
         if (copyPipeline == null) {
             Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/shadow_depth_copy");
@@ -133,12 +151,11 @@ public final class ShadowTargets {
                     new LuxiumShaderSource().put(shader, ShaderType.VERTEX, vertex).put(shader, ShaderType.FRAGMENT, fragment),
                     Runnable::run).join().finishCompile();
         }
-        try (RenderPass rp = device.createCommandEncoder().createRenderPass(() -> "Luxium shadow depth copy", depthSampledView, Optional.empty())) {
+        try (RenderPass rp = device.createCommandEncoder().createRenderPass(() -> "Luxium shadow depth copy", into, Optional.empty())) {
             rp.setPipeline(copyPipeline);
             rp.setUniform("shadowDepth", depthView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
             rp.draw(3, 1, 0, 0);
         }
-        drawn = true;
     }
 
     /**
@@ -150,7 +167,8 @@ public final class ShadowTargets {
             return null;
         }
         return switch (name) {
-            case "shadowtex0", "shadowtex1", "shadow", "watershadow" -> depthSampledView;
+            case "shadowtex0", "watershadow" -> depthSampledView;
+            case "shadowtex1", "shadow" -> opaqueSampledView;
             case "shadowcolor", "shadowcolor0" -> colorViews.get(0);
             case "shadowcolor1" -> colorViews.get(1);
             default -> null;

@@ -231,10 +231,12 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
     - the pack's `shadow.vsh/fsh` (terrain mode with `Terrain.shadow`: forward depth `(z + w) / 2`, no culling, depth ≤) draws Sodium's OPAQUE group into `render/ShadowTargets` (D32 2048² cleared to 1; shadowcolor0/1 RGBA8 cleared white);
     - the depth is then copied to an R32F image that `PackChain.input` hands out as shadowtex0/1/shadow/watershadow, with shadowcolor0/1 as the colour buffers.
   - Game test: the shadow map (`LUXIUM_SHOW=shadowtex0`) shows the platform in Complementary's distorted layout. The floor beside the leaves goes from 93/107/63 to 58/69/61. 0 validation messages, 74 unit tests pass, scoreboard 90/90.
+- **6e, second slice (2026-11-20, ✅): translucent casters.**
+  - The shadow pass draws Sodium's OPAQUE group, copies the depth as `shadowtex1`/`shadow` (Vitrail "Two maps, one render"), then draws the TRANSLUCENT group with the shadow program (alpha > 0.1, **unblended**: Iris ShadowWater BlendModeOverride.OFF) and copies the whole map as `shadowtex0`/`watershadow`.
+  - Game test shot 3: the glass box casts its frame grid and blue-tinted light through the water onto the floor (Complementary's coloured shadows through shadowcolor). 0 validation messages, 74 unit tests pass, scoreboard 90/90.
 - **6e handoff: what's left of the shadow pass.**
   - Casters are only Sodium's camera-visible sections, with the camera's per-face batch culling. Vitrail does a second culling walk for the light and keeps its own batches (sky-and-shadows.md "Culling for the light"; Vitrail MixinRenderRegion, SodiumApi.drawShadowLayer).
   - No entity, block-entity or hand casters yet (Iris shadow_entities etc.).
-  - No translucent casters (shadowtex1 = shadowtex0 today; Iris copies between the halves).
   - No shadowcolor format or clear directives; no mipmaps or hardware filtering; the shadow map isn't drawn a frame ahead.
 - **6f: correctness gaps** (from step 4): gl_FragCoord origin, textures without mips, packUnorm on Apple, gl_VertexID base vertex, .csh/.gsh programs; also the 6d-4 leftovers above.
 - Metallum's only Sodium mixin picks the graphics API (`metallum.sodium.mixins.json`: `SodiumPreferredGraphicsApiMixin`). Sodium already draws through the game's RenderPearl API, so Vitrail's Sodium-level hooks should apply on Metal too.

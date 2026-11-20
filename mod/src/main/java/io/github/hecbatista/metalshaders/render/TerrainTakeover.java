@@ -150,6 +150,8 @@ public final class TerrainTakeover {
         try {
             add(DefaultTerrainRenderPasses.SOLID, "shadow", "shadow_solid", shadow, Float.NaN, 8, false, properties, true);
             add(DefaultTerrainRenderPasses.CUTOUT, "shadow", "shadow_cutout", shadow, 0.5f, 10, false, properties, true);
+            // Iris ShaderKey SHADOW_SODIUM_TERRAIN_TRANSLUCENT (ProgramId.ShadowWater -> Shadow): one tenth.
+            add(DefaultTerrainRenderPasses.TRANSLUCENT, "shadow", "shadow_translucent", shadow, 0.1f, 17, false, properties, true);
             MetalShadersClient.LOGGER.info("Shadow pass ready: shadow writes shadowcolor{} at {}x{}",
                     shadowPrograms.get(DefaultTerrainRenderPasses.SOLID).writes(),
                     io.github.hecbatista.metalshaders.uniform.ShadowMatrices.directives().resolution(),
@@ -184,12 +186,25 @@ public final class TerrainTakeover {
                 d.withColorAttachment(ShadowTargets.color(index));
             }
             d.withDepthAttachment(ShadowTargets.depthAttachment());
-            try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(d.build())) {
+            RenderPassDescriptor descriptor = d.build();
+            try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(descriptor)) {
                 inPass = true;
                 sections.renderGroup(ChunkSectionLayerGroup.OPAQUE, pass, sampler, atlas, false);
             } finally {
                 inPass = false;
                 currentPass = null;
+            }
+            // shadowtex1 is the map without translucents: a copy taken between the two halves
+            // (Vitrail sky-and-shadows.md "Two maps, one render"); shadowtex0 then has them too.
+            ShadowTargets.publishOpaque();
+            if (shadowPrograms.containsKey(DefaultTerrainRenderPasses.TRANSLUCENT)) {
+                try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(descriptor)) {
+                    inPass = true;
+                    sections.renderGroup(ChunkSectionLayerGroup.TRANSLUCENT, pass, sampler, atlas, false);
+                } finally {
+                    inPass = false;
+                    currentPass = null;
+                }
             }
         } finally {
             shadowDrawing = false;
@@ -268,7 +283,8 @@ public final class TerrainTakeover {
             PackChain.requireTargets(writes);
         }
         // Iris leaves gbuffers_water on the vanilla translucent blend; terrain draws unblended.
-        Optional<BlendFunction> defaultBlend = pass.isTranslucent() ? Optional.of(BlendFunction.TRANSLUCENT) : Optional.empty();
+        // (Iris ProgramId.Shadow*/ShadowWater: BlendModeOverride.OFF, so the shadow pass is never blended by default.)
+        Optional<BlendFunction> defaultBlend = pass.isTranslucent() && !shadow ? Optional.of(BlendFunction.TRANSLUCENT) : Optional.empty();
         Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/" + program + "_" + name);
         RenderPipeline.Builder b = RenderPipeline.builder()
                 .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/terrain/" + name))
