@@ -416,7 +416,7 @@ public final class EntityTakeover {
         drawingIds = ids;
         if (seenIds.add(f.program + " " + type.name() + " " + ids)) {
             MetalShadersClient.LOGGER.info("Entity draw {} ({}): {}", type.name(), f.program,
-                    ids == null ? "no ids (not an entity's or block entity's)" : "entityId " + ids.entityId() + ", blockEntityId " + ids.blockEntityId());
+                    ids == null ? "no ids (not an entity's or block entity's)" : "entityId " + ids.entityId() + ", blockEntityId " + ids.blockEntityId() + ", currentRenderedItemId " + ids.itemId());
         }
         return true;
     }
@@ -778,6 +778,7 @@ public final class EntityTakeover {
             Function<String, Object> perDraw = name -> switch (name) {
                 case "entityId" -> ids == null ? 0 : ids.entityId();
                 case "blockEntityId" -> ids == null ? 0 : ids.blockEntityId();
+                case "currentRenderedItemId" -> ids == null ? 0 : ids.itemId();
                 case "renderStage" -> stage;
                 default -> values.apply(name);
             };

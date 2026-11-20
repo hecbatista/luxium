@@ -29,4 +29,13 @@ class ItemIdsTest {
         assertEquals(50084, ids.of("minecraft:slime"));
         assertEquals(-1, ids.of("minecraft:stone"));   // an item line isn't an entity
     }
+
+    @Test
+    void specialEntityNames() throws Exception {
+        // Complementary lists the camera's own player under Iris's special name.
+        ItemIds ids = ItemIds.parse("entity.50017=current_player\n", "entity.");
+        org.junit.jupiter.api.Assertions.assertTrue(ids.has("minecraft:current_player"));
+        org.junit.jupiter.api.Assertions.assertFalse(ids.has("minecraft:zombie_villager_converting"));
+        assertEquals(50017, ids.of("minecraft:current_player"));
+    }
 }

@@ -204,6 +204,17 @@ GNU Lesser General Public License version 3
   pack/ItemIds.java reads entity.properties with the same rules as item.properties
   (shaderpack.IdMap.parseEntityIdMap). Block entities are drawn with gbuffers_block
   (pipeline.programs.ShaderKey BLOCK_ENTITY, ProgramId.Block, alpha one tenth).
+  The special entity names minecraft:current_player (the camera's own player) and
+  minecraft:zombie_villager_converting follow
+  mixin.entity_render_context.MixinEntityRenderDispatcher. currentRenderedItemId follows
+  mixin.entity_render_context.ItemStackStateLayerMixin, MixinItemRenderer, ItemStackStateMixin,
+  MixinItemFeatureRenderer and ModelStorage (mixin/ItemLayerRenderStateMixin.java,
+  ItemModelResolverMixin.java, ItemStackRenderStateMixin.java, ItemFeatureRendererMixin.java,
+  ItemFeatureRendererSubmitMixin.java): the item shown is noted in appendItemLayers, its id is
+  current while a layer is submitted (a block item other than a solid bucket uses its block's
+  block.properties id and sets blockEntityId to 1; other items item.properties under the model
+  component's name or their own; 0 when unlisted), and an item submit keeps the ids for when its
+  draws are built. Changed: Iris writes the ids on each vertex; Luxium keeps one value per draw.
 
   Particles (render/EntityTakeover.java, mixin/QuadParticleFeatureRendererMixin.java) follow Iris
   for the program chain (shaderpack.loading.ProgramId: particles -> textured_lit -> textured ->

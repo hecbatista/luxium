@@ -81,6 +81,8 @@ public class ScreenshotTest implements FabricClientGameTest {
             server.runCommand("tp @a -4 101.5 -10.5 0 30");
             context.waitTicks(20);
             server.runCommand("damage @e[type=minecraft:pig,limit=1] 0.5 minecraft:generic");
+            // Translucent particles (campfire smoke is in the game's TRANSLUCENT particle layer).
+            server.runCommand("particle minecraft:campfire_cosy_smoke -3 101 -7 0.3 0.2 0.3 0.01 6 force");
             context.waitTicks(2);
             context.takeScreenshot("luxium-3-hurt");
 
@@ -107,6 +109,13 @@ public class ScreenshotTest implements FabricClientGameTest {
             });
             context.waitTicks(40);
             context.takeScreenshot("luxium-5-hand");
+
+            // Shot 5b (step 7e): the player seen from behind (third person), so the player's own
+            // body is drawn with the pack's current_player id (log: "Entity draw ... entityId").
+            context.runOnClient(mc -> mc.options.setCameraType(net.minecraft.client.CameraType.THIRD_PERSON_BACK));
+            context.waitTicks(10);
+            context.takeScreenshot("luxium-5b-third-person");
+            context.runOnClient(mc -> mc.options.setCameraType(net.minecraft.client.CameraType.FIRST_PERSON));
 
             // Shots 6-8 (step 7b): the other worlds load their own world folders (world-1, world1),
             // and coming back loads world0 again. Spectator and no HUD, as for the first shots.

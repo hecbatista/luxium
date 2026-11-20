@@ -14,7 +14,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 abstract class EntityRenderDispatcherMixin {
     @Inject(method = "submit", at = @At("HEAD"))
     private void luxium$enter(final CallbackInfo ci, @Local(argsOnly = true) final EntityRenderState state) {
-        DrawIds.enterEntity(state.entityType);
+        DrawIds.enterEntity(state);
     }
 
     @Inject(method = "submit", at = @At("RETURN"))

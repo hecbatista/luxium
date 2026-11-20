@@ -70,6 +70,11 @@ public final class ItemIds {
         return ids.getOrDefault(namespacedId, -1);
     }
 
+    /** Whether the pack lists this name. */
+    public boolean has(String namespacedId) {
+        return ids.containsKey(namespacedId);
+    }
+
     public int size() {
         return ids.size();
     }

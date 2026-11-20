@@ -219,9 +219,7 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
   - Glint isn't a pass of its own in 26.3: it's a `GLINT` variant of the entity and item pipelines, served by the base program as in Iris (`HAND_CUTOUT_GLINT` → hand).
   - Game test: spider with eyes, beacon with beam (blockEntityId 32016). 0 validation messages, 74 unit tests pass, scoreboard 90/90.
 - **6d-4 leftovers (small, can wait):**
-  - `currentRenderedItemId` (items: `submitItem` → `ItemFeatureRenderer`, render types inside `ItemQuads`) is still 0.
-  - The `current_player` entity name isn't special-cased.
-  - Translucent particle layers aren't in the test scene.
+  - ~~`currentRenderedItemId`, `current_player`, translucent particles~~: done in 7e.
   - Hand draws in a non-ENTITY format would be painted over by final.
   - `LevelPass` covers "Main", the catch and the hand pass only. The OIT path (improved transparency) is switched off while a pack is in use (7d), as in Iris.
 - **6e, first slice (2026-11-20, ✅): terrain shadows.**
@@ -321,6 +319,22 @@ Step 7 (polish), agreed order with the user (2026-11-20): pack settings → Neth
   - `mixin/LevelExtractorMixin` checks at the start of `LevelExtractor.allChanged` (runs whenever the option changes, from the menu or the debug key) and `onResourceManagerReload`. `MetalShadersClient.keepImprovedTransparencyOff` also runs once when the pack loads. "A pack is in use" means `shaderpacks/` has one (`packPresent`, read at startup and at load).
   - Game test shot 10 turns the option on from the client, asserts it's off again 40 ticks later (`computeOnClient`), and matches shot 1's view. Log: "Improved Transparency switched off".
   - 0 validation messages; 94 unit tests pass; scoreboard 90/90; flicker check passes (land 0.010%, underwater 0.025%, Nether 0.027%, End and shot 9 0%).
+
+- **7e result (2026-11-20, ✅): small leftovers (current_player, currentRenderedItemId, translucent particles).**
+  - `render/DrawIds.enterEntity(EntityRenderState)` follows Iris (MixinEntityRenderDispatcher): the camera's own player (`AvatarRenderState.id` = `getCameraEntity()` id) uses `minecraft:current_player` if the pack lists it (Complementary: 50017), and a converting zombie villager uses `minecraft:zombie_villager_converting`.
+  - `currentRenderedItemId` follows Iris's item chain:
+    - `ItemModelResolverMixin` (appendItemLayers) notes the item on the render state (`ItemStackRenderStateMixin`).
+    - `ItemLayerRenderStateMixin` makes its id current while a layer is submitted (`DrawIds.enterItem`/`leaveItem`, nested inside an entity's ids).
+    - `ItemFeatureRendererSubmitMixin` keeps the ids on the record.
+    - `ItemFeatureRendererMixin` applies them while `prepareSubmit` builds the draws (`DrawIds.buildWith`, read in `notePrepared`).
+    - A block item uses its block's block.properties id and sets blockEntityId 1; other items use item.properties (model component name first). Special-renderer items (shields, chests) go through the usual `submitModel` path with the item's ids current.
+  - Game test log: hand sword `item_cutout (gbuffers_hand): currentRenderedItemId 45012`; shot 5b (third person) `entity_translucent: entityId 50017` and its sword `entityId 50017, currentRenderedItemId 45012`.
+  - Shot 3 now spawns campfire smoke (the game's TRANSLUCENT particle layer). Log: `pipeline/translucent_particle -> gbuffers_particles_translucent`.
+  - 0 validation messages; 95 unit tests pass; scoreboard 90/90; flicker check passes.
+  - Not done:
+    - One value per draw: different items merged into one draw (same texture atlas and pipeline, e.g. several dropped items) share the first one's id. Iris and Vitrail put ids on each vertex; doing that means a longer ENTITY vertex format, like LuxiumChunkVertex for terrain.
+    - The first-person arm has no entityId (it isn't drawn through EntityRenderDispatcher.submit; Iris's isn't either).
+    - `gbuffers_line` (block outlines) is still the game's (visible through the catch). Complementary's line program builds thick lines from `gl_VertexID` and Iris's core-profile names (`vaPosition`, `vaNormal`, `projectionMatrix`), which the translator doesn't supply yet.
 
 Facts for step 6:
 - **Full-screen passes:** vanilla `PostPass` uses `renderPass.draw(3, 1, 0, 0)` with no vertex buffer. Pack composite vertex shaders expect a quad (`gl_Vertex`, `gl_MultiTexCoord0`), so we need a quad vertex buffer or a special vertex prologue.
@@ -441,7 +455,7 @@ cd mod
 export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 ./gradlew runClientGameTest
 ```
-- Test: `mod/src/gametest/java/io/github/hecbatista/metalshaders/test/ScreenshotTest.java`. Shots: 1 land, 3 hurt pig, 2 underwater, 4 rain, 5 hand, 6 Nether, 7 End, 8 back in the Overworld, 9 a hidden tower's shadow, 10 Improved Transparency switched back off. A full run takes about 100 s.
+- Test: `mod/src/gametest/java/io/github/hecbatista/metalshaders/test/ScreenshotTest.java`. Shots: 1 land, 3 hurt pig (with campfire smoke), 2 underwater, 4 rain, 5 hand, 5b third person, 6 Nether, 7 End, 8 back in the Overworld, 9 a hidden tower's shadow, 10 Improved Transparency switched back off. A full run takes about 100 s.
 - Screenshots land in `mod/build/run/clientGameTest/screenshots/` (854×480); view them with the Read tool.
 - The test's game folder is cleared every run, so the test copies `mod/run/shaderpacks/*` into it first.
 - Spectator mode and a hidden HUD keep shots clean. In Survival the player falls between teleports.

@@ -261,6 +261,7 @@ public final class MetalShadersClient implements ClientModInitializer {
                     PackReader.readText(shaders, "/item.properties").orElse(""));
             ItemIds itemIds = ItemIds.parse(PropertiesPreprocessor.preprocess(items, propertyDefines));
             GAME_UNIFORMS.setItemIds(itemIds);
+            io.github.hecbatista.metalshaders.render.DrawIds.setItemIds(itemIds);
             String entities = PackReader.open(pack, (name, root, shaders) ->
                     PackReader.readText(shaders, "/entity.properties").orElse(""));
             ItemIds entityIds = ItemIds.parse(PropertiesPreprocessor.preprocess(entities, propertyDefines), "entity.");
