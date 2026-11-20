@@ -19,7 +19,7 @@ import java.util.stream.Stream;
  * {@code ./gradlew runClientGameTest}; screenshots land in build/run/clientGameTest/screenshots/.
  * <p>
  * The scene, made with commands at noon in clear weather: a stone floor and a sealed glass box
- * full of water, an oak-log block, a gold block, a leaves block, a pig and a chest. Shot 1 looks at the box from
+ * full of water, an oak-log block, a gold block, a leaves block, a pig, a chest, a slime, a spider and a beacon. Shot 1 looks at the box from
  * outside; shot 2 is from inside the water; shot 3 is the pig just hurt; shot 4 is rain; shot 5 is the hand holding a sword.
  */
 @SuppressWarnings("UnstableApiUsage")
@@ -52,6 +52,10 @@ public class ScreenshotTest implements FabricClientGameTest {
             server.runCommand("setblock -7 100 -5 minecraft:chest[facing=north]");
             // A translucent entity (a slime's outer layer is drawn blended).
             server.runCommand("summon minecraft:slime 4 100 -8 {NoAI:1b,Size:1,Rotation:[200f,0f]}");
+            // A spider (its glowing eyes are their own pipeline) and a beacon (its beam is another).
+            server.runCommand("summon minecraft:spider 1 100 -5 {NoAI:1b,Rotation:[180f,0f]}");
+            server.runCommand("fill 5 99 -4 7 99 -2 minecraft:iron_block");
+            server.runCommand("setblock 6 100 -3 minecraft:beacon");
 
             // Shot 1: outside, looking down at the box (yaw 0 faces +z, pitch 25 looks down a bit).
             server.runCommand("tp @a 0 104 -14 0 25");

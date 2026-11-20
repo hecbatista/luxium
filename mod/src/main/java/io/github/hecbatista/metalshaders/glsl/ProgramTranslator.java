@@ -260,9 +260,13 @@ public final class ProgramTranslator {
      *                       for the hand (HandRenderer.DEPTH = 0.125, MC_HAND_DEPTH), so packs can
      *                       tell hand pixels apart (Complementary: depth < 0.56)
      */
-    public record Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames, boolean handDepth) {
+    public record Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames, boolean handDepth, boolean overlay) {
         public Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames) {
-            this(alphaTest, coverage, samplerRenames, false);
+            this(alphaTest, coverage, samplerRenames, false, true);
+        }
+
+        public Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames, boolean handDepth) {
+            this(alphaTest, coverage, samplerRenames, handDepth, true);
         }
     }
 
@@ -437,7 +441,9 @@ public final class ProgramTranslator {
         StageScan fs = new StageScan(Stage.FRAGMENT, fragmentSource);
         // entityColor (the hit flash) from the overlay texture, as Iris's EntityPatcher does: a
         // value the vertex stage reads from Sampler1 at UV1 and hands to the fragment stage.
-        boolean overlay = dynamic && elements.contains("UV1")
+        // overlay = false: the draw binds no overlay texture (e.g. spider eyes); entityColor then
+        // stays a uniform, 0, as Iris's CommonUniforms supplies it outside the overlay path.
+        boolean overlay = dynamic && format.overlay() && elements.contains("UV1")
                 && (vs.declaredNames.contains("entityColor") || fs.declaredNames.contains("entityColor"));
         List<String> warnings = new ArrayList<>();
         boolean fullscreen = mode == Mode.FULLSCREEN;

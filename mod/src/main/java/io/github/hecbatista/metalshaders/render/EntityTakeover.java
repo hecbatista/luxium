@@ -77,7 +77,8 @@ public final class EntityTakeover {
     private static final class Family {
         final String program;
         final boolean translucent;
-        final Map<Float, Program> byAlpha = new HashMap<>();
+        /** Translations by alpha test and by whether the draw binds an overlay texture. */
+        final Map<String, Program> byAlpha = new HashMap<>();
         final Map<RenderPipeline, CompiledRenderPipeline> compiled = new IdentityHashMap<>();
         final Set<RenderPipeline> refused = new HashSet<>();
         final Map<String, GpuTextureView> inputs = new HashMap<>();
@@ -93,6 +94,12 @@ public final class EntityTakeover {
         final boolean alwaysTenth;
         /** The hand: Iris's depth squeeze, and the hand's projection (see openHandWindow). */
         boolean hand;
+        /** The vanilla pipeline this family is for, by location (null: chosen by phase). */
+        String pipelinePath;
+        /** Iris's fixed alpha test for the family (NaN = off), or null for the usual rules. */
+        Float alphaOverride;
+        /** Iris's default blend override for the program (ProgramId), used where the pack sets none. */
+        Optional<BlendFunction> blendOverride;
         boolean prepared;
         /** One uniform buffer per draw this frame (each draw has its own ids). */
         final List<MappableRingBuffer> rings = new java.util.ArrayList<>();
@@ -118,10 +125,15 @@ public final class EntityTakeover {
         }
 
         Program program(float alpha) throws ProgramTranslator.TranslationException {
-            Program p = byAlpha.get(alpha);
+            return program(alpha, true);
+        }
+
+        Program program(float alpha, boolean overlay) throws ProgramTranslator.TranslationException {
+            String key = alpha + "/" + overlay;
+            Program p = byAlpha.get(key);
             if (p == null) {
                 ProgramTranslator.Result r = ProgramTranslator.translateForDraw(glsl[0], glsl[1], elements,
-                        new ProgramTranslator.Format(alpha, coverage(), RENAMES, hand));
+                        new ProgramTranslator.Format(alpha, coverage(), RENAMES, hand, overlay));
                 Map<String, String> defaults = new HashMap<>();
                 r.uniforms().forEach(u -> {
                     if (u.defaultValue() != null) {
@@ -129,12 +141,15 @@ public final class EntityTakeover {
                     }
                 });
                 p = new Program(r, Std140Layout.of(r.uniforms()), defaults);
-                byAlpha.put(alpha, p);
+                byAlpha.put(key, p);
             }
             return p;
         }
 
         float alphaFor(RenderPipeline pipeline) {
+            if (alphaOverride != null) {
+                return alphaOverride;
+            }
             if (alwaysTenth) {
                 // Iris ONE_TENTH_ALPHA, unless the pack's alphaTest.<program> says otherwise
                 return TerrainTakeover.alphaTest(properties, blendProgram != null ? blendProgram : program, 0.1f);
@@ -160,11 +175,33 @@ public final class EntityTakeover {
     /** The hand (Iris ShaderKey HAND_CUTOUT / HAND_TRANSLUCENT: one tenth; WorldRenderingPhase HAND_SOLID 16, HAND_TRANSLUCENT 23). */
     private static final Family HAND = new Family("gbuffers_hand", false, 16, DefaultVertexFormat.ENTITY, ELEMENTS, true);
     private static final Family HAND_TRANSLUCENT = new Family("gbuffers_hand_water", true, 23, DefaultVertexFormat.ENTITY, ELEMENTS, true);
-    private static final List<Family> ALL = List.of(SOLID, BLOCK, TRANSLUCENT, PARTICLES, PARTICLES_TRANSLUCENT, WEATHER, HAND, HAND_TRANSLUCENT);
+
+    /** Pipelines Iris gives programs of their own (ShaderKey EMISSIVE_ENTITIES, BEACON, LIGHTNING). */
+    private static final Family SPIDEREYES = new Family("gbuffers_spidereyes", true, 11, DefaultVertexFormat.ENTITY, ELEMENTS, true);
+    private static final Set<String> BLOCK_ELEMENTS = Set.of("Position", "Color", "UV0", "UV2");
+    private static final Family BEACON = new Family("gbuffers_beaconbeam", false, 12, DefaultVertexFormat.BLOCK, BLOCK_ELEMENTS, false);
+    private static final Family BEACON_TRANSLUCENT = new Family("gbuffers_beaconbeam", true, 12, DefaultVertexFormat.BLOCK, BLOCK_ELEMENTS, false);
+    private static final Family LIGHTNING = new Family("gbuffers_lightning", true, 11, DefaultVertexFormat.POSITION_COLOR,
+            Set.of("Position", "Color"), false);
+    private static final List<Family> BY_PIPELINE = List.of(SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING);
+    /** Every family (declared after all of them: static fields initialise in order). */
+    private static final List<Family> ALL = List.of(SOLID, BLOCK, TRANSLUCENT, PARTICLES, PARTICLES_TRANSLUCENT, WEATHER, HAND, HAND_TRANSLUCENT,
+            SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING);
 
     static {
         HAND.hand = true;
         HAND_TRANSLUCENT.hand = true;
+        SPIDEREYES.pipelinePath = "pipeline/eyes";
+        // Iris ProgramId.SpiderEyes: SRC_ALPHA ONE ZERO ONE.
+        SPIDEREYES.blendOverride = Optional.of(new BlendFunction(com.mojang.renderpearl.api.pipeline.BlendFactor.SRC_ALPHA,
+                com.mojang.renderpearl.api.pipeline.BlendFactor.ONE, com.mojang.renderpearl.api.pipeline.BlendFactor.ZERO,
+                com.mojang.renderpearl.api.pipeline.BlendFactor.ONE));
+        BEACON.pipelinePath = "pipeline/beacon_beam_opaque";
+        BEACON.alphaOverride = Float.NaN;
+        BEACON_TRANSLUCENT.pipelinePath = "pipeline/beacon_beam_translucent";
+        BEACON_TRANSLUCENT.alphaOverride = Float.NaN;
+        LIGHTNING.pipelinePath = "pipeline/lightning";
+        LIGHTNING.alphaOverride = Float.NaN;
     }
 
     /** Which part of the level's features is being drawn. */
@@ -225,6 +262,15 @@ public final class EntityTakeover {
         prepareFamily(HAND_TRANSLUCENT, translucent, properties, translucentName);
     }
 
+    /** A program Iris gives one vanilla pipeline (eyes, beacon beam, lightning), resolved through its fallbacks. */
+    public static void prepareByPipeline(String family, String name, String[] glsl, Properties properties) {
+        for (Family f : BY_PIPELINE) {
+            if (f.program.equals(family)) {
+                prepareFamily(f, glsl, properties, name);
+            }
+        }
+    }
+
     public static boolean handActive() {
         return active(HAND);
     }
@@ -280,6 +326,16 @@ public final class EntityTakeover {
      * gbuffers_entities if the pack has none.
      */
     private static Family familyFor(DrawIds.Ids ids, RenderPipeline pipeline) {
+        if (window == null) {
+            return null;
+        }
+        if (window != Phase.HAND) {
+            for (Family f : BY_PIPELINE) {
+                if (f.pipelinePath != null && f.pipelinePath.equals(pipeline.getLocation().getPath())) {
+                    return f;
+                }
+            }
+        }
         if (window == Phase.HAND) {
             boolean blended = pipeline.getColorTargetStates().size() == 1 && pipeline.getColorTargetStates().getFirst().blendFunction().isPresent();
             return blended ? HAND_TRANSLUCENT : HAND;
@@ -336,7 +392,7 @@ public final class EntityTakeover {
         if (targets.size() != 1) {
             return targets.size() + " colour targets";
         }
-        if (targets.getFirst().blendFunction().isPresent() != f.translucent) {
+        if (f.pipelinePath == null && targets.getFirst().blendFunction().isPresent() != f.translucent) {
             return f.translucent ? "not blended" : "blended";
         }
         if (pipeline.getDepthStencilState() == null) {
@@ -348,7 +404,7 @@ public final class EntityTakeover {
         BindGroupLayout.flattenUniforms(pipeline.getBindGroupLayouts()).forEach(u -> declared.add(u.name()));
         Program p;
         try {
-            p = f.program(f.alphaFor(pipeline));
+            p = f.program(f.alphaFor(pipeline), declared.contains(ProgramTranslator.OVERLAY_SAMPLER));
         } catch (ProgramTranslator.TranslationException e) {
             return "translation failed: " + e.getMessage();
         }
@@ -363,9 +419,12 @@ public final class EntityTakeover {
     /** The pack's program with the vanilla pipeline's state (topology, cull, depth, polygon mode, blend). */
     private static CompiledRenderPipeline compile(Family f, RenderPipeline vanilla) throws Exception {
         float alpha = f.alphaFor(vanilla);
-        Program p = f.program(alpha);
+        Set<String> declared = new HashSet<>();
+        BindGroupLayout.flattenUniforms(vanilla.getBindGroupLayouts()).forEach(u -> declared.add(u.name()));
+        boolean overlay = declared.contains(ProgramTranslator.OVERLAY_SAMPLER);
+        Program p = f.program(alpha, overlay);
         ProgramTranslator.Result r = p.result();
-        String variant = Float.isNaN(alpha) ? "solid" : "cutout";
+        String variant = (Float.isNaN(alpha) ? "solid" : "cutout") + (overlay ? "" : "_no_overlay");
         Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/" + f.program + "_" + variant);
         RenderPipeline.Builder b = RenderPipeline.builder()
                 .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/" + f.program + "/" + vanilla.getLocation().getPath()))
@@ -378,7 +437,8 @@ public final class EntityTakeover {
         Optional<BlendFunction> vanillaBlend = vanilla.getColorTargetStates().getFirst().blendFunction();
         for (int i = 0; i < f.writes.size(); i++) {
             int index = f.writes.get(i);
-            Optional<BlendFunction> blend = TerrainTakeover.blend(f.properties, f.blendProgram != null ? f.blendProgram : f.program, index, vanillaBlend);
+            Optional<BlendFunction> fallbackBlend = f.blendOverride != null ? f.blendOverride : vanillaBlend;
+            Optional<BlendFunction> blend = TerrainTakeover.blend(f.properties, f.blendProgram != null ? f.blendProgram : f.program, index, fallbackBlend);
             b.withColorTargetState(i, new ColorTargetState(blend, PackChain.targetFormat(index),
                     PackChain.promoted(index) ? ColorTargetState.WRITE_COLOR : ColorTargetState.WRITE_ALL));
         }
@@ -424,12 +484,12 @@ public final class EntityTakeover {
 
     /** Before the level's solid features. */
     public static void openWindow(Function<String, Object> values) {
-        open(Phase.SOLID, values, List.of(SOLID, BLOCK, PARTICLES));
+        open(Phase.SOLID, values, List.of(SOLID, BLOCK, PARTICLES, SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING));
     }
 
     /** Before the level's translucent features, and its "after terrain" ones (after the deferred cut). */
     public static void openTranslucentWindow(Function<String, Object> values) {
-        open(Phase.TRANSLUCENT, values, List.of(TRANSLUCENT, PARTICLES_TRANSLUCENT));
+        open(Phase.TRANSLUCENT, values, List.of(TRANSLUCENT, PARTICLES_TRANSLUCENT, SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING));
     }
 
     private static void open(Phase phase, Function<String, Object> values, List<Family> families) {

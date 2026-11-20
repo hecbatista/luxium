@@ -210,13 +210,20 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
   - `mixin/GameRendererHandMixin`: the "Item in hand" pass is a `LevelPass`, and the hand window opens around `renderAllFeatures`, with the hold depth = the hand's own depth view.
   - Families `gbuffers_hand` (stage 16) and `gbuffers_hand_water` (falls back to hand, stage 23), one tenth.
   - Game test shot 5 (creative, iron sword, HUD on): the sword (`item_cutout`) and the arm (`entity_translucent`) are the pack's. 0 validation messages, 74 unit tests pass, scoreboard 90/90.
-- **6d-4 handoff (start here next session): what's left of 6d-4.**
-  - `currentRenderedItemId` (items and held items: `submitItem` → `ItemFeatureRenderer`, render types inside `ItemQuads`) is still 0.
-  - The `current_player` entity name isn't special-cased yet.
-  - Glint, beacon beam, lightning, spider eyes (gbuffers_spidereyes).
-  - Translucent particle layers aren't in the test scene yet.
-  - Hand draws the pack doesn't serve (any non-ENTITY format) are drawn by the game into its image and then painted over by final.
-  - Watch: `LevelPass` covers "Main", the catch and the hand pass only. The OIT path (improved transparency) is untouched.
+- **6d-4, seventh slice (2026-11-20, ✅): spider eyes, beacon beams, lightning.**
+  - Families chosen by vanilla pipeline path (`Family.pipelinePath`), as Iris does:
+    - `pipeline/eyes` → gbuffers_spidereyes (blend SRC_ALPHA ONE ZERO ONE unless the pack says otherwise);
+    - `pipeline/beacon_beam_opaque` / `_translucent` → gbuffers_beaconbeam (BLOCK format, no alpha test);
+    - `pipeline/lightning` → gbuffers_lightning (POSITION_COLOR format, no alpha test; not in the test scene).
+  - Draws whose pipeline binds no overlay texture (spider eyes) get a translation with `Format.overlay = false`, so `entityColor` stays a uniform, 0.
+  - Glint isn't a pass of its own in 26.3: it's a `GLINT` variant of the entity and item pipelines, served by the base program as in Iris (`HAND_CUTOUT_GLINT` → hand).
+  - Game test: spider with eyes, beacon with beam (blockEntityId 32016). 0 validation messages, 74 unit tests pass, scoreboard 90/90.
+- **6d-4 leftovers (small, can wait):**
+  - `currentRenderedItemId` (items: `submitItem` → `ItemFeatureRenderer`, render types inside `ItemQuads`) is still 0.
+  - The `current_player` entity name isn't special-cased.
+  - Translucent particle layers aren't in the test scene.
+  - Hand draws in a non-ENTITY format would be painted over by final.
+  - `LevelPass` covers "Main", the catch and the hand pass only. The OIT path (improved transparency) is untouched.
 - **6e: shadow pass.**
 - Metallum's only Sodium mixin picks the graphics API (`metallum.sodium.mixins.json`: `SodiumPreferredGraphicsApiMixin`). Sodium already draws through the game's RenderPearl API, so Vitrail's Sodium-level hooks should apply on Metal too.
 

@@ -383,6 +383,25 @@ public final class MetalShadersClient implements ClientModInitializer {
                     ownWater ? new String[]{hwV.result().text(), hwF.result().text()} : hand, props);
         }
 
+        // Programs Iris gives single pipelines, through its fallbacks (ProgramId): spider eyes and
+        // beacon beam -> textured -> basic; lightning -> entities -> textured_lit -> textured -> basic.
+        Map<String, List<String>> byPipeline = new LinkedHashMap<>();
+        byPipeline.put("gbuffers_spidereyes", List.of("gbuffers_spidereyes", "gbuffers_textured", "gbuffers_basic"));
+        byPipeline.put("gbuffers_beaconbeam", List.of("gbuffers_beaconbeam", "gbuffers_textured", "gbuffers_basic"));
+        byPipeline.put("gbuffers_lightning", List.of("gbuffers_lightning", "gbuffers_entities", "gbuffers_textured_lit", "gbuffers_textured", "gbuffers_basic"));
+        for (Map.Entry<String, List<String>> e : byPipeline.entrySet()) {
+            for (String candidate : e.getValue()) {
+                var v = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".vsh", defines);
+                var f = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".fsh", defines);
+                if (PackChain.ready() && v.ok() && f.ok()) {
+                    LOGGER.info("{}: {}", e.getKey(), candidate);
+                    io.github.hecbatista.metalshaders.render.EntityTakeover.prepareByPipeline(e.getKey(), candidate,
+                            new String[]{v.result().text(), f.result().text()}, props);
+                    break;
+                }
+            }
+        }
+
         // Weather, through Iris's fallbacks (weather -> textured_lit -> textured -> basic).
         for (String candidate : List.of("gbuffers_weather", "gbuffers_textured_lit", "gbuffers_textured", "gbuffers_basic")) {
             var v = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".vsh", defines);

@@ -191,6 +191,11 @@ GNU Lesser General Public License version 3
   with its depth in depthtex0, follows Vitrail's docs/frame.md ("The hand is the one family the
   engine has to move rather than intercept").
 
+  Spider eyes, beacon beams and lightning (render/EntityTakeover.java) follow Iris for which
+  program serves which pipeline and its fallbacks (shaderpack.loading.ProgramId SpiderEyes,
+  BeaconBeam, Lightning; pipeline.programs.ShaderKey EMISSIVE_ENTITIES, BEACON, LIGHTNING), their
+  alpha tests (beacon and lightning off) and SpiderEyes' default blend (SRC_ALPHA ONE ZERO ONE).
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3
