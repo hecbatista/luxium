@@ -63,6 +63,26 @@ public final class MetalShadersClient implements ClientModInitializer {
         readMeshDirectives(shaderpacks);
     }
 
+    /** Whether Luxium found a pack to use (a pack in shaderpacks/, read at startup and at load). */
+    private static volatile boolean packPresent;
+
+    /**
+     * Step 7d (Iris MixinDisableFabulousGraphics): while a pack is in use, the game's Improved
+     * Transparency is switched off and the graphics preset becomes Custom, as when a player
+     * changes one setting by hand.
+     */
+    public static void keepImprovedTransparencyOff() {
+        Minecraft mc = Minecraft.getInstance();
+        if (!packPresent || mc == null || mc.options == null) {
+            return;
+        }
+        if (mc.options.improvedTransparency().get()) {
+            mc.options.improvedTransparency().set(false);
+            mc.options.graphicsPreset().set(net.minecraft.client.GraphicsPreset.CUSTOM);
+            LOGGER.info("Improved Transparency switched off: the shader pack does its own transparency (as Iris does)");
+        }
+    }
+
     /** What the chunk meshes were last built with: separateAo and the block.properties map. */
     private static String meshKey = "";
 
@@ -77,6 +97,7 @@ public final class MetalShadersClient implements ClientModInitializer {
     private static boolean readMeshDirectives(Path shaderpacks) {
         try {
             List<Path> packs = PackReader.findPacks(shaderpacks);
+            packPresent = !packs.isEmpty();
             if (packs.isEmpty()) {
                 return false;
             }
@@ -169,6 +190,7 @@ public final class MetalShadersClient implements ClientModInitializer {
                 mc.levelExtractor.allChanged();
             }
             loadPackValues();
+            keepImprovedTransparencyOff();
         }
         // Step 7b: the folder whose programs draw this world; a different one is loaded in place
         // of the last (Iris keeps one pipeline per world; we keep only the current one).

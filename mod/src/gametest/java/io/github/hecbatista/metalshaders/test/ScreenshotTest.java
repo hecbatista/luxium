@@ -179,6 +179,19 @@ public class ScreenshotTest implements FabricClientGameTest {
             singleplayer.getConnection().waitForChunksRender();
             context.takeScreenshot("luxium-9-offscreen-caster");
             captureFrames(context, "offscreen", 24);
+
+            // Shot 10 (step 7d): a player turns on Improved Transparency. With a pack in use it's
+            // switched straight back off (as under Iris), and shot 1's view looks as before.
+            server.runCommand("time set noon");
+            server.runCommand("tp @a 0 104 -14 0 25");
+            context.runOnClient(mc -> mc.options.improvedTransparency().set(true));
+            context.waitTicks(40);
+            singleplayer.getConnection().waitForChunksRender();
+            boolean stillOn = context.computeOnClient(mc -> mc.options.improvedTransparency().get());
+            if (stillOn) {
+                throw new AssertionError("Improved Transparency should be switched off while a pack is in use");
+            }
+            context.takeScreenshot("luxium-10-no-oit");
         }
     }
 

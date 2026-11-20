@@ -223,7 +223,7 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
   - The `current_player` entity name isn't special-cased.
   - Translucent particle layers aren't in the test scene.
   - Hand draws in a non-ENTITY format would be painted over by final.
-  - `LevelPass` covers "Main", the catch and the hand pass only. The OIT path (improved transparency) is untouched.
+  - `LevelPass` covers "Main", the catch and the hand pass only. The OIT path (improved transparency) is switched off while a pack is in use (7d), as in Iris.
 - **6e, first slice (2026-11-20, ✅): terrain shadows.**
   - `uniform/ShadowMatrices.java` (Iris's math) publishes from `GameUniforms` each frame: `shadowAngle`, `shadowModelView(Inverse)`, `shadowProjection(Inverse)` (OpenGL convention).
   - Directives are read from the programs' `const` lines. Complementary: 2048, distance 192, sunPathRotation −40, near/far −100.05/156, interval 2.
@@ -315,6 +315,12 @@ Step 7 (polish), agreed order with the user (2026-11-20): pack settings → Neth
     - Entity casters are still only the camera-visible ones (the level's prepared solid features).
     - Sections never built because the camera hasn't been near them have no mesh to cast with. Sodium builds from the camera's task lists; the light's task lists are dropped, as in Iris.
     - Sodium is now declared in `fabric.mod.json` (`"sodium": "~0.9.2"`, user-approved 2026-11-20): Luxium's terrain and shadows are drawn through Sodium and its mixins target 0.9.2's internals.
+
+- **7d result (2026-11-20, ✅): Improved Transparency (the game's OIT path).**
+  - Following Iris (`MixinDisableFabulousGraphics`), the option is switched off while a pack is in use, and the graphics preset becomes Custom. The pack does its own transparency, and Iris never takes over `LevelRenderer.executeOit` either.
+  - `mixin/LevelExtractorMixin` checks at the start of `LevelExtractor.allChanged` (runs whenever the option changes, from the menu or the debug key) and `onResourceManagerReload`. `MetalShadersClient.keepImprovedTransparencyOff` also runs once when the pack loads. "A pack is in use" means `shaderpacks/` has one (`packPresent`, read at startup and at load).
+  - Game test shot 10 turns the option on from the client, asserts it's off again 40 ticks later (`computeOnClient`), and matches shot 1's view. Log: "Improved Transparency switched off".
+  - 0 validation messages; 94 unit tests pass; scoreboard 90/90; flicker check passes (land 0.010%, underwater 0.025%, Nether 0.027%, End and shot 9 0%).
 
 Facts for step 6:
 - **Full-screen passes:** vanilla `PostPass` uses `renderPass.draw(3, 1, 0, 0)` with no vertex buffer. Pack composite vertex shaders expect a quad (`gl_Vertex`, `gl_MultiTexCoord0`), so we need a quad vertex buffer or a special vertex prologue.
@@ -435,7 +441,7 @@ cd mod
 export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 ./gradlew runClientGameTest
 ```
-- Test: `mod/src/gametest/java/io/github/hecbatista/metalshaders/test/ScreenshotTest.java`. Shots: 1 land, 3 hurt pig, 2 underwater, 4 rain, 5 hand, 6 Nether, 7 End, 8 back in the Overworld, 9 a hidden tower's shadow. A full run takes about 90 s.
+- Test: `mod/src/gametest/java/io/github/hecbatista/metalshaders/test/ScreenshotTest.java`. Shots: 1 land, 3 hurt pig, 2 underwater, 4 rain, 5 hand, 6 Nether, 7 End, 8 back in the Overworld, 9 a hidden tower's shadow, 10 Improved Transparency switched back off. A full run takes about 100 s.
 - Screenshots land in `mod/build/run/clientGameTest/screenshots/` (854×480); view them with the Read tool.
 - The test's game folder is cleared every run, so the test copies `mod/run/shaderpacks/*` into it first.
 - Spectator mode and a hidden HUD keep shots clean. In Survival the player falls between teleports.

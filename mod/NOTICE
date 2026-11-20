@@ -259,6 +259,13 @@ GNU Lesser General Public License version 3
   SodiumWorldRenderer.setupTerrain, and its frustum is the shadow map's own box (the light's
   clip space) instead of Iris's advanced shadow frustum.
 
+  src/main/java/io/github/hecbatista/metalshaders/mixin/LevelExtractorMixin.java (with
+  MetalShadersClient.keepImprovedTransparencyOff) follows
+  net.irisshaders.iris.mixin.fabulous.MixinDisableFabulousGraphics: while a pack is in use,
+  Improved Transparency is switched off and the graphics preset set to Custom, checked at the
+  start of LevelExtractor.allChanged and onResourceManagerReload. Changed: also checked once
+  when the pack loads.
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3

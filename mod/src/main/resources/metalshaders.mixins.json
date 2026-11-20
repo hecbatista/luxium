@@ -12,6 +12,7 @@
     "GameRendererHandMixin",
     "GameRendererMixin",
     "GameRendererRenderMixin",
+    "LevelExtractorMixin",
     "LevelRendererTerrainMixin",
     "PreparedRenderTypeMixin",
     "QuadParticleFeatureRendererMixin",
