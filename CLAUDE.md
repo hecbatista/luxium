@@ -21,6 +21,10 @@ Step 5 progress (2026-11-20):
   - about 65 built-ins. Each maps to an Iris file in `iris/.../uniforms/` (WorldTime, SystemTime, Celestial, Camera, Common, Viewport, Fog, IrisExclusive, IdMap, Matrix…). Check every Minecraft method in the 26.3 sources: e.g. `Level.getDefaultClockTime()` replaces day time, and moon phase comes from `Camera.attributeProbe()` + `EnvironmentAttributes.MOON_PHASE`.
   - about 25 custom formulas in `shaders.properties` (`uniform.float.x = smooth(...)`). Iris evaluates these with its own `kroppeb.stareval` (part of Iris, LGPL). We'll write a small evaluator and credit the behavior.
   - Per-draw values (entityId, renderStage, the luxium_* matrices…) are set during rendering, so they belong to step 6.
+- Game values v1:
+  - `uniform/GameUniforms.java` updates once per frame from `mixin/GameRendererMixin` (TAIL of `GameRenderer.extract`). `uniform/UniformWriter.java` packs the values into std140 bytes; missing names get the pack's default or zero and are reported.
+  - In game (2026-11-20, validation on, 0 messages): the logged values matched F3 (camera = feet + 1.62, 1708×960, frameTime ≈ 1/fps, worldTime frozen while paused, sunAngle follows vanilla's eased curve).
+  - Coverage for world0/gbuffers_terrain is **34 of 88** values. Still missing: the ~25 pack formulas, matrices (gbuffer*, shadow*, luxium_*), per-draw values, and smaller ones (fogColor, wetness, eyePosition, relativeEyePosition, playerLookVector, velocity, atlasSize, heldItem*, lightningBoltPosition, endFlash*, darknessLightFactor).
 
 Translator v1 only makes programs **compile**. These things are known to matter for drawing correctly and aren't handled yet:
 - `gl_FragCoord` origin: GL is bottom-left, Vulkan/Metal are top-left.

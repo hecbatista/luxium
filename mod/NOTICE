@@ -48,6 +48,17 @@ GNU Lesser General Public License version 3
   SodiumCoreTransformer and VanillaCoreTransformer). Changed: those names are only declared
   so the program compiles. Iris's replacement expressions aren't reproduced.
 
+  src/main/java/io/github/hecbatista/metalshaders/uniform/GameUniforms.java reproduces how
+  Iris computes each value it supplies, quirks included, from net.irisshaders.iris.uniforms
+  SystemTimeUniforms (frameTime truncated to whole milliseconds, frameTimeCounter wrapping at
+  3600, frameCounter at 720720), ViewportUniforms, WorldTimeUniforms (the Nether and the End
+  keep moving time), CelestialUniforms.getSunAngle, CameraUniforms (near = 0.05, far = render
+  distance x 16, and the CameraPositionTracker shift by multiples of 30000) and CommonUniforms
+  (isEyeInWater, blindness, darknessFactor, nightVision incl. conduit power, is_invisible,
+  playerMood, eyeBrightness, screenBrightness, rainStrength, skyColor). Changed: nightVision
+  checks for the effect first instead of relying on Iris's mixin into
+  GameRenderer.nightVisionScale (same result in vanilla).
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3

@@ -42,6 +42,12 @@ public final class PackPreprocessor {
         });
     }
 
+    /** Preprocesses a single program file, e.g. "/world0/gbuffers_terrain.vsh". */
+    public static Program preprocessProgram(Path pack, String path, Map<String, String> defines) throws IOException {
+        return PackReader.open(pack, (name, root, shaders) ->
+                preprocessOne(path, packPath -> PackReader.readText(shaders, packPath), defines));
+    }
+
     static Program preprocessOne(String path, IncludeExpander.FileSource files, Map<String, String> defines)
             throws IOException {
         List<String> lines;
