@@ -287,6 +287,7 @@ public final class PackChain {
             encoder.clearColorTexture(coverage, new Vector4f(SkyTakeover.active() ? 0.0f : COVERAGE_NOTHING));
             SkyTakeover.beginFrame(device, encoder);
             TerrainTakeover.beginFrame();
+            EntityTakeover.beginFrame();
             deferredRan = false;
             stopped = false;
         } catch (RuntimeException e) {

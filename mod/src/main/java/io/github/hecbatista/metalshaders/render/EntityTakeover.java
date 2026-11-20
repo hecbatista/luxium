@@ -71,8 +71,6 @@ public final class EntityTakeover {
     private static final Set<String> GAME_BOUND = Set.of("Sampler0", "Sampler1", "Sampler2");
     private static final Matrix4f LIGHTMAP_MATRIX = new Matrix4f(
             0.00390625f, 0, 0, 0, 0, 0.00390625f, 0, 0, 0, 0, 0.00390625f, 0, 0.03125f, 0.03125f, 0.03125f, 1);
-    /** WorldRenderingPhase.ENTITIES (Iris). */
-    private static final int STAGE_ENTITIES = 11;
     private static final Set<String> ELEMENTS = Set.of("Position", "Color", "UV0", "UV1", "UV2", "Normal");
 
     /** One pack program and the vanilla pipelines it serves. */
@@ -86,13 +84,17 @@ public final class EntityTakeover {
         String[] glsl;
         Properties properties = new Properties();
         List<Integer> writes = List.of();
+        final int stage;
         boolean prepared;
-        MappableRingBuffer ubo;
+        /** One uniform buffer per draw this frame (each draw has its own ids). */
+        final List<MappableRingBuffer> rings = new java.util.ArrayList<>();
+        int slot;
         int served;
 
-        Family(String program, boolean translucent) {
+        Family(String program, boolean translucent, int stage) {
             this.program = program;
             this.translucent = translucent;
+            this.stage = stage;
         }
 
         boolean coverage() {
@@ -124,13 +126,24 @@ public final class EntityTakeover {
         }
     }
 
-    private static final Family SOLID = new Family("gbuffers_entities", false);
-    private static final Family TRANSLUCENT = new Family("gbuffers_entities_translucent", true);
+    /** Iris WorldRenderingPhase: ENTITIES 11, BLOCK_ENTITIES 12. */
+    private static final Family SOLID = new Family("gbuffers_entities", false, 11);
+    private static final Family BLOCK = new Family("gbuffers_block", false, 12);
+    private static final Family TRANSLUCENT = new Family("gbuffers_entities_translucent", true, 11);
+
+    /** Which part of the level's features is being drawn. */
+    private enum Phase { SOLID, TRANSLUCENT }
     private static final Map<CompiledRenderPipeline, Program> programOf = new IdentityHashMap<>();
     private static int compiledCount;
 
     // Per-frame state.
-    private static Family window;
+    private static Phase window;
+    private static Function<String, Object> frameValues;
+    /** The family and ids of the draw being made (null outside a served draw). */
+    private static Family drawing;
+    private static DrawIds.Ids drawingIds;
+    private static Family holdFamily;
+    private static final Set<String> seenIds = new HashSet<>();
     private static RenderPass hold;
     private static boolean inHold;
     private static long logged;
@@ -150,9 +163,12 @@ public final class EntityTakeover {
      * may be null: the translucent family then falls back to gbuffers_entities, as Iris's program
      * fallback does (ProgramId.EntitiesTrans -> Entities).
      */
-    public static void prepare(String[] solid, String[] translucent, Properties properties) {
+    public static void prepare(String[] solid, String[] translucent, String[] block, Properties properties) {
         prepareFamily(SOLID, solid, properties);
         prepareFamily(TRANSLUCENT, translucent != null ? translucent : solid, properties);
+        if (block != null) {
+            prepareFamily(BLOCK, block, properties);
+        }
     }
 
     private static void prepareFamily(Family f, String[] glsl, Properties properties) {
@@ -173,29 +189,51 @@ public final class EntityTakeover {
         }
     }
 
-    /** Whether this vanilla pipeline is one the open window's program draws. */
-    public static boolean serves(RenderPipeline pipeline) {
-        Family f = window;
-        if (f == null || !active(f) || f.refused.contains(pipeline)) {
+    /**
+     * The family that draws this draw in the open window, or null if it stays the game's. A block
+     * entity's solid draws go to gbuffers_block (Iris ProgramId.Block), falling back to
+     * gbuffers_entities if the pack has none.
+     */
+    private static Family familyFor(DrawIds.Ids ids) {
+        if (window == Phase.TRANSLUCENT) {
+            return TRANSLUCENT;
+        }
+        if (window == Phase.SOLID) {
+            return ids != null && ids.blockEntity() && BLOCK.prepared ? BLOCK : SOLID;
+        }
+        return null;
+    }
+
+    /** Whether the open window serves this draw; if so, the next {@link #hold()} and draw use its family. */
+    public static boolean serves(net.minecraft.client.renderer.rendertype.PreparedRenderType type) {
+        DrawIds.Ids ids = DrawIds.of(type);
+        Family f = familyFor(ids);
+        RenderPipeline pipeline = type.pipeline();
+        if (f == null || !active(f) || !targetsReady(f) || f.refused.contains(pipeline)) {
             return false;
         }
-        if (f.compiled.containsKey(pipeline)) {
-            return true;
+        if (!f.compiled.containsKey(pipeline)) {
+            String why = refusal(f, pipeline);
+            if (why != null) {
+                f.refused.add(pipeline);
+                MetalShadersClient.LOGGER.info("Entity takeover ({}): {} stays the game's ({})", f.program, pipeline.getLocation(), why);
+                return false;
+            }
+            try {
+                f.compiled.put(pipeline, compile(f, pipeline));
+            } catch (Exception e) {
+                f.refused.add(pipeline);
+                MetalShadersClient.LOGGER.warn("Entity takeover ({}): {} stays the game's: {}", f.program, pipeline.getLocation(), e.getMessage());
+                return false;
+            }
         }
-        String why = refusal(f, pipeline);
-        if (why != null) {
-            f.refused.add(pipeline);
-            MetalShadersClient.LOGGER.info("Entity takeover ({}): {} stays the game's ({})", f.program, pipeline.getLocation(), why);
-            return false;
+        drawing = f;
+        drawingIds = ids;
+        if (seenIds.add(f.program + " " + type.name() + " " + ids)) {
+            MetalShadersClient.LOGGER.info("Entity draw {} ({}): {}", type.name(), f.program,
+                    ids == null ? "no ids (not an entity's or block entity's)" : "entityId " + ids.entityId() + ", blockEntityId " + ids.blockEntityId());
         }
-        try {
-            f.compiled.put(pipeline, compile(f, pipeline));
-            return true;
-        } catch (Exception e) {
-            f.refused.add(pipeline);
-            MetalShadersClient.LOGGER.warn("Entity takeover ({}): {} stays the game's: {}", f.program, pipeline.getLocation(), e.getMessage());
-            return false;
-        }
+        return true;
     }
 
     /** Why a pipeline isn't served by this family, or null if it is. */
@@ -284,57 +322,60 @@ public final class EntityTakeover {
 
     private static boolean saidWindow;
 
+    /** Frame start (from PackChain.beginFrame, no pass open): last frame's uniform buffers rotate. */
+    static void beginFrame() {
+        for (Family f : List.of(SOLID, BLOCK, TRANSLUCENT)) {
+            for (int i = 0; i < f.slot; i++) {
+                f.rings.get(i).rotate();
+            }
+            f.slot = 0;
+        }
+        DrawIds.beginFrame();
+    }
+
     /** Before the level's solid features. */
     public static void openWindow(Function<String, Object> values) {
-        open(SOLID, values);
+        open(Phase.SOLID, values, List.of(SOLID, BLOCK));
     }
 
     /** Before the level's translucent features (after the deferred cut). */
     public static void openTranslucentWindow(Function<String, Object> values) {
-        open(TRANSLUCENT, values);
+        open(Phase.TRANSLUCENT, values, List.of(TRANSLUCENT));
     }
 
-    private static void open(Family f, Function<String, Object> values) {
-        f.served = 0;
-        if (!active(f)) {
-            return;
-        }
-        if (!saidWindow) {
-            saidWindow = true;
-            MetalShadersClient.LOGGER.info("Entity window opened (targets ready: {})", targetsReady(f));
-        }
-        window = f;
-        // Inputs and the uniform block, while no pass is open (placeholders may be created, and
-        // the deferred passes may have flipped buffers since the frame began).
-        f.inputs.clear();
-        for (Program p : f.byAlpha.values()) {
-            for (ProgramTranslator.Sampler s : p.result().samplers()) {
-                if (!GAME_BOUND.contains(s.name())) {
-                    f.inputs.put(s.name(), PackChain.inputView(s.name()));
+    private static void open(Phase phase, Function<String, Object> values, List<Family> families) {
+        window = phase;
+        frameValues = perFrame(values);
+        for (Family f : families) {
+            f.served = 0;
+            if (!active(f)) {
+                continue;
+            }
+            if (!saidWindow) {
+                saidWindow = true;
+                MetalShadersClient.LOGGER.info("Entity window opened (targets ready: {})", targetsReady(f));
+            }
+            // Inputs while no pass is open (placeholders may be created, and the deferred passes
+            // may have flipped buffers since the frame began).
+            f.inputs.clear();
+            for (Program p : f.byAlpha.values()) {
+                for (ProgramTranslator.Sampler s : p.result().samplers()) {
+                    if (!GAME_BOUND.contains(s.name())) {
+                        f.inputs.put(s.name(), PackChain.inputView(s.name()));
+                    }
                 }
-            }
-        }
-        Program p = f.byAlpha.values().iterator().next();
-        if (p.layout().size() > 0) {
-            if (f.ubo == null) {
-                f.ubo = new MappableRingBuffer(() -> "Luxium " + f.program + " uniforms",
-                        GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_MAP_WRITE, p.layout().size());
-            } else {
-                f.ubo.rotate();   // here and not at the window's end: rotating records a command, so no pass may be open
-            }
-            try (GpuBufferSlice.MappedView view = f.ubo.currentBuffer().map(false, true)) {
-                UniformWriter.write(p.layout(), perFrame(values), p.defaults(), view.data());
             }
         }
     }
 
     public static void closeWindow() {
-        Family f = window;
         releaseHold();
         window = null;
-        if (f != null && f.served > 0 && System.nanoTime() - logged > 5_000_000_000L) {
-            logged = System.nanoTime();
-            MetalShadersClient.LOGGER.info("Entities drawn by the pack this frame ({}): {} draws", f.program, f.served);
+        for (Family f : List.of(SOLID, BLOCK, TRANSLUCENT)) {
+            if (f.served > 0 && System.nanoTime() - logged > 5_000_000_000L) {
+                logged = System.nanoTime();
+                MetalShadersClient.LOGGER.info("Entities drawn by the pack this frame ({}): {} draws", f.program, f.served);
+            }
         }
     }
 
@@ -342,8 +383,12 @@ public final class EntityTakeover {
 
     /** The pack's pass for a served draw, opened if needed (the level's pass must be suspended). */
     public static RenderPass hold() {
-        Family f = Objects.requireNonNull(window);
+        Family f = Objects.requireNonNull(drawing);
+        if (hold != null && holdFamily != f && !holdFamily.writes.equals(f.writes)) {
+            releaseHold();   // another program with other draw buffers: another pass
+        }
         if (hold == null) {
+            holdFamily = f;
             RenderPassDescriptor.Builder d = RenderPassDescriptor.builder(() -> "Luxium entities (pack " + f.program + ")");
             for (int index : f.writes) {
                 d.withColorAttachment(PackChain.gbufferTarget(index));
@@ -355,11 +400,6 @@ public final class EntityTakeover {
             hold = RenderSystem.getDevice().createCommandEncoder().createRenderPass(d.build());
         }
         return hold;
-    }
-
-    /** Whether the open window's targets exist yet (the chain allocates them at the first frame). */
-    public static boolean targetsReady() {
-        return window != null && targetsReady(window);
     }
 
     private static boolean targetsReady(Family f) {
@@ -381,25 +421,27 @@ public final class EntityTakeover {
 
     public static void enterDraw() {
         inHold = true;
-        window.served++;
+        drawing.served++;
     }
 
     public static void leaveDraw() {
         inHold = false;
+        drawing = null;
+        drawingIds = null;
     }
 
     /** Inside a served draw: the pack's pipeline for the vanilla one. */
     public static CompiledRenderPipeline pipelineFor(RenderPipeline vanilla, CompiledRenderPipeline original) {
-        if (!inHold || window == null) {
+        if (!inHold || drawing == null) {
             return original;
         }
-        CompiledRenderPipeline c = window.compiled.get(vanilla);
+        CompiledRenderPipeline c = drawing.compiled.get(vanilla);
         return c != null ? c : original;
     }
 
     /** After the pipeline is set: the pack's uniform block and its other textures. */
     public static void bind(RenderPass pass, CompiledRenderPipeline pipeline) {
-        Family f = window;
+        Family f = drawing;
         Program p = inHold && f != null ? programOf.get(pipeline) : null;
         if (p == null) {
             return;
@@ -413,8 +455,27 @@ public final class EntityTakeover {
                 pass.setUniform(s.name(), v, depthLike ? nearest : linear);
             }
         }
-        if (f.ubo != null && p.layout().size() > 0) {
-            pass.setUniform(ProgramTranslator.UNIFORM_BLOCK, f.ubo.currentBuffer());
+        if (p.layout().size() > 0) {
+            // A buffer per draw: the ids differ from draw to draw. Mapping is CPU work, so it's
+            // fine inside the pass; rotating isn't, and happens at frame start.
+            while (f.rings.size() <= f.slot) {
+                f.rings.add(new MappableRingBuffer(() -> "Luxium " + f.program + " uniforms",
+                        GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_MAP_WRITE, p.layout().size()));
+            }
+            MappableRingBuffer ring = f.rings.get(f.slot++);
+            DrawIds.Ids ids = drawingIds;
+            Function<String, Object> values = frameValues;
+            int stage = f.stage;
+            Function<String, Object> perDraw = name -> switch (name) {
+                case "entityId" -> ids == null ? 0 : ids.entityId();
+                case "blockEntityId" -> ids == null ? 0 : ids.blockEntityId();
+                case "renderStage" -> stage;
+                default -> values.apply(name);
+            };
+            try (GpuBufferSlice.MappedView view = ring.currentBuffer().map(false, true)) {
+                UniformWriter.write(p.layout(), perDraw, p.defaults(), view.data());
+            }
+            pass.setUniform(ProgramTranslator.UNIFORM_BLOCK, ring.currentBuffer());
         }
     }
 
@@ -433,7 +494,6 @@ public final class EntityTakeover {
             case "luxium_ModelViewMatrix" -> modelView;
             case "luxium_ProjectionMatrix" -> projection;
             case "luxium_TextureMatrix" -> textureMatrices;
-            case "renderStage" -> STAGE_ENTITIES;
             default -> values.apply(name);
         };
     }

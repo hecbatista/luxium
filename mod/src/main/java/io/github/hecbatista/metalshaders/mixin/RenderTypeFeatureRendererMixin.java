@@ -22,7 +22,7 @@ abstract class RenderTypeFeatureRendererMixin {
             target = "Lnet/minecraft/client/renderer/rendertype/PreparedRenderType;drawFromBuffer(Lnet/minecraft/client/renderer/StagedVertexBuffer$ExecuteInfo;Lcom/mojang/renderpearl/api/commands/RenderPass;)V"))
     private void luxium$route(final PreparedRenderType type, final StagedVertexBuffer.ExecuteInfo info, final RenderPass pass,
                               final Operation<Void> original) {
-        if (pass instanceof LevelPass level && EntityTakeover.targetsReady() && EntityTakeover.serves(type.pipeline())) {
+        if (pass instanceof LevelPass level && EntityTakeover.serves(type)) {
             level.suspend();
             RenderPass hold = EntityTakeover.hold();
             EntityTakeover.enterDraw();

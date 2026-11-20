@@ -22,4 +22,11 @@ class ItemIdsTest {
         assertEquals(-1, ids.of("minecraft:dirt"));              // not listed
         assertEquals(Set.of("lantern[hanging=true]", "lantern:hanging=true", "item.bad"), Set.copyOf(ids.skipped()));
     }
+
+    @Test
+    void entityFileUsesItsOwnPrefix() throws Exception {
+        ItemIds ids = ItemIds.parse("entity.50084=slime magma_cube\nitem.1=stone\n", "entity.");
+        assertEquals(50084, ids.of("minecraft:slime"));
+        assertEquals(-1, ids.of("minecraft:stone"));   // an item line isn't an entity
+    }
 }

@@ -27,17 +27,26 @@ public final class ItemIds {
 
     /** Parses an already preprocessed item.properties. */
     public static ItemIds parse(String properties) throws IOException {
+        return parse(properties, "item.");
+    }
+
+    /**
+     * Parses an already preprocessed id file with the given key prefix: "item." for
+     * item.properties, "entity." for entity.properties (Iris IdMap.parseEntityIdMap uses the
+     * same rules as items).
+     */
+    public static ItemIds parse(String properties, String prefix) throws IOException {
         Properties p = new Properties();
         p.load(new StringReader(properties));
         Map<String, Integer> ids = new HashMap<>();
         List<String> skipped = new ArrayList<>();
         for (String key : p.stringPropertyNames().stream().sorted().toList()) {
-            if (!key.startsWith("item.")) {
+            if (!key.startsWith(prefix)) {
                 continue;
             }
             int id;
             try {
-                id = Integer.parseInt(key.substring("item.".length()));
+                id = Integer.parseInt(key.substring(prefix.length()));
             } catch (NumberFormatException e) {
                 skipped.add(key);
                 continue;

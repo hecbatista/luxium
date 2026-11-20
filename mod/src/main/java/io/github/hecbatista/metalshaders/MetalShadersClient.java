@@ -199,6 +199,12 @@ public final class MetalShadersClient implements ClientModInitializer {
                     PackReader.readText(shaders, "/item.properties").orElse(""));
             ItemIds itemIds = ItemIds.parse(PropertiesPreprocessor.preprocess(items, propertyDefines));
             GAME_UNIFORMS.setItemIds(itemIds);
+            String entities = PackReader.open(pack, (name, root, shaders) ->
+                    PackReader.readText(shaders, "/entity.properties").orElse(""));
+            ItemIds entityIds = ItemIds.parse(PropertiesPreprocessor.preprocess(entities, propertyDefines), "entity.");
+            io.github.hecbatista.metalshaders.render.DrawIds.setEntityIds(entityIds);
+            LOGGER.info("entity.properties: {} entity types numbered (pig={}, slime={})", entityIds.size(),
+                    entityIds.of("minecraft:pig"), entityIds.of("minecraft:slime"));
             LOGGER.info("item.properties: {} items numbered, {} entries skipped (block states aren't supported, as in Iris)",
                     itemIds.size(), itemIds.skipped().size());
             customUniforms = CustomUniforms.load(PropertiesPreprocessor.preprocess(properties, propertyDefines),
@@ -329,12 +335,15 @@ public final class MetalShadersClient implements ClientModInitializer {
         // Step 6d-4: the level's solid entities and block entities, drawn by the pack's gbuffers_entities.
         var entitiesV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_entities.vsh", defines);
         var entitiesF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_entities.fsh", defines);
+        var blockV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_block.vsh", defines);
+        var blockF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_block.fsh", defines);
         var entitiesTV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_entities_translucent.vsh", defines);
         var entitiesTF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_entities_translucent.fsh", defines);
         if (PackChain.ready() && entitiesV.ok() && entitiesF.ok()) {
             io.github.hecbatista.metalshaders.render.EntityTakeover.prepare(
                     new String[]{entitiesV.result().text(), entitiesF.result().text()},
                     entitiesTV.ok() && entitiesTF.ok() ? new String[]{entitiesTV.result().text(), entitiesTF.result().text()} : null,
+                    blockV.ok() && blockF.ok() ? new String[]{blockV.result().text(), blockF.result().text()} : null,
                     props);
         } else {
             LOGGER.warn("Entity takeover skipped (the pack lacks gbuffers_entities, or the chain isn't ready)");

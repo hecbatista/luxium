@@ -177,16 +177,24 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
     - Game test: the slime's outer layer is the pack's (entity_translucent). `entity_shadow` stays the game's (no Sampler1).
   - `clouds=off` in shaders.properties (Complementary's default, CLOUD_STYLE_DEFINE = -1) skips `CloudRenderer.render` in `executeClassicTransparency` (Iris ShaderProperties).
   - 0 validation messages, 73 unit tests pass, scoreboard 90/90.
+- **6d-4, third slice (2026-11-20, ✅): entity ids and gbuffers_block.**
+  - `render/DrawIds.java` carries ids from the submission to the draw:
+    - the dispatchers' `submit` (mixins on `EntityRenderDispatcher` / `BlockEntityRenderDispatcher`; block state via `BlockEntityRenderStateAccessor`) sets the current ids;
+    - `SubmitNodeCollection.submitModel/submitCustomGeometry` record RenderType → ids;
+    - `RenderTypeFeatureRenderer$Group.getOrAddDraw` records the PreparedRenderType → ids;
+    - `EntityTakeover` reads them per draw.
+  - One value per draw is right because the game only merges draws with equal pipeline + textures. Two entity types sharing a texture would share an id (Vitrail puts ids on the vertex and never meets that).
+  - `EntityTakeover`: families are chosen per draw. Block entities' solid draws go to `gbuffers_block` (falls back to gbuffers_entities). Each served draw writes its own uniform ring slot with `entityId`, `blockEntityId` and `renderStage` (ENTITIES 11, BLOCK_ENTITIES 12); the rings rotate at `PackChain.beginFrame`.
+  - `entity.properties` is read with `ItemIds.parse(text, "entity.")`. Complementary: 74 types, slime = 50084, pig unlisted = −1.
+  - Game test log: pig entityId −1; slime 50084 (both layers); chest → gbuffers_block with blockEntityId 5008. 0 validation messages, 74 unit tests pass, scoreboard 90/90.
 - **6d-4 handoff (start here next session): what's left of 6d-4.**
-  - **Entity ids** (`entityId`, `blockEntityId`, `currentRenderedItemId`; still 0). Measured plan:
-    - Different entity types almost always have different textures, and `RenderTypeFeatureRenderer.Group` only merges draws whose `PreparedRenderType` (pipeline + textures) is equal. So a per-draw value is right in nearly all cases. Vitrail carries ids on the vertex instead.
-    - Needed:
-      - parse `entity.properties` (like `pack/ItemIds`);
-      - stamp the current entity or block entity on each submit node at submission (find the 26.3 call from `EntityRenderDispatcher` into the `SubmitNodeCollector`);
-      - map each `StagedVertexBuffer.Draw` to it in `buildGroup`;
-      - write a per-draw uniform ring slot in `EntityTakeover.bind` (as `SkyTakeover` does).
-  - Block entities should use `gbuffers_block` (Iris ProgramId.Block, alpha one tenth). This needs the same submission stamp to tell them apart from entities: chests and pigs both use entity_cutout.
-  - Then: the hand (`render3dHud`, after the chain today; Vitrail moves it into the level), particles (`QuadParticleFeatureRenderer` has its own `executeGroup` → gbuffers_textured_lit), weather (gbuffers_weather), glint, beacon beam, lightning, spider eyes (gbuffers_spidereyes).
+  - `currentRenderedItemId` (items and held items: `submitItem` → `ItemFeatureRenderer`, render types inside `ItemQuads`) is still 0.
+  - The `current_player` entity name isn't special-cased yet.
+  - Then:
+    - the hand (`render3dHud`, after the chain today; Vitrail moves it into the level);
+    - particles (`QuadParticleFeatureRenderer` has its own `executeGroup` → gbuffers_textured_lit);
+    - weather (gbuffers_weather);
+    - glint, beacon beam, lightning, spider eyes (gbuffers_spidereyes).
   - Watch: `LevelPass` covers "Main" and the catch only. The OIT path (improved transparency) is untouched.
 - **6e: shadow pass.**
 - Metallum's only Sodium mixin picks the graphics API (`metallum.sodium.mixins.json`: `SodiumPreferredGraphicsApiMixin`). Sodium already draws through the game's RenderPearl API, so Vitrail's Sodium-level hooks should apply on Metal too.

@@ -165,6 +165,13 @@ GNU Lesser General Public License version 3
   gbuffers_entities as Iris's ProgramId fallback does, and render/PackChain.java honours
   clouds=off as net.irisshaders.iris.shaderpack.properties.ShaderProperties reads it.
 
+  src/main/java/io/github/hecbatista/metalshaders/render/DrawIds.java follows Iris for the
+  values of entityId and blockEntityId (0 outside any entity, -1 for one the pack doesn't list;
+  blockEntityId is the block.properties id of the block entity's block state), and
+  pack/ItemIds.java reads entity.properties with the same rules as item.properties
+  (shaderpack.IdMap.parseEntityIdMap). Block entities are drawn with gbuffers_block
+  (pipeline.programs.ShaderKey BLOCK_ENTITY, ProgramId.Block, alpha one tenth).
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3
