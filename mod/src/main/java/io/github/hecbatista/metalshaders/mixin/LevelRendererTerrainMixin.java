@@ -10,6 +10,8 @@ import com.mojang.renderpearl.api.textures.GpuTextureView;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
 import io.github.hecbatista.metalshaders.MetalShadersClient;
+import io.github.hecbatista.metalshaders.render.EntityTakeover;
+import io.github.hecbatista.metalshaders.render.LevelPass;
 import io.github.hecbatista.metalshaders.render.PackChain;
 import io.github.hecbatista.metalshaders.render.TerrainTakeover;
 import net.minecraft.client.Minecraft;
@@ -59,7 +61,28 @@ abstract class LevelRendererTerrainMixin {
         TerrainTakeover.noteSections(sections);
         GpuTextureView atlas = this.textureManager.getTexture(TextureAtlas.LOCATION_BLOCKS).getTextureView();
         TerrainTakeover.drawOpaque(depth, this.chunkLayerSampler, atlas, this.levelRenderState.renderWireframeTerrain);
-        return original.call(encoder, label, color, clear, depth, clearDepth);
+        RenderPass main = original.call(encoder, label, color, clear, depth, clearDepth);
+        // The pack draws the opaque world: hand the level a pass that can step aside for the
+        // pack's entity passes (LevelPass). Clearing never happens on "Main", so reopening is safe.
+        return TerrainTakeover.drewOpaque() && clear.isEmpty() && clearDepth.isEmpty()
+                ? new LevelPass(main, label, color, depth) : main;
+    }
+
+    /** The level's solid features (entities, block entities): the pack's entity window. */
+    @WrapOperation(method = "executeSolid", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;executeSolid(Lcom/mojang/renderpearl/api/commands/RenderPass;)V"))
+    private void luxium$solidFeatures(final FeatureRenderDispatcher.PreparedFrame frame, final RenderPass pass, final Operation<Void> original) {
+        if (!(pass instanceof LevelPass level)) {
+            original.call(frame, pass);
+            return;
+        }
+        level.suspend();   // the window resolves textures and writes a buffer: no pass may be open
+        EntityTakeover.openWindow(MetalShadersClient::value);
+        try {
+            original.call(frame, pass);
+        } finally {
+            EntityTakeover.closeWindow();
+        }
     }
 
     /**

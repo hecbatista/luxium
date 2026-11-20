@@ -150,6 +150,14 @@ GNU Lesser General Public License version 3
   number (WorldRenderingPhase.TERRAIN_TRANSLUCENT). mixin/sodium/DefaultFluidRendererMixin.java
   gives fluid quads the fluid's block id with Iris's fluid bit (SodiumTransformer.replaceMCEntity).
 
+  src/main/java/io/github/hecbatista/metalshaders/glsl/ProgramTranslator.java, draw mode
+  (translateForDraw), follows net.irisshaders.iris.pipeline.transform.transformer.
+  VanillaTransformer for the game's own draws: gl_ModelViewMatrix and gl_TextureMatrix[0] from
+  the DynamicTransforms block (ModelViewMat, TextureMat), gl_Color = Color * ColorModulator,
+  gl_MultiTexCoord1/2 = the UV2 light pair, or full light (240, 240) where the format has none.
+  render/EntityTakeover.java keys the served draws by RenderPipeline and uses Iris's alpha tests
+  for entities (pipeline.programs.ShaderKey ENTITIES_SOLID off, ENTITIES_CUTOUT ONE_TENTH_ALPHA).
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3
@@ -186,6 +194,12 @@ GNU Lesser General Public License version 3
   afterwards (frame.md, "Where the seed does not reach"). mixin/sodium/ChunkVertexMixin.java
   carries the block id on Sodium's vertex object through copyVertexTo, as Vitrail's
   ChunkVertexMixin does. No Vitrail code was copied.
+
+  render/LevelPass.java (the game's "Main" pass made one that can step aside and reopen) and
+  render/EntityTakeover.java (opening the pack's pass over a run of served draws inside
+  RenderTypeFeatureRenderer.executeGroup, the level's solid-feature window) follow designs
+  described in Vitrail's render/LevelPass and docs/internals/entities.md ("The door is a group of
+  draws"). No Vitrail code was copied.
 
 JCPP, https://github.com/shevek/jcpp (org.anarres:jcpp 1.4.14)
 Apache License 2.0

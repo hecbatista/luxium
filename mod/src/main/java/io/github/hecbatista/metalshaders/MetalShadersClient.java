@@ -322,6 +322,16 @@ public final class MetalShadersClient implements ClientModInitializer {
         } else {
             LOGGER.warn("Terrain takeover skipped (the pack lacks gbuffers_terrain, or the chain isn't ready)");
         }
+
+        // Step 6d-4: the level's solid entities and block entities, drawn by the pack's gbuffers_entities.
+        var entitiesV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_entities.vsh", defines);
+        var entitiesF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_entities.fsh", defines);
+        if (PackChain.ready() && entitiesV.ok() && entitiesF.ok()) {
+            io.github.hecbatista.metalshaders.render.EntityTakeover.prepare(
+                    new String[]{entitiesV.result().text(), entitiesF.result().text()});
+        } else {
+            LOGGER.warn("Entity takeover skipped (the pack lacks gbuffers_entities, or the chain isn't ready)");
+        }
     }
 
     /** A short, readable line of the values worth comparing with the F3 screen. */

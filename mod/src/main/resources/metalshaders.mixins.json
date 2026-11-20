@@ -9,6 +9,8 @@
     "GameRendererMixin",
     "GameRendererRenderMixin",
     "LevelRendererTerrainMixin",
+    "PreparedRenderTypeMixin",
+    "RenderTypeFeatureRendererMixin",
     "SkyRendererMixin",
     "sodium.BlockRendererMixin",
     "sodium.ChunkMeshFormatsMixin",

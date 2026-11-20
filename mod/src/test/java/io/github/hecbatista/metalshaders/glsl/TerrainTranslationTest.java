@@ -102,6 +102,26 @@ class TerrainTranslationTest {
         compile(pack.getFileName() + "-water", r);
     }
 
+    @Test
+    void complementaryEntitiesCompileForTheEntityFormat() throws Exception {
+        List<Path> packs = PackReader.findPacks(Path.of("run/shaderpacks"));
+        assumeFalse(packs.isEmpty(), "No packs in run/shaderpacks/");
+        Path pack = packs.getFirst();
+        var vsh = PackPreprocessor.preprocessProgram(pack, "/world0/gbuffers_entities.vsh", StandardDefines.forMac());
+        var fsh = PackPreprocessor.preprocessProgram(pack, "/world0/gbuffers_entities.fsh", StandardDefines.forMac());
+        // DefaultVertexFormat.ENTITY's element names (26.3).
+        ProgramTranslator.Result r = ProgramTranslator.translateForDraw(vsh.result().text(), fsh.result().text(),
+                java.util.Set.of("Position", "Color", "UV0", "UV1", "UV2", "Normal"),
+                new ProgramTranslator.Format(0.1f, true, java.util.Map.of("tex", "Sampler0", "gtexture", "Sampler0", "texture", "Sampler0")));
+        System.out.println("gbuffers_entities (draw mode): inputs " + r.vertexInputs().stream().map(ProgramTranslator.Slot::name).toList()
+                + ", draw buffers " + r.drawBuffers() + ", outputs " + r.fragmentOutputs().stream().map(ProgramTranslator.Slot::name).toList()
+                + ", samplers " + r.samplers().stream().map(ProgramTranslator.Sampler::name).toList());
+        assertTrue(r.vertex().contains("uniform DynamicTransforms"), "reads the draw's transforms");
+        assertTrue(r.fragment().contains(ProgramTranslator.COVERAGE_OUTPUT), "entities write the coverage mask");
+        assertTrue(r.samplers().stream().anyMatch(x -> x.name().equals("Sampler0")), "the skin is the game's Sampler0");
+        compile(pack.getFileName() + "-entities", r);
+    }
+
     /** glslang (Vulkan 1.2) -> spirv-cross MSL -> xcrun metal, as TranslateRealPackTest does. */
     private static void compile(String name, ProgramTranslator.Result r) throws Exception {
         assumeTrue(tool("glslangValidator") && tool("spirv-cross"), "glslang/spirv-cross not installed");

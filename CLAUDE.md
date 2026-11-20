@@ -152,11 +152,28 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
     - The caught layer is the game's finished sRGB colour composed onto the pack's colortex0.
     - Improved transparency (OIT) isn't taken over.
     - Water inputs that the chain hasn't written this frame (gaux4 = colortex7) read last frame's values, as under Iris.
-- **6d-4 handoff (start here next session): entities, block entities, hand, particles, weather, clouds.**
-  - Read Vitrail `docs/internals/entities.md` ("the door is a group of draws") and frame.md "The seed".
-  - Solid entities are drawn by `featureFrame.executeSolid(renderPass)` inside "Main", right after the (skipped) opaque terrain call in `executeSolid`. Translucent ones are drawn in `executeClassicTransparency` (now drawn onto the catch).
-  - They need their own vertex format (`DefaultVertexFormat.ENTITY`, DefaultVertexFormat.java:40; elements by name, through `ProgramTranslator.translateForFormat`), plus `entityId`/`blockEntityId`/`entityColor` per draw.
-  - Entities drawn by the pack must write the coverage mask too, so the seed keeps them.
+- **6d-4, first slice (2026-11-20, ✅): the level's solid entities and block entities drawn by the pack's `gbuffers_entities`.**
+  - How the game draws them (26.3): `executeSolid` → `featureFrame.executeSolid(renderPass)` → each feature renderer's `executeGroup` → `PreparedRenderType.draw` per draw. That call sets the vanilla pipeline, binds `DynamicTransforms` (ModelViewMat, TextureMat, ColorModulator) and the textures (Sampler0 skin, Sampler1 overlay, Sampler2 lightmap) by name, then `drawIndexed`. Every draw shares the level's single "Main" pass.
+  - Pieces:
+    - `render/LevelPass.java`: the game is handed a stand-in for "Main" that forwards every call to a real pass. `suspend()` closes the real pass; the next call reopens it (no clear, default uniforms, debug groups, scissor).
+    - `mixin/LevelRendererTerrainMixin.luxium$solidFeatures` opens the entity window around `featureFrame.executeSolid`.
+    - `mixin/RenderTypeFeatureRendererMixin` routes each `drawFromBuffer`: served pipelines go to the pack's pass (the "hold": gbuffers_entities' targets colortex0/3/6/4 + coverage mask + the game's depth); others go back to the LevelPass, which releases the hold first.
+    - `mixin/PreparedRenderTypeMixin` swaps the pipeline and binds the pack's block and textures right after `setPipeline`.
+    - `render/EntityTakeover.java` serves pipelines with the `ENTITY` format, one unblended target, and depth. Each is compiled on first use with the vanilla state; alpha > 0.1 if the vanilla pipeline defines `ALPHA_CUTOUT`.
+  - Translator: `ProgramTranslator.translateForDraw` + `Format(alphaTest, coverage, samplerRenames)`. Draw mode reads the `DynamicTransforms` block, takes the light from UV2, and renames the pack's albedo sampler (`tex`/`gtexture`/`texture`) → `Sampler0` and `lightmap` → `Sampler2`, so the game's own draw binds them. Format mode now gives full light (240) where a format has no UV2, as Iris does (the sky's average colour didn't change).
+  - Traps found:
+    - `RenderPipeline.getVertexFormatBindings()` has empty (`null`) slots, so check slot 0 and that the rest are null.
+    - `MappableRingBuffer.rotate()` records a command, so do it only when no pass is open.
+  - Game test (scene gains a pig with NoAI and a chest): both are drawn by the pack (pipelines entity_cutout and entity_cutout_cull). Their average colour moves (pig 157/118/114 → 147/123/127). 0 validation messages, 73 unit tests pass, scoreboard 90/90.
+  - New debug switch: `LUXIUM_NO_ENTITIES=1`.
+- **6d-4 handoff (start here next session): the rest of 6d-4.**
+  - Per-draw ids:
+    - `entityId`, `blockEntityId` and `currentRenderedItemId` are still 0. Vitrail carries them on the vertex: an extra element on a format object of its own, set at submission (entities.md "What rides on the vertex").
+    - `entityColor` (hit flash) should come from the overlay texture `Sampler1` at UV1 (Iris and Vitrail do it in a wrapper around main).
+  - Block entities should use `gbuffers_block` (Iris ProgramId.Block, alpha one tenth); today they share gbuffers_entities.
+  - Translucent entities (`executeTranslucent` → the catch today) → `gbuffers_entities_translucent` after the deferred cut.
+  - Then: the hand (`render3dHud`, after the chain today; Vitrail moves it into the level), particles (`QuadParticleFeatureRenderer` has its own `executeGroup`), weather, clouds, glint, beacon beam, lightning, spider eyes.
+  - Watch: `LevelPass` covers only "Main". The OIT path (improved transparency) is untouched.
 - **6e: shadow pass.**
 - Metallum's only Sodium mixin picks the graphics API (`metallum.sodium.mixins.json`: `SodiumPreferredGraphicsApiMixin`). Sodium already draws through the game's RenderPearl API, so Vitrail's Sodium-level hooks should apply on Metal too.
 

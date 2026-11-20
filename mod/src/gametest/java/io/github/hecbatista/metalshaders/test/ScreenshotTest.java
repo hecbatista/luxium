@@ -19,7 +19,7 @@ import java.util.stream.Stream;
  * {@code ./gradlew runClientGameTest}; screenshots land in build/run/clientGameTest/screenshots/.
  * <p>
  * The scene, made with commands at noon in clear weather: a stone floor and a sealed glass box
- * full of water, an oak-log block, a gold block and a leaves block. Shot 1 looks at the box from
+ * full of water, an oak-log block, a gold block, a leaves block, a pig and a chest. Shot 1 looks at the box from
  * outside; shot 2 is from inside the water.
  */
 @SuppressWarnings("UnstableApiUsage")
@@ -47,6 +47,9 @@ public class ScreenshotTest implements FabricClientGameTest {
             server.runCommand("fill 8 100 9 12 101 12 minecraft:gold_block");
             // Cutout terrain (leaves are drawn in Sodium's cutout pass, not the solid one).
             server.runCommand("fill 8 100 -6 11 101 -3 minecraft:oak_leaves[persistent=true]");
+            // Entities: a mob that stands still, and a block entity.
+            server.runCommand("summon minecraft:pig -4 100 -7 {NoAI:1b,Rotation:[150f,0f]}");
+            server.runCommand("setblock -7 100 -5 minecraft:chest[facing=north]");
 
             // Shot 1: outside, looking down at the box (yaw 0 faces +z, pitch 25 looks down a bit).
             server.runCommand("tp @a 0 104 -14 0 25");
