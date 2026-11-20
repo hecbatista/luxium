@@ -96,6 +96,15 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
     - The seed discards where `mask` matches the raw world depth within 4 ULP (`floatBitsToInt`).
     - Game test: picture identical to before, 0 validation messages.
     - Next: the sky.
+  - Sky ✅ (2026-11-20):
+    - `render/SkyTakeover.java` + `mixin/SkyRendererMixin.java` (MixinExtras `@WrapOperation`) open vanilla's sky pass on colortex0.
+    - Vanilla's SKY/STARS/SUNRISE_SUNSET pipelines are swapped for gbuffers_skybasic and CELESTIAL for gbuffers_skytextured. Each is compiled with `ProgramTranslator.translateForFormat` for that pipeline's vertex format, and copies the pipeline's topology, blend and depth state.
+    - The per-piece model-view and color come from `DynamicGpuData.writeTransform`, and renderStage from the piece's debug label. The sun/moon texture (Sampler0) is bound under the pack's albedo names. The End isn't taken over.
+    - Format mode adds a vertex epilogue `z' = (w - z) / 2` (OpenGL clip depth onto the shared reversed-Z buffer).
+    - `UniformWriter` writes mat4 arrays (luxium_TextureMatrix).
+  - **Big bug found and fixed:** the chain ran after `GameRenderer.renderLevel()`, but `render3dHud` clears the depth (`GameRenderer.java:689`) before drawing the hand. So the chain always saw depth 0 (CPU readback: 100% zeros), and composites treated everything as sky. The chain now runs before `render3dHud`. This also fixed the near-black underwater shot.
+  - Debug: `LUXIUM_SHOW=rawdepth|maindepth`, `LUXIUM_SHOW_SCALE=<n>`, `LUXIUM_DEPTH_PROBE=1` (CPU readback of the game's depth).
+  - Result: land shows the scene under Complementary's sky gradient (the white streak is gone), underwater is visible and tinted, and there are 0 validation messages.
 - **6d-2: terrain through Sodium.** Vitrail hooks in at a handful of points without rewriting Sodium's meshing:
   - the per-pass pipeline compile (memoised by render pass)
   - the chunk vertex-format accessor (only at renderer rebuild; Sodium 0.9.2's shared geometry arena bakes the stride and needs its own mixin)

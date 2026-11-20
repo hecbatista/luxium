@@ -236,6 +236,19 @@ public final class MetalShadersClient implements ClientModInitializer {
         }
         LOGGER.info("Chain: {} passes in order {}, scales {}", programs.size(), programs.stream().map(Map.Entry::getKey).toList(), scales);
         PackChain.prepare(plan, programs, scales, noise);
+
+        // Step 6d-1: the sky, drawn by the pack's own sky programs.
+        var skybasicV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_skybasic.vsh", defines);
+        var skybasicF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_skybasic.fsh", defines);
+        var skytexV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_skytextured.vsh", defines);
+        var skytexF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_skytextured.fsh", defines);
+        if (PackChain.ready() && skybasicV.ok() && skybasicF.ok() && skytexV.ok() && skytexF.ok()) {
+            io.github.hecbatista.metalshaders.render.SkyTakeover.prepare(
+                    new String[]{skybasicV.result().text(), skybasicF.result().text()},
+                    new String[]{skytexV.result().text(), skytexF.result().text()});
+        } else {
+            LOGGER.warn("Sky takeover skipped (the pack lacks a sky program, or the chain isn't ready)");
+        }
     }
 
     /** A short, readable line of the values worth comparing with the F3 screen. */

@@ -267,7 +267,10 @@ public final class PackChain {
                     encoder.clearColorTexture(e.getValue()[current.get(e.getKey())], clearColor(t));
                 }
             }
-            encoder.clearColorTexture(coverage, new Vector4f(COVERAGE_NOTHING));
+            // When the pack draws the sky, every pixel the game draws nothing in front of is the
+            // pack's: the sky stands at the far plane, which is reversed-Z 0.
+            encoder.clearColorTexture(coverage, new Vector4f(SkyTakeover.active() ? 0.0f : COVERAGE_NOTHING));
+            SkyTakeover.beginFrame(device, encoder);
         } catch (RuntimeException e) {
             fail("beginFrame threw", e);
         }
@@ -286,6 +289,7 @@ public final class PackChain {
             // (Clears happen in beginFrame, before the world is drawn.)
             // 2. Stand-ins: vanilla's depth, and vanilla's image as colortex0.
             encoder.copyTextureToTexture(target.getDepthTexture(), depthCopy, 0, 0, 0, 0, 0, width, height);
+            probeDepth(device, encoder, target);
             try (RenderPass convert = encoder.createRenderPass(() -> "Luxium depth to OpenGL convention", depthConvertedView, Optional.empty())) {
                 convert.setPipeline(depthPipeline);
                 convert.setUniform("reversedDepth", depthCopyView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
@@ -391,9 +395,11 @@ public final class PackChain {
                     void main() {
                         vec4 c = texture(shown, uv);
                         bool bad = any(isnan(c)) || any(isinf(c));
-                        color = bad ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(abs(c.rgb), 1.0);
+                        color = bad ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(abs(c.rgb) * SCALE, 1.0);
                     }
                     """;
+            // LUXIUM_SHOW_SCALE multiplies what is shown, to make tiny values (raw depth) visible.
+            fragment = fragment.replace("SCALE", System.getenv().getOrDefault("LUXIUM_SHOW_SCALE", "1.0"));
             showPipeline = device.compilePipeline(RenderPipeline.builder()
                             .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/show"))
                             .withVertexShader(shader).withFragmentShader(shader)
@@ -403,12 +409,45 @@ public final class PackChain {
                     new LuxiumShaderSource().put(shader, ShaderType.VERTEX, vertex).put(shader, ShaderType.FRAGMENT, fragment),
                     Runnable::run).join().finishCompile();
         }
-        GpuTextureView view = input(device, encoder, show);
+        GpuTextureView view = show.equals("rawdepth") ? depthCopyView
+                : show.equals("maindepth") ? target.getDepthTextureView() : input(device, encoder, show);
         try (RenderPass rp = encoder.createRenderPass(() -> "Luxium debug show " + show, target.getColorTextureView(), Optional.empty())) {
             rp.setPipeline(showPipeline);
             rp.setUniform("shown", view, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
             rp.draw(3, 1, 0, 0);
         }
+    }
+
+    private static long lastProbe;
+
+    /** Debug (LUXIUM_DEPTH_PROBE=1): reads the game's depth back to the CPU every 5 s and logs its range. */
+    private static void probeDepth(GpuDevice device, CommandEncoder encoder, RenderTarget target) {
+        if (System.getenv("LUXIUM_DEPTH_PROBE") == null || System.nanoTime() - lastProbe < 5_000_000_000L) {
+            return;
+        }
+        lastProbe = System.nanoTime();
+        int w = target.width;
+        int h = target.height;
+        GpuBuffer buf = device.createBuffer(() -> "Luxium depth probe", GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_MAP_READ, (long) w * h * 4);
+        encoder.copyTextureToBuffer(target.getDepthTexture(), buf, 0, () -> {
+            try (GpuBufferSlice.MappedView v = buf.map(true, false)) {
+                java.nio.FloatBuffer f = v.data().order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer();
+                float min = Float.MAX_VALUE, max = -Float.MAX_VALUE;
+                int zeros = 0;
+                for (int i = 0; i < f.limit(); i++) {
+                    float d = f.get(i);
+                    min = Math.min(min, d);
+                    max = Math.max(max, d);
+                    if (d == 0f) {
+                        zeros++;
+                    }
+                }
+                MetalShadersClient.LOGGER.info("Depth probe (game depth, CPU readback): min {} max {}, {}% exactly 0",
+                        min, max, String.format("%.1f", 100.0 * zeros / f.limit()));
+            } finally {
+                buf.close();
+            }
+        }, 0);
     }
 
     private static GpuTexture worldCopyTex;
@@ -426,6 +465,27 @@ public final class PackChain {
         }
         encoder.copyTextureToTexture(target.getColorTexture(), worldCopyTex, 0, 0, 0, 0, 0, target.width, target.height);
         return worldCopyTex;
+    }
+
+    // ---- For pack programs drawn during the world (6d) ----------------------------------------
+
+    /** The half a geometry program draws into (the current one: geometry passes don't flip). */
+    public static GpuTextureView gbufferTarget(int index) {
+        return halfViews.containsKey(index) ? view(index, true) : null;
+    }
+
+    public static GpuFormat targetFormat(int index) {
+        return plan.target(index).format();
+    }
+
+    public static boolean promoted(int index) {
+        return plan.target(index).promoted();
+    }
+
+    /** What a sampler name reads. Creates placeholders, so call it outside any render pass. */
+    public static GpuTextureView inputView(String name) {
+        GpuDevice device = RenderSystem.getDevice();
+        return input(device, device.createCommandEncoder(), name);
     }
 
     /** What a sampler name reads. */

@@ -30,8 +30,13 @@ abstract class GameRendererRenderMixin {
         PackChain.beginFrame(this.mainRenderTarget());
     }
 
-    @Inject(method = "render", at = @At(value = "INVOKE",
-            target = "Lnet/minecraft/client/renderer/GameRenderer;renderLevel()V", shift = At.Shift.AFTER))
+    /**
+     * Right after the level renderer returns, before render3dHud: that method clears the depth
+     * (GameRenderer.java:689) and draws the hand. Running here keeps the world's depth and lets
+     * the game draw the hand over the pack's finished image.
+     */
+    @Inject(method = "renderLevel", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/client/renderer/GameRenderer;render3dHud(Lnet/minecraft/client/renderer/state/level/CameraRenderState;Lnet/minecraft/client/renderer/state/level/PlayerRenderState;Lnet/minecraft/client/renderer/state/OptionsRenderState;Z)V"))
     private void luxium$afterWorld(final CallbackInfo ci) {
         PackChain.draw(this.mainRenderTarget(), MetalShadersClient::value);
     }
