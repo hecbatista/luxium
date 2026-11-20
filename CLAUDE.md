@@ -1,13 +1,41 @@
-# metal-shaders
+# Luxium
+
+GitHub repo: `hecbatista/luxium` (renamed from `metal-shaders` on 2026-11-20; GitHub redirects the old URL). The local folder is still `metal-shaders/`.
 
 ## Goal
 Load and run Iris/OptiFine-format shader packs (the `shaderpacks/` format) on Minecraft's **Metal** backend provided by the Metallum mod, on Apple Silicon macOS.
 
-Status (2026-11-20): steps 1–3 of 7 done. `mod/` loads next to Metallum and, at startup, logs each pack in `shaderpacks/`: its shaders folder, world-to-folder map and program-file counts (`pack/PackReader.java`). The preprocessor (`pack/IncludeExpander.java`, then `pack/GlslPreprocessor.java` using JCPP, with `pack/StandardDefines.java`) runs in tests only, not yet in the game. Rendering isn't touched.
+Status (2026-11-20): steps 1–4 of 7 done; nothing draws yet. `mod/` loads next to Metallum and, at startup, logs each pack in `shaderpacks/`: its shaders folder, world-to-folder map and program-file counts (`pack/PackReader.java`). Two pieces run in tests only, not yet in the game:
+- The preprocessor: `pack/IncludeExpander.java`, then `pack/GlslPreprocessor.java` (using JCPP), with `pack/StandardDefines.java`.
+- The translator: `glsl/GlslTokenizer.java` → `glsl/Declarations.java` → `glsl/ProgramTranslator.java`, our own code with no glsl-transformer.
 
-Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor ✅ (pack's default settings only) · 4 translator (GLSL → Vulkan-style GLSL; goal: every Complementary program compiles to MSL outside the game) · 5 uniforms · 6 render pipeline · 7 polish.
+Rendering isn't touched.
+
+Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor ✅ (pack's default settings only) · 4 translator ✅ v1 (compiles; correctness comes in step 6) · 5 uniforms · 6 render pipeline · 7 polish.
+
+Step 4 result: `TranslateRealPackTest` (the scoreboard) translates every vertex+fragment program, then runs glslang for Vulkan 1.2 with only `--auto-map-bindings` (no `-R`, no `--aml`), spirv-cross with Metallum's MSL options, and `xcrun metal`. On Complementary that's **90/90** programs: 30 per world, excluding dh_/clrwl_/voxy programs that need mods we don't have. A reflection check (`spirv-cross --reflect`) found 0 vertex/fragment interface mismatches. Outputs go to `mod/build/translated/<pack>/`, plus `scoreboard.txt`.
+
+Translator v1 only makes programs **compile**. These things are known to matter for drawing correctly and aren't handled yet:
+- `gl_FragCoord` origin: GL is bottom-left, Vulkan/Metal are top-left.
+- Reversed-Z depth: Iris's `iris_undoRevZ`, and Vitrail converting the depth image.
+- `texture()` on samplers without mips: Vitrail pins these to level 0.
+- `invariant gl_Position` against Metal fast-math.
+- `packUnorm*` on Apple Silicon: Vitrail found it wrong through MoltenVK.
+- `gl_VertexID` → `gl_VertexIndex`: this adds base vertex.
+- `gl_TextureMatrix` is assumed to be `mat4[8]`.
+- .csh/.gsh programs aren't translated.
+- Placeholder names (`luxium_ModelViewMatrix`, `luxium_Vertex`…) need real values in steps 5–6.
 
 Tests: `./gradlew test` in `mod/` (JUnit, no game needed). `RealPackTest` preprocesses every pack in `mod/run/shaderpacks/` into `mod/build/preprocessed/`, and then `mod/scripts/check-preprocessed.sh` validates that output with glslangValidator. Result on Complementary (2026-11-20): 219/219 programs preprocess in about 2 s, and 189 pass glslang. All 30 failures are explained in the script header (they need Distant Horizons, Colorwheel, colored lighting, or Iris-injected built-ins).
+
+Step 4 findings (2026-11-20):
+- **glsl-transformer, the GLSL parser Iris uses, is AGPL-3.0.** Its README says software that uses it "must itself be licensed as AGPLv3" (Iris has a special exception). Don't add it unless the user chooses AGPL.
+- Baseline: `experiments/02-translation-baseline/run.sh` adds crude `#define` stand-ins for the old built-ins. With them, 59/60 world0 programs reach SPIR-V and 59/59 compile to Metal. That run cheats with glslang `-R` (lets loose uniforms through) and `--aml` (numbers each stage's in/out slots separately). The real translator still has to:
+  - put loose uniforms in one block per program
+  - give in/out slots that match between the two stages by name
+  - map fragment outputs from DRAWBUFFERS/RENDERTARGETS
+  - add Iris's injected names (`projectionMatrix`, `modelViewMatrix`, `vaPosition`…), which `gbuffers_line` needs
+- The highest sampler index is composite1's 14, just under Metal's 16-per-stage limit.
 
 Known gaps: user-changed pack settings aren't applied yet; only the defaults written in the pack are used. `shaders.properties` and `dimension.properties` aren't preprocessed yet (Iris does it at `ShaderPack.java:126` and in `PropertiesPreprocessor`), so `#if` lines in them are ignored. Credits for borrowed Iris material are in `mod/NOTICE`. The repo has **no LICENSE yet**, and the LGPL material in NOTICE affects which license fits.
 

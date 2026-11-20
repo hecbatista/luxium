@@ -1,5 +1,5 @@
-Third-party material in Metal Shaders
-====================================
+Third-party material in Luxium
+==============================
 
 The files below reproduce material from another project, such as a table, a rule or a
 technique, because shader packs are written against that project's behavior. The material
@@ -38,6 +38,26 @@ GNU Lesser General Public License version 3
   formats MC_VERSION and IRIS_VERSION the way
   net.irisshaders.iris.gl.shader.StandardMacros.formatVersionString does. Which other names
   are defined is our own choice, documented in the file.
+
+  src/main/java/io/github/hecbatista/metalshaders/glsl/ProgramTranslator.java follows two
+  Iris rules: the DRAWBUFFERS / RENDERTARGETS comment directive, where the last one in the
+  program wins (net.irisshaders.iris.shaderpack.parsing.CommentDirectiveParser, as described
+  in Vitrail's docs/translation.md); and the set of core-profile names Iris supplies when a
+  pack uses them without declaring them (projectionMatrix, modelViewMatrix, vaPosition,
+  vaNormal, ...; net.irisshaders.iris.pipeline.transform.transformer.CompositeCoreTransformer,
+  SodiumCoreTransformer and VanillaCoreTransformer). Changed: those names are only declared
+  so the program compiles. Iris's replacement expressions aren't reproduced.
+
+Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
+Copyright the Vitrail contributors
+GNU Lesser General Public License version 3
+
+  src/main/java/io/github/hecbatista/metalshaders/glsl/ProgramTranslator.java translates a
+  vertex and fragment stage together, as one program: one uniform block holding the union of
+  both stages' uniforms in a fixed order, and one shared table of in/out locations by name,
+  with a matrix taking one location per column. This design is described in Vitrail's
+  docs/translation.md ("The unit of translation is the program, not the file"). No Vitrail
+  code was read or copied for it.
 
 JCPP, https://github.com/shevek/jcpp (org.anarres:jcpp 1.4.14)
 Apache License 2.0
