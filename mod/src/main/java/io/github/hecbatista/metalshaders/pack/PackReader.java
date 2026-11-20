@@ -55,24 +55,54 @@ public final class PackReader {
         }
     }
 
-    /** Opens a pack (a .zip file or a folder), reads its layout, and closes it again. */
-    public static PackInfo read(Path pack) throws IOException {
+    /** Work to do while a pack is open. {@code shaders} is the pack's shaders/ folder. */
+    @FunctionalInterface
+    public interface OpenPackAction<T> {
+        T run(String name, Path packRoot, Path shaders) throws IOException;
+    }
+
+    /**
+     * Opens a pack (a .zip file or a folder), finds its shaders/ folder, runs {@code action},
+     * and closes the pack again. Paths given to {@code action} stop working once it returns.
+     */
+    public static <T> T open(Path pack, OpenPackAction<T> action) throws IOException {
         String name = pack.getFileName().toString();
         if (isZip(pack)) {
-            name = name.substring(0, name.length() - ".zip".length());
+            String zipName = name.substring(0, name.length() - ".zip".length());
             try (FileSystem zip = FileSystems.newFileSystem(pack)) {
-                return readFrom(name, zip.getPath("/"));
+                Path root = zip.getPath("/");
+                return action.run(zipName, root, shadersFolderOrThrow(zipName, root));
             }
         }
         if (Files.isDirectory(pack)) {
-            return readFrom(name, pack);
+            return action.run(name, pack, shadersFolderOrThrow(name, pack));
         }
         throw new IOException("Not a shader pack (neither a .zip nor a folder): " + name);
     }
 
-    private static PackInfo readFrom(String name, Path packRoot) throws IOException {
-        Path shaders = findShadersFolder(packRoot)
+    /** Opens a pack, reads its layout, and closes it again. */
+    public static PackInfo read(Path pack) throws IOException {
+        return open(pack, PackReader::readFrom);
+    }
+
+    /**
+     * Reads a text file by its path relative to shaders/ ("/lib/common.glsl"). Empty if missing.
+     * Refuses paths that would leave shaders/. Bad UTF-8 is replaced rather than failing.
+     */
+    public static Optional<String> readText(Path shaders, String packPath) throws IOException {
+        Path file = shaders.resolve(IncludeExpander.normalize(packPath).substring(1)).normalize();
+        if (!file.startsWith(shaders) || !Files.isRegularFile(file)) {
+            return Optional.empty();
+        }
+        return Optional.of(new String(Files.readAllBytes(file), StandardCharsets.UTF_8));
+    }
+
+    private static Path shadersFolderOrThrow(String name, Path packRoot) throws IOException {
+        return findShadersFolder(packRoot)
                 .orElseThrow(() -> new IOException("No \"shaders\" folder in pack " + name));
+    }
+
+    private static PackInfo readFrom(String name, Path packRoot, Path shaders) throws IOException {
         String shadersRoot = relative(packRoot, shaders);
 
         SortedMap<String, String> dimensionFolders = loadProperties(shaders.resolve("dimension.properties"))

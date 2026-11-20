@@ -1,0 +1,44 @@
+Third-party material in Metal Shaders
+====================================
+
+The files below reproduce material from another project, such as a table, a rule or a
+technique, because shader packs are written against that project's behavior. The material
+is reused under that project's own terms. No source code was copied in any of these cases:
+each file is our own code, written after reading the original.
+
+Iris, https://github.com/IrisShaders/Iris (branch 26.3, commit 671a5c87)
+Copyright the Iris contributors
+GNU Lesser General Public License version 3
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/PackReader.java follows Iris's rules
+  for finding a pack's "shaders" folder (net.irisshaders.iris.Iris, loadExternalZipShaderpack),
+  for which file extensions are programs
+  (net.irisshaders.iris.shaderpack.include.ShaderPackSourceNames), and for mapping worlds to
+  folders from dimension.properties or from the world0 / world-1 / world1 folder names
+  (net.irisshaders.iris.shaderpack.ShaderPack). Changed: the "shaders" folder search is
+  depth-limited and sorted, where Iris's has no limit and no fixed order.
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/IncludeExpander.java follows Iris's
+  #include rules: how an include line is recognized and its path resolved
+  (net.irisshaders.iris.shaderpack.include.FileNode and AbsolutePackPath), and that every
+  include is expanded before #if is evaluated, so a cycle is an error
+  (net.irisshaders.iris.shaderpack.include.IncludeGraph). Changed: a cap on total lines
+  written and on nesting depth, which Iris doesn't have.
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/GlslPreprocessor.java adapts a
+  technique from net.irisshaders.iris.shaderpack.preprocessor.JcppProcessor and
+  GlslCollectingListener (which credit GlShader from Canvas, LGPL): #version and #extension
+  are hidden from JCPP as #warning lines, so only the ones on live lines come back, and they
+  are then hoisted to the top of the output. Changed: our own marker names, our own handling
+  of the warning text, and JCPP errors are collected and reported instead of logged.
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/StandardDefines.java contains the
+  render stage table (names and their order) of the enum
+  net.irisshaders.iris.pipeline.WorldRenderingPhase, used as MC_RENDER_STAGE_* values, and
+  formats MC_VERSION and IRIS_VERSION the way
+  net.irisshaders.iris.gl.shader.StandardMacros.formatVersionString does. Which other names
+  are defined is our own choice, documented in the file.
+
+JCPP, https://github.com/shevek/jcpp (org.anarres:jcpp 1.4.14)
+Apache License 2.0
+  Used as a library dependency, unmodified.

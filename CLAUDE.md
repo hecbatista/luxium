@@ -3,11 +3,13 @@
 ## Goal
 Load and run Iris/OptiFine-format shader packs (the `shaderpacks/` format) on Minecraft's **Metal** backend provided by the Metallum mod, on Apple Silicon macOS.
 
-Status (2026-11-20): steps 1–2 of 7 done. `mod/` loads next to Metallum and, at startup, logs each pack in `shaderpacks/`: its shaders folder, world-to-folder map and program-file counts (`pack/PackReader.java`). It doesn't read shader code or touch rendering yet.
+Status (2026-11-20): steps 1–3 of 7 done. `mod/` loads next to Metallum and, at startup, logs each pack in `shaderpacks/`: its shaders folder, world-to-folder map and program-file counts (`pack/PackReader.java`). The preprocessor (`pack/IncludeExpander.java`, then `pack/GlslPreprocessor.java` using JCPP, with `pack/StandardDefines.java`) runs in tests only, not yet in the game. Rendering isn't touched.
 
-Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor (`#include`, `#if`, settings, `MC_OS_MAC`) · 4 translator (GLSL → Vulkan-style GLSL; goal: every Complementary program compiles to MSL outside the game) · 5 uniforms · 6 render pipeline · 7 polish. Tests: `./gradlew test` in `mod/` (JUnit, no game needed).
+Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor ✅ (pack's default settings only) · 4 translator (GLSL → Vulkan-style GLSL; goal: every Complementary program compiles to MSL outside the game) · 5 uniforms · 6 render pipeline · 7 polish.
 
-Known gap: `dimension.properties` is read as plain properties. Iris preprocesses it first (`ShaderPack.java:126`), so `#if` lines in it are ignored until step 3.
+Tests: `./gradlew test` in `mod/` (JUnit, no game needed). `RealPackTest` preprocesses every pack in `mod/run/shaderpacks/` into `mod/build/preprocessed/`, and then `mod/scripts/check-preprocessed.sh` validates that output with glslangValidator. Result on Complementary (2026-11-20): 219/219 programs preprocess in about 2 s, and 189 pass glslang. All 30 failures are explained in the script header (they need Distant Horizons, Colorwheel, colored lighting, or Iris-injected built-ins).
+
+Known gaps: user-changed pack settings aren't applied yet; only the defaults written in the pack are used. `shaders.properties` and `dimension.properties` aren't preprocessed yet (Iris does it at `ShaderPack.java:126` and in `PropertiesPreprocessor`), so `#if` lines in them are ignored. Credits for borrowed Iris material are in `mod/NOTICE`. The repo has **no LICENSE yet**, and the LGPL material in NOTICE affects which license fits.
 
 Target pack: **Complementary Unbound r5.10**. Its license (Complementary License Agreement 1.8) forbids redistributing or modifying it, so never commit any of its files. The mod must run it unmodified. Under Iris's `MC_OS_MAC` define, the pack forces `COLORED_LIGHTING 0`, which turns off its compute, SSBO and 3D-image features.
 
@@ -17,7 +19,8 @@ metal-shaders/
 ├── CLAUDE.md                  this file
 ├── .mcp.json                  project-scoped MCP server: apple-docs
 ├── .claude/skills/axiom-graphics/   Metal/GLSL→MSL reference skill (copied from CharlesWiltgen/Axiom, MIT)
-├── mod/                       OUR mod (Fabric, id `metalshaders`, package io.github.hecbatista.metalshaders)
+├── mod/                       OUR mod, display name **Luxium** (Fabric, id `metalshaders`, package io.github.hecbatista.metalshaders)
+├── branding/                  Luxium icon (`make_icon.py` draws it and copies icon.png into the mod)
 ├── experiments/               small out-of-game tests (01-glsl-to-metal: GLSL → SPIR-V → MSL → metallib)
 └── references/                read-only reference code; do not edit, build our own code elsewhere
     ├── metallum/              kokodio/metallum: the Metal backend we build on (MIT)
@@ -71,7 +74,7 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 ./gradlew runClient
 ```
 - Why the local Metallum jar and not Modrinth's `metallum-mc` 0.0.25 (2026-10-10): the local clone has two more commits, including `5bee03e fix: synchronize MetalDevice.getOrCompileFunction()`, a thread-safety fix in shader compiling.
-- A healthy start of our mod logs `(metalshaders) Metal Shaders loaded. Metallum version: 0.0.25` (confirmed 2026-11-20: title screen normal, zero validation messages). The game directory is `mod/run/`, so packs go in `mod/run/shaderpacks/`.
+- A healthy start of our mod logs `(metalshaders) Luxium loaded. Metallum version: 0.0.25` (the log said "Metal Shaders loaded" before the 2026-11-20 rename; confirmed 2026-11-20: title screen normal, zero validation messages). The game directory is `mod/run/`, so packs go in `mod/run/shaderpacks/`.
 - Closing the game with `kill` makes Gradle print `BUILD FAILED ... exit value 143`. 143 means SIGTERM, so this is expected and not an error.
 - To run plain Metallum without our mod, use the same command from `references/metallum`.
 - Source: `man MetalValidation` (`/usr/share/man/man1/MetalValidation.1`). Any non-zero `MTL_DEBUG_LAYER` enables API validation; any non-zero `MTL_SHADER_VALIDATION` enables GPU validation. More `MTL_DEBUG_LAYER_*` and `MTL_SHADER_VALIDATION_*` options are documented there.
