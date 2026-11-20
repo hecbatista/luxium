@@ -314,7 +314,7 @@ Step 7 (polish), agreed order with the user (2026-11-20): pack settings → Neth
   - Still open:
     - Entity casters are still only the camera-visible ones (the level's prepared solid features).
     - Sections never built because the camera hasn't been near them have no mesh to cast with. Sodium builds from the camera's task lists; the light's task lists are dropped, as in Iris.
-    - `fabric.mod.json` doesn't declare Sodium, though Luxium's terrain needs it (ask the user before adding `"sodium": "*"`).
+    - Sodium is now declared in `fabric.mod.json` (`"sodium": "~0.9.2"`, user-approved 2026-11-20): Luxium's terrain and shadows are drawn through Sodium and its mixins target 0.9.2's internals.
 
 Facts for step 6:
 - **Full-screen passes:** vanilla `PostPass` uses `renderPass.draw(3, 1, 0, 0)` with no vertex buffer. Pack composite vertex shaders expect a quad (`gl_Vertex`, `gl_MultiTexCoord0`), so we need a quad vertex buffer or a special vertex prologue.
