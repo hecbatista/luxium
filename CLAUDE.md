@@ -3,7 +3,9 @@
 ## Goal
 Load and run Iris/OptiFine-format shader packs (the `shaderpacks/` format) on Minecraft's **Metal** backend provided by the Metallum mod, on Apple Silicon macOS.
 
-Status: setup only. No loader or shader code has been written yet.
+Status (2026-11-20): mod skeleton only. `mod/` loads next to Metallum and logs one line; it doesn't load packs or touch rendering yet.
+
+Target pack: **Complementary Unbound r5.10**. Its license (Complementary License Agreement 1.8) forbids redistributing or modifying it, so never commit any of its files. The mod must run it unmodified. Under Iris's `MC_OS_MAC` define, the pack forces `COLORED_LIGHTING 0`, which turns off its compute, SSBO and 3D-image features.
 
 ## Layout
 ```
@@ -11,6 +13,8 @@ metal-shaders/
 ├── CLAUDE.md                  this file
 ├── .mcp.json                  project-scoped MCP server: apple-docs
 ├── .claude/skills/axiom-graphics/   Metal/GLSL→MSL reference skill (copied from CharlesWiltgen/Axiom, MIT)
+├── mod/                       OUR mod (Fabric, id `metalshaders`, package io.github.hecbatista.metalshaders)
+├── experiments/               small out-of-game tests (01-glsl-to-metal: GLSL → SPIR-V → MSL → metallib)
 └── references/                read-only reference code; do not edit, build our own code elsewhere
     ├── metallum/              kokodio/metallum: the Metal backend we build on (MIT)
     ├── iris/                  IrisShaders/Iris: the reference shader-pack implementation, OpenGL (LGPL-3.0)
@@ -55,12 +59,17 @@ metal-shaders/
 - Metallum and the Axiom skill are MIT; keep their copyright notice if any code is copied.
 
 ## Running and testing
-Always test with Metal's API validation and GPU shader validation on:
+Always test with Metal's API validation and GPU shader validation on. To run **our mod** (with Metallum and Sodium):
 ```bash
-cd references/metallum
+cd references/metallum && ./gradlew build   # once: mod/ uses this local jar (commit 467d312)
+cd ../../mod
 export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 ./gradlew runClient
 ```
+- Why the local Metallum jar and not Modrinth's `metallum-mc` 0.0.25 (2026-10-10): the local clone has two more commits, including `5bee03e fix: synchronize MetalDevice.getOrCompileFunction()`, a thread-safety fix in shader compiling.
+- A healthy start of our mod logs `(metalshaders) Metal Shaders loaded. Metallum version: 0.0.25` (confirmed 2026-11-20: title screen normal, zero validation messages). The game directory is `mod/run/`, so packs go in `mod/run/shaderpacks/`.
+- Closing the game with `kill` makes Gradle print `BUILD FAILED ... exit value 143`. 143 means SIGTERM, so this is expected and not an error.
+- To run plain Metallum without our mod, use the same command from `references/metallum`.
 - Source: `man MetalValidation` (`/usr/share/man/man1/MetalValidation.1`). Any non-zero `MTL_DEBUG_LAYER` enables API validation; any non-zero `MTL_SHADER_VALIDATION` enables GPU validation. More `MTL_DEBUG_LAYER_*` and `MTL_SHADER_VALIDATION_*` options are documented there.
 - **Confirmed working (2026-11-20).** The game process got both variables even though the long-running Gradle daemon didn't have them (checked with `ps eww <pid>`), so `--no-daemon` isn't needed. Metal printed `Metal API Validation Enabled` and `Metal GPU Validation Enabled` at startup. If those two lines are missing from a run, validation is off.
 - Baseline (2026-11-20): unmodified Metallum, run under API and GPU validation, reached the title screen, created and loaded a Creative world, flew around for about 40 seconds, and saved and quit. There were **zero Metal validation messages** and the world rendered normally (user-confirmed). Any validation failure after our changes is therefore ours.

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "metalshaders",
+  "version": "${version}",
+  "name": "Metal Shaders",
+  "description": "Experimental: Iris/OptiFine shader packs on Metallum's Metal backend.",
+  "contact": {
+    "sources": "https://github.com/hecbatista/metal-shaders"
+  },
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "io.github.hecbatista.metalshaders.MetalShadersClient"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "~26.3-",
+    "java": ">=25",
+    "metallum": "*"
+  }
+}

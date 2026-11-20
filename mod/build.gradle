@@ -1,0 +1,48 @@
+plugins {
+	id 'net.fabricmc.fabric-loom' version "${loom_version}"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+repositories {
+	// Sodium comes from Modrinth's Maven, the same way Metallum gets it.
+	maven { url "https://api.modrinth.com/maven" }
+}
+
+// The Metallum jar we built and tested locally (see gradle.properties).
+def metallumJar = file("../references/metallum/build/libs/metallum-${project.metallum_version}.jar")
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	implementation "maven.modrinth:sodium:${project.sodium_version}"
+	implementation files(metallumJar)
+}
+
+// Fail early, with a clear message, if Metallum hasn't been built yet.
+tasks.named("compileJava") {
+	doFirst {
+		if (!metallumJar.exists()) {
+			throw new GradleException("Missing ${metallumJar}. Build Metallum first: cd ../references/metallum && ./gradlew build")
+		}
+	}
+}
+
+processResources {
+	inputs.property "version", project.version
+
+	filesMatching("fabric.mod.json") {
+		expand "version": inputs.properties.version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+}
