@@ -204,6 +204,11 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
     - Today `GameRenderer.render3dHud` clears the depth (GameRenderer.java:689) and draws the hand *after* the chain (the chain runs before render3dHud), so the pack never sees it.
     - The pack expects `gbuffers_hand` before the deferred/composite passes. Complementary's composite1 tells hand pixels by depth (`z0 <= 0.56`), so the hand needs its own depth range in depthtex0.
     - Read Iris `pathways/HandRenderer.java` and Vitrail frame.md "The hand is the one family the engine has to move rather than intercept".
+    - 26.3 facts (GameRenderer.java:382-420, 678-723):
+      - `render3dHud` sets the hud projection (`hudProjection.setupPerspective(0.05, depthFar, hudFov, …)`) and clears depth to 0.
+      - `renderItemInHand` queues the hand into its own `handAndScreenSubmitNodeStorage` (`firstPersonHandsAndItemsRenderer.submitHandsWithItems`), prepares it with the GameRenderer's *own* `featureRenderDispatcher` (not the level's), and draws it with `renderAllFeatures` into an "Item in hand" pass on the main target.
+      - So the hand is a separate dispatcher run that the existing entity routing could serve if a window were open around it.
+    - Open question, check before coding: Iris squeezes the hand's clip depth (`HandRenderer.DEPTH = 0.125`: m22 = 0.125, m32 = 0.4375). By my arithmetic that puts hand depth at about 0.66–0.78 in window space, yet Complementary's composite1 treats `z0 <= 0.56` as hand. Work out which convention the pack really expects (OptiFine's `MC_HAND_DEPTH`) before choosing the hand's depth range on reversed-Z.
     - The game test needs a non-spectator player holding something.
   - `currentRenderedItemId` (items and held items: `submitItem` → `ItemFeatureRenderer`, render types inside `ItemQuads`) is still 0.
   - The `current_player` entity name isn't special-cased yet.
