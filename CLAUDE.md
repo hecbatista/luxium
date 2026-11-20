@@ -105,6 +105,15 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
   - **Big bug found and fixed:** the chain ran after `GameRenderer.renderLevel()`, but `render3dHud` clears the depth (`GameRenderer.java:689`) before drawing the hand. So the chain always saw depth 0 (CPU readback: 100% zeros), and composites treated everything as sky. The chain now runs before `render3dHud`. This also fixed the near-black underwater shot.
   - Debug: `LUXIUM_SHOW=rawdepth|maindepth`, `LUXIUM_SHOW_SCALE=<n>`, `LUXIUM_DEPTH_PROBE=1` (CPU readback of the game's depth).
   - Result: land shows the scene under Complementary's sky gradient (the white streak is gone), underwater is visible and tinted, and there are 0 validation messages.
+- **6d-2 handoff (start here next session):**
+  - Read Vitrail `docs/internals/terrain.md` fully, then find the matching Sodium 0.9.2 classes. The Sodium jar is in the Gradle cache: `find ~/.gradle/caches -name 'sodium*mc26.3*.jar'`; decompile with `javap -c` or read sources if present.
+  - Reuse the 6d-1 pieces:
+    - `ProgramTranslator.translateForFormat` (vertex inputs by element name, plus the reversed-Z epilogue). Extend it for Sodium's compact chunk vertex, decoded the way Iris's SodiumTransformer does (`_vert_position` etc.).
+    - The SkyTakeover pattern: per-pipeline compile copying vanilla state, a per-draw MappableRingBuffer UBO, and inputs resolved at `PackChain.beginFrame`.
+    - The coverage mask: terrain must write its fragment depth into the mask as an extra output, so the seed keeps pack-drawn terrain.
+  - Pack data needed: block.properties → mc_Entity ids (parse like `pack/ItemIds`), plus at_tangent and mc_midTexCoord.
+  - Complementary's gbuffers_terrain DRAWBUFFERS lists several targets (check it), so the render pass needs several attachments.
+  - Run deferred1 at "after opaque", before translucents (Vitrail frame.md "The chain is cut in three"). Today the whole chain still runs before render3dHud.
 - **6d-2: terrain through Sodium.** Vitrail hooks in at a handful of points without rewriting Sodium's meshing:
   - the per-pass pipeline compile (memoised by render pass)
   - the chunk vertex-format accessor (only at renderer rebuild; Sodium 0.9.2's shared geometry arena bakes the stride and needs its own mixin)
