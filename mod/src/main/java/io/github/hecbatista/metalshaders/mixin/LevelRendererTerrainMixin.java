@@ -57,8 +57,10 @@ abstract class LevelRendererTerrainMixin {
     private RenderPass luxium$terrainBeforeMain(final CommandEncoder encoder, final Supplier<String> label, final GpuTextureView color,
                                                 final Optional<Vector4fc> clear, final GpuTextureView depth, final OptionalDouble clearDepth,
                                                 final Operation<RenderPass> original,
-                                                @Local(argsOnly = true) final ChunkSectionsToRender sections) {
+                                                @Local(argsOnly = true) final ChunkSectionsToRender sections,
+                                                @Local(argsOnly = true) final FeatureRenderDispatcher.PreparedFrame featureFrame) {
         TerrainTakeover.noteSections(sections);
+        TerrainTakeover.noteFeatureFrame(featureFrame);
         GpuTextureView atlas = this.textureManager.getTexture(TextureAtlas.LOCATION_BLOCKS).getTextureView();
         TerrainTakeover.drawOpaque(depth, this.chunkLayerSampler, atlas, this.levelRenderState.renderWireframeTerrain);
         RenderPass main = original.call(encoder, label, color, clear, depth, clearDepth);

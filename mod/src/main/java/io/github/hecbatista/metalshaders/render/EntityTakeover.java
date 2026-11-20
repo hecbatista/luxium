@@ -94,6 +94,10 @@ public final class EntityTakeover {
         final boolean alwaysTenth;
         /** The hand: Iris's depth squeeze, and the hand's projection (see openHandWindow). */
         boolean hand;
+        /** Drawn into the shadow map: the light's matrices, forward depth, the shadow targets. */
+        boolean shadow;
+        /** Serves blended and unblended pipelines alike (the shadow pass draws both, unblended). */
+        boolean anyBlend;
         /** The vanilla pipeline this family is for, by location (null: chosen by phase). */
         String pipelinePath;
         /** Iris's fixed alpha test for the family (NaN = off), or null for the usual rules. */
@@ -121,7 +125,8 @@ public final class EntityTakeover {
         }
 
         boolean coverage() {
-            return !translucent;   // translucents are drawn after the seed, which is all the mask is for
+            // translucents are drawn after the seed, which is all the mask is for; the shadow map has none
+            return !translucent && !shadow;
         }
 
         Program program(float alpha) throws ProgramTranslator.TranslationException {
@@ -133,7 +138,7 @@ public final class EntityTakeover {
             Program p = byAlpha.get(key);
             if (p == null) {
                 ProgramTranslator.Result r = ProgramTranslator.translateForDraw(glsl[0], glsl[1], elements,
-                        new ProgramTranslator.Format(alpha, coverage(), RENAMES, hand, overlay));
+                        new ProgramTranslator.Format(alpha, coverage(), RENAMES, hand, overlay, shadow));
                 Map<String, String> defaults = new HashMap<>();
                 r.uniforms().forEach(u -> {
                     if (u.defaultValue() != null) {
@@ -184,9 +189,16 @@ public final class EntityTakeover {
     private static final Family LIGHTNING = new Family("gbuffers_lightning", true, 11, DefaultVertexFormat.POSITION_COLOR,
             Set.of("Position", "Color"), false);
     private static final List<Family> BY_PIPELINE = List.of(SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING);
+    /** Entities and block entities in the shadow map (Iris ShaderKey SHADOW_ENTITIES_CUTOUT: ProgramId.ShadowEntities -> Shadow, one tenth). */
+    private static final Family SHADOW_ENTITIES = new Family("shadow", false, 11, DefaultVertexFormat.ENTITY, ELEMENTS, true);
+
+    static {
+        SHADOW_ENTITIES.shadow = true;
+        SHADOW_ENTITIES.anyBlend = true;
+    }
     /** Every family (declared after all of them: static fields initialise in order). */
     private static final List<Family> ALL = List.of(SOLID, BLOCK, TRANSLUCENT, PARTICLES, PARTICLES_TRANSLUCENT, WEATHER, HAND, HAND_TRANSLUCENT,
-            SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING);
+            SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING, SHADOW_ENTITIES);
 
     static {
         HAND.hand = true;
@@ -205,7 +217,7 @@ public final class EntityTakeover {
     }
 
     /** Which part of the level's features is being drawn. */
-    private enum Phase { SOLID, TRANSLUCENT, HAND }
+    private enum Phase { SOLID, TRANSLUCENT, HAND, SHADOW }
     private static final Map<CompiledRenderPipeline, Program> programOf = new IdentityHashMap<>();
     private static int compiledCount;
 
@@ -289,6 +301,31 @@ public final class EntityTakeover {
         open(Phase.HAND, values, List.of(HAND, HAND_TRANSLUCENT));
     }
 
+    /** The shadow program for entities and block entities in the shadow map. */
+    public static void prepareShadowEntities(String[] shadow, Properties properties) {
+        prepareFamily(SHADOW_ENTITIES, shadow, properties, "shadow");
+    }
+
+    /**
+     * Inside the shadow pass, after the opaque terrain: the level's solid features (entities, block
+     * entities) replayed into the shadow map with the pack's shadow program. Their draw list is
+     * already built (the frame was prepared before the level's main pass), and drawing from it only
+     * reads buffers, so the replay leaves the real draw untouched. What isn't served is dropped.
+     */
+    public static void drawShadowCasters(net.minecraft.client.renderer.feature.FeatureRenderDispatcher.PreparedFrame frame,
+                                         Function<String, Object> values) {
+        if (frame == null || !active(SHADOW_ENTITIES)) {
+            return;
+        }
+        holdDepth = ShadowTargets.depthAttachment();
+        open(Phase.SHADOW, values, List.of(SHADOW_ENTITIES));
+        try {
+            frame.executeSolid(DropPass.INSTANCE);
+        } finally {
+            closeWindow();
+        }
+    }
+
     /** The weather program, already resolved through Iris's fallbacks (weather -> textured_lit -> textured -> basic). */
     public static void prepareWeather(String name, String[] weather, Properties properties) {
         prepareFamily(WEATHER, weather, properties, name);
@@ -328,6 +365,9 @@ public final class EntityTakeover {
     private static Family familyFor(DrawIds.Ids ids, RenderPipeline pipeline) {
         if (window == null) {
             return null;
+        }
+        if (window == Phase.SHADOW) {
+            return SHADOW_ENTITIES;
         }
         if (window != Phase.HAND) {
             for (Family f : BY_PIPELINE) {
@@ -392,7 +432,7 @@ public final class EntityTakeover {
         if (targets.size() != 1) {
             return targets.size() + " colour targets";
         }
-        if (f.pipelinePath == null && targets.getFirst().blendFunction().isPresent() != f.translucent) {
+        if (f.pipelinePath == null && !f.anyBlend && targets.getFirst().blendFunction().isPresent() != f.translucent) {
             return f.translucent ? "not blended" : "blended";
         }
         if (pipeline.getDepthStencilState() == null) {
@@ -430,13 +470,18 @@ public final class EntityTakeover {
                 .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/" + f.program + "/" + vanilla.getLocation().getPath()))
                 .withVertexShader(shader).withFragmentShader(shader)
                 .withPrimitiveTopology(vanilla.getPrimitiveTopology())
-                .withCull(vanilla.isCull())
+                .withCull(!f.shadow && vanilla.isCull())
                 .withPolygonMode(vanilla.getPolygonMode())
-                .withDepthStencilState(vanilla.getDepthStencilState())
+                .withDepthStencilState(f.shadow ? new com.mojang.renderpearl.api.pipeline.DepthStencilState(
+                        com.mojang.renderpearl.api.pipeline.CompareOp.LESS_THAN_OR_EQUAL, true) : vanilla.getDepthStencilState())
                 .withVertexBinding(0, f.format);
         Optional<BlendFunction> vanillaBlend = vanilla.getColorTargetStates().getFirst().blendFunction();
         for (int i = 0; i < f.writes.size(); i++) {
             int index = f.writes.get(i);
+            if (f.shadow) {
+                b.withColorTargetState(i, new ColorTargetState(Optional.empty(), ShadowTargets.FORMAT, ColorTargetState.WRITE_ALL));
+                continue;
+            }
             Optional<BlendFunction> fallbackBlend = f.blendOverride != null ? f.blendOverride : vanillaBlend;
             Optional<BlendFunction> blend = TerrainTakeover.blend(f.properties, f.blendProgram != null ? f.blendProgram : f.program, index, fallbackBlend);
             b.withColorTargetState(i, new ColorTargetState(blend, PackChain.targetFormat(index),
@@ -630,7 +675,7 @@ public final class EntityTakeover {
             holdFamily = f;
             RenderPassDescriptor.Builder d = RenderPassDescriptor.builder(() -> "Luxium entities (pack " + f.program + ")");
             for (int index : f.writes) {
-                d.withColorAttachment(PackChain.gbufferTarget(index));
+                d.withColorAttachment(f.shadow ? ShadowTargets.color(index) : PackChain.gbufferTarget(index));
             }
             if (f.coverage()) {
                 d.withColorAttachment(PackChain.coverageTarget());
@@ -728,14 +773,23 @@ public final class EntityTakeover {
         // The hand is drawn under the hud projection (its own field of view), and that's what the
         // hand programs' gl_ProjectionMatrix is (Vitrail frame.md: "the one family whose
         // gl_ProjectionMatrix is not the frame's"); gbufferProjection stays the world's.
+        boolean shadowPass = window == Phase.SHADOW;
         Matrix4f projection = handProjection != null ? new Matrix4f(handProjection)
-                : values.apply("gbufferProjection") instanceof Matrix4fc m ? new Matrix4f(m) : new Matrix4f();
+                : values.apply(shadowPass ? "shadowProjection" : "gbufferProjection") instanceof Matrix4fc m ? new Matrix4f(m) : new Matrix4f();
+        // The draw's pose is camera-relative under the camera's view rotation; seen from the light
+        // it's shadowModelView * inverse(view) * that.
+        Matrix4f shadowFix = new Matrix4f();
+        if (shadowPass && values.apply("shadowModelView") instanceof Matrix4fc smv) {
+            shadowFix = new Matrix4f(smv).mul(new Matrix4f(modelView).invert());
+        }
+        Matrix4f fix = shadowFix;
         Matrix4fc[] textureMatrices = new Matrix4fc[8];
         Arrays.fill(textureMatrices, new Matrix4f());
         textureMatrices[1] = LIGHTMAP_MATRIX;
         return name -> switch (name) {
             case "luxium_ModelViewMatrix" -> modelView;
             case "luxium_ProjectionMatrix" -> projection;
+            case ProgramTranslator.SHADOW_FIX -> fix;
             case "luxium_TextureMatrix" -> textureMatrices;
             default -> values.apply(name);
         };

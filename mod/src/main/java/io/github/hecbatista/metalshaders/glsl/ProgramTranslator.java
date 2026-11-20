@@ -260,15 +260,27 @@ public final class ProgramTranslator {
      *                       for the hand (HandRenderer.DEPTH = 0.125, MC_HAND_DEPTH), so packs can
      *                       tell hand pixels apart (Complementary: depth < 0.56)
      */
-    public record Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames, boolean handDepth, boolean overlay) {
+    public record Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames, boolean handDepth, boolean overlay,
+                         boolean shadow) {
         public Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames) {
-            this(alphaTest, coverage, samplerRenames, false, true);
+            this(alphaTest, coverage, samplerRenames, false, true, false);
         }
 
         public Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames, boolean handDepth) {
-            this(alphaTest, coverage, samplerRenames, handDepth, true);
+            this(alphaTest, coverage, samplerRenames, handDepth, true, false);
+        }
+
+        public Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames, boolean handDepth, boolean overlay) {
+            this(alphaTest, coverage, samplerRenames, handDepth, overlay, false);
         }
     }
+
+    /**
+     * In a shadow-pass game draw, gl_ModelViewMatrix = luxium_ShadowFix * ModelViewMat, where the
+     * engine sets luxium_ShadowFix = shadowModelView * inverse(camera view): the draw's own pose,
+     * seen from the light instead of the camera.
+     */
+    public static final String SHADOW_FIX = "luxium_ShadowFix";
 
     /** The game's overlay texture (hit flash, damage tint), bound by its entity draws (entity.vsh). */
     public static final String OVERLAY_SAMPLER = "Sampler1";
@@ -516,6 +528,10 @@ public final class ProgramTranslator {
             }
             if (elements != null && !dynamic && s.identifiers.contains("gl_Color")) {
                 uniforms.putIfAbsent("luxium_ColorModulator", new Uniform("vec4", "luxium_ColorModulator", "", null));
+            }
+            if (dynamic && format.shadow() && (s.identifiers.contains("gl_ModelViewMatrix") || s.identifiers.contains("gl_NormalMatrix")
+                    || s.identifiers.contains("gl_ModelViewProjectionMatrix") || s.identifiers.contains("ftransform"))) {
+                uniforms.putIfAbsent(SHADOW_FIX, new Uniform("mat4", SHADOW_FIX, "", null));
             }
             if (dynamic && (s.identifiers.contains("gl_ModelViewProjectionMatrix") || s.identifiers.contains("ftransform"))) {
                 uniforms.putIfAbsent("luxium_ProjectionMatrix", new Uniform("mat4", "luxium_ProjectionMatrix", "", null));
@@ -767,10 +783,11 @@ public final class ProgramTranslator {
                         continue;
                     }
                 }
+                String mv = format.shadow() ? "(" + SHADOW_FIX + " * ModelViewMat)" : "ModelViewMat";
                 String expr = switch (name) {
-                    case "gl_ModelViewMatrix" -> "ModelViewMat";
-                    case "gl_NormalMatrix" -> "transpose(inverse(mat3(ModelViewMat)))";
-                    case "gl_ModelViewProjectionMatrix" -> "(luxium_ProjectionMatrix * ModelViewMat)";
+                    case "gl_ModelViewMatrix" -> mv;
+                    case "gl_NormalMatrix" -> "transpose(inverse(mat3(" + mv + ")))";
+                    case "gl_ModelViewProjectionMatrix" -> "(luxium_ProjectionMatrix * " + mv + ")";
                     default -> null;
                 };
                 if (expr != null) {
@@ -877,7 +894,8 @@ public final class ProgramTranslator {
                         : terrain != null
                         ? "vec4 luxium_ftransform() { return luxium_ModelViewProjectionMatrix * luxium_terrain_vertex(); }\n"
                         : dynamic
-                        ? "vec4 luxium_ftransform() { return luxium_ProjectionMatrix * ModelViewMat * vec4(Position, 1.0); }\n"
+                        ? "vec4 luxium_ftransform() { return luxium_ProjectionMatrix * " + (format.shadow() ? SHADOW_FIX + " * " : "")
+                        + "ModelViewMat * vec4(Position, 1.0); }\n"
                         : elements != null
                         ? "vec4 luxium_ftransform() { return luxium_ModelViewProjectionMatrix * vec4(Position, 1.0); }\n"
                         : "vec4 luxium_ftransform() { return luxium_ModelViewProjectionMatrix * luxium_Vertex; }\n");
@@ -950,7 +968,9 @@ public final class ProgramTranslator {
                     : "";
             // Reversed-Z (see the comment above). For the hand, the OpenGL depth d is first squeezed
             // to 0.4375 + 0.125 d (Iris HandRenderer); stored reversed that's 0.5 w - 0.0625 z.
-            String depth = dynamic && format.handDepth()
+            String depth = dynamic && format.shadow()
+                    ? "    gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;\n"   // the shadow map's forward depth
+                    : dynamic && format.handDepth()
                     ? "    gl_Position.z = 0.5 * gl_Position.w - 0.0625 * gl_Position.z;\n"
                     : "    gl_Position.z = (gl_Position.w - gl_Position.z) * 0.5;\n";
             body += "\nvoid main() {\n" + prologue + "    luxium_pack_main();\n" + depth + "}\n";

@@ -359,6 +359,8 @@ public final class MetalShadersClient implements ClientModInitializer {
         if (shadowV.ok() && shadowF.ok()) {
             io.github.hecbatista.metalshaders.render.TerrainTakeover.prepareShadow(
                     new String[]{shadowV.result().text(), shadowF.result().text()}, props);
+            io.github.hecbatista.metalshaders.render.EntityTakeover.prepareShadowEntities(
+                    new String[]{shadowV.result().text(), shadowF.result().text()}, props);
         }
 
         // Step 6d-4: the level's solid entities and block entities, drawn by the pack's gbuffers_entities.

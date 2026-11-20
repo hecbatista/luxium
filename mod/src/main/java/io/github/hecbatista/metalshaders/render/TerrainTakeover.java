@@ -194,6 +194,8 @@ public final class TerrainTakeover {
                 inPass = false;
                 currentPass = null;
             }
+            // Entities and block entities cast shadows too: the level's solid features replayed.
+            EntityTakeover.drawShadowCasters(featureFrame, MetalShadersClient::value);
             // shadowtex1 is the map without translucents: a copy taken between the two halves
             // (Vitrail sky-and-shadows.md "Two maps, one render"); shadowtex0 then has them too.
             ShadowTargets.publishOpaque();
@@ -366,6 +368,13 @@ public final class TerrainTakeover {
 
     public static void noteSections(ChunkSectionsToRender chunkSections) {
         sections = chunkSections;
+    }
+
+    private static net.minecraft.client.renderer.feature.FeatureRenderDispatcher.PreparedFrame featureFrame;
+
+    /** The level's prepared features for this frame (replayed into the shadow map). */
+    public static void noteFeatureFrame(net.minecraft.client.renderer.feature.FeatureRenderDispatcher.PreparedFrame frame) {
+        featureFrame = frame;
     }
 
     /**

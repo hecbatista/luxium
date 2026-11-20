@@ -251,7 +251,9 @@ GNU Lesser General Public License version 3
 
   The shadow pass (render/TerrainTakeover.drawShadow, render/ShadowTargets.java) follows Vitrail's
   docs/sky-and-shadows.md: forward depth for the shadow map (cleared to 1, less-or-equal), the
-  shadow pair as the pass's fixed-function matrices, both faces drawn.
+  shadow pair as the pass's fixed-function matrices, both faces drawn. Replaying the level's entities into
+  the map and dropping what the shadow program doesn't serve follows the same document ("What
+  moves is submitted a second time, for the light"; "inside the light's walk a refusal is a drop").
 
 JCPP, https://github.com/shevek/jcpp (org.anarres:jcpp 1.4.14)
 Apache License 2.0

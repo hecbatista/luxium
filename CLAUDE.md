@@ -234,9 +234,14 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
 - **6e, second slice (2026-11-20, ✅): translucent casters.**
   - The shadow pass draws Sodium's OPAQUE group, copies the depth as `shadowtex1`/`shadow` (Vitrail "Two maps, one render"), then draws the TRANSLUCENT group with the shadow program (alpha > 0.1, **unblended**: Iris ShadowWater BlendModeOverride.OFF) and copies the whole map as `shadowtex0`/`watershadow`.
   - Game test shot 3: the glass box casts its frame grid and blue-tinted light through the water onto the floor (Complementary's coloured shadows through shadowcolor). 0 validation messages, 74 unit tests pass, scoreboard 90/90.
+- **6e, third slice (2026-11-20, ✅): entity and block-entity casters.**
+  - In the shadow pass, after the opaque terrain, `EntityTakeover.drawShadowCasters` replays the level's already-prepared solid features (`PreparedFrame.executeSolid`, noted from the main-pass lambda) through a `DropPass`.
+    - Served ENTITY-format draws go to the pack's `shadow` program (family SHADOW_ENTITIES, any blend drawn unblended, one tenth, no culling, depth ≤, the shadow targets); everything else is dropped, never drawn on screen.
+    - The draw's pose is moved to the light: `gl_ModelViewMatrix = luxium_ShadowFix * ModelViewMat`, with `luxium_ShadowFix = shadowModelView · inverse(gbufferModelView)` (`Format.shadow`: forward depth).
+  - Game test: the pig, slime and chest cast shadows (floor beside the pig 89/106/120 → 65/77/90). 0 validation messages, 74 unit tests pass, scoreboard 90/90.
 - **6e handoff: what's left of the shadow pass.**
   - Casters are only Sodium's camera-visible sections, with the camera's per-face batch culling. Vitrail does a second culling walk for the light and keeps its own batches (sky-and-shadows.md "Culling for the light"; Vitrail MixinRenderRegion, SodiumApi.drawShadowLayer).
-  - No entity, block-entity or hand casters yet (Iris shadow_entities etc.).
+  - No hand casters, and no beacon beams (BLOCK format) or particles in the map.
   - No shadowcolor format or clear directives; no mipmaps or hardware filtering; the shadow map isn't drawn a frame ahead.
 - **6f: correctness gaps** (from step 4): gl_FragCoord origin, textures without mips, packUnorm on Apple, gl_VertexID base vertex, .csh/.gsh programs; also the 6d-4 leftovers above.
 - Metallum's only Sodium mixin picks the graphics API (`metallum.sodium.mixins.json`: `SodiumPreferredGraphicsApiMixin`). Sodium already draws through the game's RenderPearl API, so Vitrail's Sodium-level hooks should apply on Metal too.
