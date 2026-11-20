@@ -6,7 +6,7 @@
   "description": "Experimental: Iris/OptiFine shader packs on Metallum's Metal backend.",
   "icon": "assets/metalshaders/icon.png",
   "contact": {
-    "sources": "https://github.com/hecbatista/metal-shaders"
+    "sources": "https://github.com/hecbatista/luxium"
   },
   "environment": "client",
   "entrypoints": {
