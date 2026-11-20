@@ -1,0 +1,6 @@
+# Third-party reference code. Never commit: separate repos, and
+# minecraft-26.3-sources/ is decompiled Mojang code that must not be published.
+references/
+
+# macOS
+.DS_Store
