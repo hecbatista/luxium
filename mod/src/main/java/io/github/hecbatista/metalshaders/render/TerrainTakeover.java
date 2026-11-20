@@ -181,6 +181,16 @@ public final class TerrainTakeover {
         shadowDrawing = true;
         try {
             resolveInputs(p);
+            // Step 7c: the light's own render list, so casters the camera can't see still cast.
+            ShadowCulling.withLightLists(() -> drawShadowTerrain(p, sampler, atlas));
+        } finally {
+            shadowDrawing = false;
+        }
+        ShadowTargets.publish();
+    }
+
+    private static void drawShadowTerrain(Program p, GpuSampler sampler, GpuTextureView atlas) {
+        {
             RenderPassDescriptor.Builder d = RenderPassDescriptor.builder(() -> "Luxium shadow map (pack shadow)");
             for (int index : p.writes()) {
                 d.withColorAttachment(ShadowTargets.color(index));
@@ -208,10 +218,7 @@ public final class TerrainTakeover {
                     currentPass = null;
                 }
             }
-        } finally {
-            shadowDrawing = false;
         }
-        ShadowTargets.publish();
     }
 
     /** {@code alphaTest.<program>=GREATER 0.1} (Iris AlphaTest syntax); only GREATER and off are read. */

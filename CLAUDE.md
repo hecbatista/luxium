@@ -240,7 +240,7 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
     - The draw's pose is moved to the light: `gl_ModelViewMatrix = luxium_ShadowFix * ModelViewMat`, with `luxium_ShadowFix = shadowModelView · inverse(gbufferModelView)` (`Format.shadow`: forward depth).
   - Game test: the pig, slime and chest cast shadows (floor beside the pig 89/106/120 → 65/77/90). 0 validation messages, 74 unit tests pass, scoreboard 90/90.
 - **6e handoff: what's left of the shadow pass.**
-  - Casters are only Sodium's camera-visible sections: anything off-screen or occlusion-culled casts no shadow. Vitrail does a second culling walk for the light and keeps its own batches (sky-and-shadows.md "Culling for the light"; Vitrail MixinRenderRegion, SodiumApi.drawShadowLayer).
+  - ~~Casters are only Sodium's camera-visible sections~~: fixed for terrain in 7c (the light's own render list). Entity casters are still the camera-visible ones.
   - Fixed: Sodium's block-face culling (`DefaultChunkRenderer.prepare` reads `useBlockFaceCulling`) is off while the pack's shadow pass is active, so faces turned away from the camera still cast shadows; the camera's pipelines cull back faces anyway.
   - No hand casters, and no beacon beams (BLOCK format) or particles in the map.
   - No shadowcolor format or clear directives; no mipmaps or hardware filtering; the shadow map isn't drawn a frame ahead.
@@ -297,6 +297,24 @@ Step 7 (polish), agreed order with the user (2026-11-20): pack settings → Neth
     - The world folder's programs compile on the render thread while the loading screen is up.
     - Only one world's programs are kept: going back compiles again (warm cache: about 1.8 s).
     - Nether/End weather, clouds and DH/voxy programs aren't checked.
+
+- **7c result (2026-11-20, ✅): shadows from casters the camera can't see.**
+  - The shadow pass's terrain now comes from the light's own Sodium render list, as Iris does on the same Sodium 0.9.2 (`render/ShadowCulling.withLightLists`, around `TerrainTakeover.drawShadowTerrain`):
+    - Each region gets a second render list and batch map (`mixin/sodium/RenderRegionMixin` + `sodium/ShadowRegion`), swapped in for the shadow draw. Every place Sodium empties a batch empties all maps, including the three in `RenderRegionManager.uploadResults` (`RenderRegionManagerMixin`, `require = 3`).
+    - Sodium's `renderOutOfGraph` walk fills the light's lists (`RenderSectionManagerAccessor` invoker), then `SodiumWorldRenderer.prepareChunkRendering` fills its batches.
+    - Afterwards the camera's `renderLists`, `taskLists` and `renderTree` are put back and its batches prepared again. `prepare` writes the shared `shouldDraw` array, and `renderTree` also drives entity culling.
+  - The walk's frustum is the shadow map's box (`ShadowCulling.LightBox`): a section's corners go through `shadowProjection × shadowModelView` (camera-relative, as the shadow programs use them) and must overlap the unit cube. `intersectAab` returns −2/−1/0 as Sodium's tree walk reads JOML. Iris's default "advanced" frustum is tighter; the box never drops a caster.
+  - Debug: `LUXIUM_SHADOW_CAMERA_LIST=1` keeps the camera's list (the old behaviour). The log line "Shadow terrain: N regions seen by the light, M by the camera" appears every 5 s.
+  - Game test shot 9:
+    - The scene is a floor at y = 160 around x = 100, with a stone-brick tower at x 118–121 behind the camera, at time 1500.
+    - The camera looks west and down. The tower's long morning shadow lies across the floor; with `LUXIUM_SHADOW_CAMERA_LIST=1` the floor has none.
+    - Go there before the `fill`s: a fill only works in loaded chunks (the first try filled nothing).
+    - 0 validation messages; 94 unit tests pass (new `ShadowCullingTest`); scoreboard 90/90.
+    - Flicker: land 0.014%, underwater 0.019%, Nether 0.045% (soul fire), End 0%, shot 9 sequence 0%.
+  - Still open:
+    - Entity casters are still only the camera-visible ones (the level's prepared solid features).
+    - Sections never built because the camera hasn't been near them have no mesh to cast with. Sodium builds from the camera's task lists; the light's task lists are dropped, as in Iris.
+    - `fabric.mod.json` doesn't declare Sodium, though Luxium's terrain needs it (ask the user before adding `"sodium": "*"`).
 
 Facts for step 6:
 - **Full-screen passes:** vanilla `PostPass` uses `renderPass.draw(3, 1, 0, 0)` with no vertex buffer. Pack composite vertex shaders expect a quad (`gl_Vertex`, `gl_MultiTexCoord0`), so we need a quad vertex buffer or a special vertex prologue.
@@ -417,14 +435,14 @@ cd mod
 export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 ./gradlew runClientGameTest
 ```
-- Test: `mod/src/gametest/java/io/github/hecbatista/metalshaders/test/ScreenshotTest.java`. Shots: 1 land, 3 hurt pig, 2 underwater, 4 rain, 5 hand, 6 Nether, 7 End, 8 back in the Overworld. A full run takes about 80 s.
+- Test: `mod/src/gametest/java/io/github/hecbatista/metalshaders/test/ScreenshotTest.java`. Shots: 1 land, 3 hurt pig, 2 underwater, 4 rain, 5 hand, 6 Nether, 7 End, 8 back in the Overworld, 9 a hidden tower's shadow. A full run takes about 90 s.
 - Screenshots land in `mod/build/run/clientGameTest/screenshots/` (854×480); view them with the Read tool.
 - The test's game folder is cleared every run, so the test copies `mod/run/shaderpacks/*` into it first.
 - Spectator mode and a hidden HUD keep shots clean. In Survival the player falls between teleports.
 - `eula = true` in `mod/build.gradle`: the user agreed to the Minecraft EULA for this on 2026-11-20.
-- Frame sequences for flicker: 24 consecutive frames each (one per tick, still camera): `screenshots/frames-land/` and `frames-underwater/` after shot 1, `frames-nether/` and `frames-end/` after shots 6 and 7. Check them with:
+- Frame sequences for flicker: 24 consecutive frames each (one per tick, still camera): `screenshots/frames-land/` and `frames-underwater/` after shot 1, `frames-nether/` and `frames-end/` after shots 6 and 7, `frames-offscreen/` after shot 9. Check them with:
   ```bash
-  D=build/run/clientGameTest/screenshots; java scripts/FlickerCheck.java $D/frames-land $D/frames-underwater $D/frames-nether $D/frames-end
+  D=build/run/clientGameTest/screenshots; java scripts/FlickerCheck.java $D/frames-land $D/frames-underwater $D/frames-nether $D/frames-end $D/frames-offscreen
   ```
   - It flags pixels that jump for one frame and come back (A→B→A, change > 40/255, neighbours within 12/255). It fails (exit 1) above 0.1% of a frame's pixels.
   - It writes `<dir>-flicker.png` (heat map) and `<dir>.gif` (a looping 20 fps clip to watch). No ffmpeg on this Mac.

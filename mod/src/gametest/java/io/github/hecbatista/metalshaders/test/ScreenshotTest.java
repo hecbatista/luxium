@@ -158,6 +158,27 @@ public class ScreenshotTest implements FabricClientGameTest {
             singleplayer.getConnection().waitForChunksRender();
             context.waitTicks(40);
             context.takeScreenshot("luxium-8-back");
+
+            // Shot 9 (step 7c): a caster the camera can't see. A tower stands east of a floor in the
+            // morning sun (low in the east), and the camera looks west with the tower behind it:
+            // the tower's long shadow should still lie on the floor in front. Look at the tower
+            // first so Sodium has built its mesh. LUXIUM_SHADOW_CAMERA_LIST=1 shows the old
+            // behaviour (no shadow).
+            server.runCommand("time set 1500");
+            // High up (y 160), above anything the world generated there. Go there first: a fill
+            // only works in loaded chunks.
+            server.runCommand("tp @a 100 167 100 -90 0");
+            context.waitTicks(20);
+            singleplayer.getConnection().waitForChunksRender();
+            server.runCommand("fill 70 160 85 125 160 115 minecraft:stone");
+            server.runCommand("fill 118 161 98 121 191 102 minecraft:stone_bricks");
+            context.waitTicks(40);
+            singleplayer.getConnection().waitForChunksRender();
+            server.runCommand("tp @a 108 167 100 90 40");
+            context.waitTicks(40);
+            singleplayer.getConnection().waitForChunksRender();
+            context.takeScreenshot("luxium-9-offscreen-caster");
+            captureFrames(context, "offscreen", 24);
         }
     }
 

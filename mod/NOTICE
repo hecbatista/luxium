@@ -246,9 +246,27 @@ GNU Lesser General Public License version 3
   mixin.MixinLevelRenderer: SKY, SUNSET, SUN, MOON, STARS, VOID; CUSTOM_SKY for the End's sky
   and End flash, where none of those calls run).
 
+  src/main/java/io/github/hecbatista/metalshaders/render/ShadowCulling.java,
+  sodium/ShadowRegion.java and mixin/sodium/RenderRegionMixin.java,
+  RenderRegionManagerMixin.java, RenderSectionManagerAccessor.java and
+  SodiumWorldRendererAccessor.java follow Iris's shadow render lists on Sodium
+  (net.irisshaders.iris.compat.sodium.mixin.MixinRenderRegion, MixinRenderRegionManager,
+  MixinRenderSectionManagerShadow, MixinSodiumWorldRenderer, and shadows.ShadowRenderer): a
+  second render list and batch map per region swapped in for the shadow pass, every batch
+  emptied in all maps wherever Sodium empties one, the light's list filled by Sodium's
+  renderOutOfGraph walk, and the camera's lists, tree and task lists put back afterwards.
+  Changed: our own code; the walk runs inside our shadow pass rather than through
+  SodiumWorldRenderer.setupTerrain, and its frustum is the shadow map's own box (the light's
+  clip space) instead of Iris's advanced shadow frustum.
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3
+
+  src/main/java/io/github/hecbatista/metalshaders/mixin/sodium/RenderRegionMixin.java keeps a
+  batch map for the light because of Vitrail's finding (docs/sky-and-shadows.md, "Culling for
+  the light"): a batch is kept until its region's list changes, so a shadow draw sharing the
+  camera's batches draws the camera's holes.
 
   src/main/java/io/github/hecbatista/metalshaders/glsl/ProgramTranslator.java translates a
   vertex and fragment stage together, as one program: one uniform block holding the union of

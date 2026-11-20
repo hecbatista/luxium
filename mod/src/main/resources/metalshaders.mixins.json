@@ -24,7 +24,11 @@
     "sodium.ChunkMeshFormatsMixin",
     "sodium.ChunkVertexMixin",
     "sodium.DefaultChunkRendererMixin",
-    "sodium.DefaultFluidRendererMixin"
+    "sodium.DefaultFluidRendererMixin",
+    "sodium.RenderRegionManagerMixin",
+    "sodium.RenderRegionMixin",
+    "sodium.RenderSectionManagerAccessor",
+    "sodium.SodiumWorldRendererAccessor"
   ],
   "injectors": {
     "defaultRequire": 1
