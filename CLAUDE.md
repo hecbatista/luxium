@@ -15,6 +15,13 @@ Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor ✅ (pack's d
 
 Step 4 result: `TranslateRealPackTest` (the scoreboard) translates every vertex+fragment program, then runs glslang for Vulkan 1.2 with only `--auto-map-bindings` (no `-R`, no `--aml`), spirv-cross with Metallum's MSL options, and `xcrun metal`. On Complementary that's **90/90** programs: 30 per world, excluding dh_/clrwl_/voxy programs that need mods we don't have. A reflection check (`spirv-cross --reflect`) found 0 vertex/fragment interface mismatches. Outputs go to `mod/build/translated/<pack>/`, plus `scoreboard.txt`.
 
+Step 5 progress (2026-11-20):
+- `glsl/Std140Layout.java` computes byte offsets in `LuxiumUniforms`. `Std140LayoutTest` checks it against glslang via `spirv-cross --reflect`: all 7,815 members in 90 programs match, and so does every block size.
+- Complementary reads 92 block values:
+  - about 65 built-ins. Each maps to an Iris file in `iris/.../uniforms/` (WorldTime, SystemTime, Celestial, Camera, Common, Viewport, Fog, IrisExclusive, IdMap, Matrix…). Check every Minecraft method in the 26.3 sources: e.g. `Level.getDefaultClockTime()` replaces day time, and moon phase comes from `Camera.attributeProbe()` + `EnvironmentAttributes.MOON_PHASE`.
+  - about 25 custom formulas in `shaders.properties` (`uniform.float.x = smooth(...)`). Iris evaluates these with its own `kroppeb.stareval` (part of Iris, LGPL). We'll write a small evaluator and credit the behavior.
+  - Per-draw values (entityId, renderStage, the luxium_* matrices…) are set during rendering, so they belong to step 6.
+
 Translator v1 only makes programs **compile**. These things are known to matter for drawing correctly and aren't handled yet:
 - `gl_FragCoord` origin: GL is bottom-left, Vulkan/Metal are top-left.
 - Reversed-Z depth: Iris's `iris_undoRevZ`, and Vitrail converting the depth image.
