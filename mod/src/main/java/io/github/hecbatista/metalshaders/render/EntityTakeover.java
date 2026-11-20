@@ -517,6 +517,31 @@ public final class EntityTakeover {
     private static boolean saidWindow;
 
     /** Frame start (from PackChain.beginFrame, no pass open): last frame's uniform buffers rotate. */
+    /** Forgets every family's program (a new world folder is being loaded; see PackChain.unload). */
+    static void unload() {
+        for (Family f : ALL) {
+            f.compiled.values().forEach(CompiledRenderPipeline::close);
+            f.compiled.clear();
+            f.refused.clear();
+            f.byAlpha.clear();
+            f.inputs.clear();
+            f.rings.forEach(MappableRingBuffer::close);
+            f.rings.clear();
+            f.slot = 0;
+            f.served = 0;
+            f.glsl = null;
+            f.blendProgram = null;
+            f.writes = List.of();
+            f.prepared = false;
+        }
+        programOf.clear();
+        window = null;
+        drawing = null;
+        holdFamily = null;
+        hold = null;
+        inHold = false;
+    }
+
     static void beginFrame() {
         for (Family f : ALL) {
             for (int i = 0; i < f.slot; i++) {

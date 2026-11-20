@@ -115,7 +115,7 @@ public final class TerrainTakeover {
             // Iris ShaderKey: SODIUM_TERRAIN_SOLID is AlphaTests.OFF, SODIUM_TERRAIN_CUTOUT is HALF_ALPHA.
             add(DefaultTerrainRenderPasses.SOLID, "gbuffers_terrain", "solid", terrain, Float.NaN, 8, true, properties);   // TERRAIN_SOLID
             add(DefaultTerrainRenderPasses.CUTOUT, "gbuffers_terrain", "cutout", terrain, 0.5f, 10, true, properties);     // TERRAIN_CUTOUT
-            atlasSampler = RenderSystem.getDevice().createSampler(AddressMode.CLAMP_TO_EDGE, AddressMode.CLAMP_TO_EDGE,
+            atlasSampler = atlasSampler != null ? atlasSampler : RenderSystem.getDevice().createSampler(AddressMode.CLAMP_TO_EDGE, AddressMode.CLAMP_TO_EDGE,
                     FilterMode.NEAREST, FilterMode.NEAREST, 1, OptionalDouble.empty());
             prepared = true;
             MetalShadersClient.LOGGER.info("Terrain takeover ready: gbuffers_terrain writes colortex{} plus the coverage mask",
@@ -337,6 +337,25 @@ public final class TerrainTakeover {
                 r.vertexInputs().stream().map(ProgramTranslator.Slot::name).toList(),
                 r.samplers().stream().map(ProgramTranslator.Sampler::name).toList(),
                 Float.isNaN(alphaTest) ? "off" : "> " + alphaTest, blends);
+    }
+
+    /** Forgets the pack's terrain and shadow programs (a new world folder is being loaded; see PackChain.unload). */
+    static void unload() {
+        for (Map<TerrainRenderPass, Program> map : List.of(programs, shadowPrograms)) {
+            for (Program p : map.values()) {
+                p.compiled().close();
+                p.rings().forEach(MappableRingBuffer::close);
+            }
+            map.clear();
+        }
+        inputs.clear();
+        usedRings.clear();
+        prepared = false;
+        shadowDrawing = false;
+        drewOpaque = false;
+        drewTranslucent = false;
+        inPass = false;
+        currentPass = null;
     }
 
     /** Frame start (from PackChain.beginFrame, no pass open): resolve inputs, reset per-frame state. */

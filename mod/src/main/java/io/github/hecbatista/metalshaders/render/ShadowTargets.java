@@ -76,6 +76,12 @@ public final class ShadowTargets {
         }
     }
 
+    /** Frees the shadow map (a new world folder is being loaded; its resolution may differ). */
+    static void unload() {
+        close();
+        size = 0;
+    }
+
     private static void close() {
         if (depth != null) {
             depthView.close();

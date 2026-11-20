@@ -30,6 +30,48 @@ public record PackInfo(
         programFiles = java.util.Collections.unmodifiableSortedMap(programFiles);
     }
 
+    /**
+     * The folder whose programs draw a world, by Iris's rules: the world's id (after
+     * {@link #worldKey}) if the pack names it, else the folder of "*", else the shaders/ root
+     * (ShaderPack.getProgramSet and its {@code base}). A named folder that holds no programs also
+     * falls back, as Iris's {@code dimensionIds} check does.
+     */
+    public String folderFor(String worldId) {
+        String folder = lookup(worldId);
+        if (folder != null && programFiles.containsKey(folder)) {
+            return folder;
+        }
+        String star = lookup("*");
+        return star != null && programFiles.containsKey(star) ? star : "";
+    }
+
+    private String lookup(String id) {
+        // dimension.properties may leave out "minecraft:" (Iris NamespacedId(String)).
+        for (Map.Entry<String, String> e : dimensionFolders.entrySet()) {
+            String key = e.getKey().equals("*") || e.getKey().contains(":") ? e.getKey() : "minecraft:" + e.getKey();
+            if (key.equals(id)) {
+                return e.getValue();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Iris.getCurrentDimension: a world the pack names keeps its own id; otherwise a world with
+     * the End's sky counts as the End and one with the Overworld's sky as the Overworld, so mod
+     * worlds get matching programs. {@code skybox} is "end", "overworld" or "none".
+     */
+    public String worldKey(String worldId, String skybox) {
+        if (lookup(worldId) != null) {
+            return worldId;
+        }
+        return switch (skybox) {
+            case "end" -> "minecraft:the_end";
+            case "overworld" -> "minecraft:overworld";
+            default -> worldId;
+        };
+    }
+
     /** A few lines for the game log. */
     public String summary() {
         StringBuilder out = new StringBuilder();

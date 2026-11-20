@@ -99,7 +99,7 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
   - Sky ✅ (2026-11-20):
     - `render/SkyTakeover.java` + `mixin/SkyRendererMixin.java` (MixinExtras `@WrapOperation`) open vanilla's sky pass on colortex0.
     - Vanilla's SKY/STARS/SUNRISE_SUNSET pipelines are swapped for gbuffers_skybasic and CELESTIAL for gbuffers_skytextured. Each is compiled with `ProgramTranslator.translateForFormat` for that pipeline's vertex format, and copies the pipeline's topology, blend and depth state.
-    - The per-piece model-view and color come from `DynamicGpuData.writeTransform`, and renderStage from the piece's debug label. The sun/moon texture (Sampler0) is bound under the pack's albedo names. The End isn't taken over.
+    - The per-piece model-view and color come from `DynamicGpuData.writeTransform`, and renderStage from the piece's debug label. The sun/moon texture (Sampler0) is bound under the pack's albedo names. The End's sky came in step 7b.
     - Format mode adds a vertex epilogue `z' = (w - z) / 2` (OpenGL clip depth onto the shared reversed-Z buffer).
     - `UniformWriter` writes mat4 arrays (luxium_TextureMatrix).
   - **Big bug found and fixed:** the chain ran after `GameRenderer.renderLevel()`, but `render3dHud` clears the depth (`GameRenderer.java:689`) before drawing the hand. So the chain always saw depth 0 (CPU readback: 100% zeros), and composites treated everything as sky. The chain now runs before `render3dHud`. This also fixed the near-black underwater shot.
@@ -273,6 +273,30 @@ Step 7 (polish), agreed order with the user (2026-11-20): pack settings → Neth
     - 0 validation messages, 86 unit tests pass (new: `PackOptionsTest`), scoreboard 90/90.
     - Flicker check: land worst 0.012% of pixels (edges of the animated mobs), underwater 0.009%. A fake one-frame glitch is caught.
   - Not done: profiles (`profile.*`), an in-game settings screen, and reloading without a restart. A reload needs every `prepare` (PackChain, takeovers, shadow targets) to free and rebuild its GPU state.
+- **7b result (2026-11-20, ✅): the Nether and the End.**
+  - Each world loads its own folder (`MetalShadersClient.loadWorld`), checked every frame in `onFrameExtracted`. Iris's rules (`PackInfo.worldKey` + `folderFor`):
+    - A world named in `dimension.properties` uses its folder.
+    - Otherwise the End's sky means the End's folder and the Overworld's sky the Overworld's.
+    - Otherwise the folder of `*`, else the shaders/ root.
+  - Switching unloads the last world first (`PackChain.unload` → `SkyTakeover`/`TerrainTakeover`/`EntityTakeover`/`ShadowTargets.unload`: close every pipeline, ring buffer and texture, forget programs). Closing right away is safe because Metallum's command buffers retain what queued frames use (`commandQueue.commandBuffer()`, retained references); the resize path already relied on that.
+  - Pack-wide values (settings, item/entity ids, formulas, preprocessed shaders.properties) load once in `loadPackValues`. Only the world folder's programs reload.
+  - Load time per world: about 1.8 s when macOS's Metal shader cache is warm, about 9 s the first time a folder's shaders are ever compiled.
+  - `program.<folder>/<name>.enabled` (`pack/ProgramSwitches.java`, Iris's BooleanParser rules) now applies to every program, not only the composites. A switched-off program counts as missing, so the fallbacks pick another.
+    - Example: `SHADOW_QUALITY=-1` switches off `shadow` in every world.
+    - Under that setting the empty sky below the horizon turns dark, because Complementary also turns off its light shafts (`LIGHTSHAFTS_ACTIVE` needs `SHADOW_QUALITY > -1` in the Overworld). That's the pack's own behaviour, not a bug.
+  - The End sky: vanilla's END_SKY pipeline (POSITION_TEX_COLOR, quads) is drawn with `gbuffers_skytextured` (Iris IrisPipelines); End sky and End flash are stage CUSTOM_SKY (3). `SkyRendererMixin` now also wraps `DynamicGpuData.writeTransform(Matrix4f)` (the End sky's transform, white).
+  - Sky coverage fix: the coverage mask is cleared to "nothing" at frame start, and `PackChain.skyDrawn` marks the background as the pack's only when the pack's sky pass actually opens. Before, a frame where the game skips the sky drew a black background. The game skips it with no sky in the world (Nether), a boss's world fog (the dragon), lava or powder snow fog, or blindness/darkness.
+  - Game test:
+    - Shot 6: a carved Nether room (lava, glowstone, soul fire) in the pack's orange haze.
+    - Shot 7: an End platform at (0, 72, −205) under the pack's End sky, outside the dragon's 192-block arena (`EnderDragonFight.validPlayer`).
+    - Shot 8: back in the Overworld (world0 reloaded), matching shot 1.
+    - 0 validation messages; 91 unit tests pass (new `WorldFoldersTest`); scoreboard 90/90.
+    - Flicker: land 0.012%, underwater 0.030%, Nether 0.033% (all on the animated soul fire), End 0%.
+    - With `SHADOW_QUALITY=-1`: every world's shadow program is switched off and the floor loses the glass grid's shadow.
+  - Gaps:
+    - The world folder's programs compile on the render thread while the loading screen is up.
+    - Only one world's programs are kept: going back compiles again (warm cache: about 1.8 s).
+    - Nether/End weather, clouds and DH/voxy programs aren't checked.
 
 Facts for step 6:
 - **Full-screen passes:** vanilla `PostPass` uses `renderPass.draw(3, 1, 0, 0)` with no vertex buffer. Pack composite vertex shaders expect a quad (`gl_Vertex`, `gl_MultiTexCoord0`), so we need a quad vertex buffer or a special vertex prologue.
@@ -393,18 +417,18 @@ cd mod
 export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 ./gradlew runClientGameTest
 ```
-- Test: `mod/src/gametest/java/io/github/hecbatista/metalshaders/test/ScreenshotTest.java`.
-- Screenshots land in `mod/build/run/clientGameTest/screenshots/` (854×480); view them with the Read tool. The run takes about 25 s.
+- Test: `mod/src/gametest/java/io/github/hecbatista/metalshaders/test/ScreenshotTest.java`. Shots: 1 land, 3 hurt pig, 2 underwater, 4 rain, 5 hand, 6 Nether, 7 End, 8 back in the Overworld. A full run takes about 80 s.
+- Screenshots land in `mod/build/run/clientGameTest/screenshots/` (854×480); view them with the Read tool.
 - The test's game folder is cleared every run, so the test copies `mod/run/shaderpacks/*` into it first.
 - Spectator mode and a hidden HUD keep shots clean. In Survival the player falls between teleports.
 - `eula = true` in `mod/build.gradle`: the user agreed to the Minecraft EULA for this on 2026-11-20.
-- Frame sequences for flicker: after shot 1 the test takes 24 consecutive frames (one per tick, still camera) into `screenshots/frames-land/` and 24 underwater into `frames-underwater/`. Check them with:
+- Frame sequences for flicker: 24 consecutive frames each (one per tick, still camera): `screenshots/frames-land/` and `frames-underwater/` after shot 1, `frames-nether/` and `frames-end/` after shots 6 and 7. Check them with:
   ```bash
-  java scripts/FlickerCheck.java build/run/clientGameTest/screenshots/frames-land build/run/clientGameTest/screenshots/frames-underwater
+  D=build/run/clientGameTest/screenshots; java scripts/FlickerCheck.java $D/frames-land $D/frames-underwater $D/frames-nether $D/frames-end
   ```
   - It flags pixels that jump for one frame and come back (A→B→A, change > 40/255, neighbours within 12/255). It fails (exit 1) above 0.1% of a frame's pixels.
   - It writes `<dir>-flicker.png` (heat map) and `<dir>.gif` (a looping 20 fps clip to watch). No ffmpeg on this Mac.
-  - Baseline 2026-11-20: land 0.012%, underwater 0.009%.
+  - Baseline 2026-11-20: land 0.012%, underwater 0.03%, Nether 0.033% (soul fire), End 0%.
 - `LUXIUM_TEST_SETTINGS="NAME=value;NAME2=value2"` (environment variable) makes the test write the pack's settings file before the world loads.
 - API, read from the jar: `context.worldBuilder().create()`, `singleplayer.getServer().runCommand(...)`, `context.waitTicks(n)`, `context.takeScreenshot(name)`, `context.runOnClient(mc -> ...)`, `assertScreenshotEquals(...)`.
 

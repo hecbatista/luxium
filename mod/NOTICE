@@ -18,6 +18,22 @@ GNU Lesser General Public License version 3
   (net.irisshaders.iris.shaderpack.ShaderPack). Changed: the "shaders" folder search is
   depth-limited and sorted, where Iris's has no limit and no fixed order.
 
+  src/main/java/io/github/hecbatista/metalshaders/pack/PackInfo.java (folderFor, worldKey)
+  follows Iris's choice of the folder that draws a world: a world named in the map keeps its
+  id, otherwise the End's or the Overworld's sky makes it the End or the Overworld
+  (net.irisshaders.iris.Iris.getCurrentDimension); the named folder if it holds programs,
+  else the folder of "*", else the shaders/ root (ShaderPack.getProgramSet and its base
+  program set); names without a namespace get "minecraft:" (materialmap.NamespacedId).
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/ProgramSwitches.java follows Iris's
+  program.<folder>/<name>.enabled directives: the key's program part
+  (net.irisshaders.iris.shaderpack.properties.ShaderProperties.handleProgramEnabledDirective),
+  a switched-off program treated as missing (ShaderPack's source provider), and the value as
+  a boolean expression (parsing.BooleanParser: ! && || and brackets, literals true/1 and
+  false/0, AND before OR), with unknown names counting as on
+  (option.values.OptionValues.getBooleanValueOrDefault). Changed: our own recursive-descent
+  parser instead of Iris's two stacks.
+
   src/main/java/io/github/hecbatista/metalshaders/pack/IncludeExpander.java follows Iris's
   #include rules: how an include line is recognized and its path resolved
   (net.irisshaders.iris.shaderpack.include.FileNode and AbsolutePackPath), and that every
@@ -222,6 +238,13 @@ GNU Lesser General Public License version 3
   shadowDistance 160, near/far -100.05/156, shadowIntervalSize 2). The shadow pass's alpha tests
   follow ShaderKey SHADOW_SODIUM_TERRAIN_SOLID/CUTOUT and its clear colours the shadowcolor
   defaults (white).
+
+  src/main/java/io/github/hecbatista/metalshaders/render/SkyTakeover.java follows Iris for
+  which program draws each vanilla sky pipeline (net.irisshaders.iris.pipeline.IrisPipelines:
+  SKY, STARS and SUNRISE_SUNSET with gbuffers_skybasic; CELESTIAL and END_SKY with
+  gbuffers_skytextured) and for each piece's render stage (mixin.MixinSkyRenderer and
+  mixin.MixinLevelRenderer: SKY, SUNSET, SUN, MOON, STARS, VOID; CUSTOM_SKY for the End's sky
+  and End flash, where none of those calls run).
 
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors

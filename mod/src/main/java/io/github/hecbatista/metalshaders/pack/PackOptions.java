@@ -559,6 +559,26 @@ public final class PackOptions {
         return out;
     }
 
+    /**
+     * An on/off option's value as Iris reads it in expressions (OptionValues
+     * .getBooleanValueOrDefault): "0"/"1" are literals, and a name that isn't an on/off option
+     * counts as on (Iris logs "defaulting to true").
+     */
+    public boolean booleanValue(String name) {
+        if (name.equals("0")) {
+            return false;
+        }
+        if (name.equals("1")) {
+            return true;
+        }
+        Boolean changed = changedBooleans.get(name);
+        if (changed != null) {
+            return changed;
+        }
+        BooleanOption option = booleans.get(name);
+        return option == null || option.defaultValue();
+    }
+
     /** Settings that weren't applied, NAME -> reason. */
     public Map<String, String> ignored() {
         return Collections.unmodifiableMap(ignored);

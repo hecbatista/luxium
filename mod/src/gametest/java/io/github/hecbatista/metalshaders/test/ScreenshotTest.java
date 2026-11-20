@@ -107,6 +107,57 @@ public class ScreenshotTest implements FabricClientGameTest {
             });
             context.waitTicks(40);
             context.takeScreenshot("luxium-5-hand");
+
+            // Shots 6-8 (step 7b): the other worlds load their own world folders (world-1, world1),
+            // and coming back loads world0 again. Spectator and no HUD, as for the first shots.
+            server.runCommand("gamemode spectator @a");
+            context.runOnClient(mc -> {
+                if (!mc.gui.hud.isHidden()) {
+                    mc.gui.hud.toggle();
+                }
+            });
+
+            // Shot 6: the Nether. Carve a room in whatever was generated, with a floor, a lava
+            // pool, glowstone, nether bricks and soul fire, so the shot is the same every run
+            // except for the walls behind the fog.
+            server.runCommand("execute in minecraft:the_nether run tp @a 0 66 -9 0 15");
+            context.waitTicks(20);
+            singleplayer.getConnection().waitForChunksRender();
+            server.runCommand("execute in minecraft:the_nether run fill -12 60 -12 12 76 12 minecraft:air");
+            server.runCommand("execute in minecraft:the_nether run fill -12 59 -12 12 59 12 minecraft:netherrack");
+            server.runCommand("execute in minecraft:the_nether run fill -3 59 0 3 59 4 minecraft:lava");
+            server.runCommand("execute in minecraft:the_nether run fill 6 60 2 7 63 3 minecraft:glowstone");
+            server.runCommand("execute in minecraft:the_nether run fill -8 60 2 -6 62 4 minecraft:nether_bricks");
+            server.runCommand("execute in minecraft:the_nether run setblock 4 59 -2 minecraft:soul_sand");
+            server.runCommand("execute in minecraft:the_nether run setblock 4 60 -2 minecraft:soul_fire");
+            context.waitTicks(60);
+            singleplayer.getConnection().waitForChunksRender();
+            context.takeScreenshot("luxium-6-nether");
+            captureFrames(context, "nether", 24);
+
+            // Shot 7: the End, from beside the main island, looking back at it and the sky. Far
+            // enough from the centre (more than 192 blocks: EndDragonFight's arena) that the
+            // dragon's boss bar and its world fog stay away.
+            // A small platform in front of the camera so the shot always has End terrain in it.
+            server.runCommand("execute in minecraft:the_end run tp @a 0 72 -205 0 12");
+            context.waitTicks(20);
+            singleplayer.getConnection().waitForChunksRender();
+            server.runCommand("execute in minecraft:the_end run fill -5 64 -196 5 64 -186 minecraft:end_stone");
+            server.runCommand("execute in minecraft:the_end run fill -4 65 -190 -3 68 -189 minecraft:purpur_block");
+            server.runCommand("execute in minecraft:the_end run fill 3 65 -190 3 67 -190 minecraft:obsidian");
+            server.runCommand("execute in minecraft:the_end run setblock 0 65 -188 minecraft:end_rod");
+            server.runCommand("execute in minecraft:the_end run setblock 1 65 -192 minecraft:chorus_flower");
+            context.waitTicks(60);
+            singleplayer.getConnection().waitForChunksRender();
+            context.takeScreenshot("luxium-7-end");
+            captureFrames(context, "end", 24);
+
+            // Shot 8: back in the Overworld, from shot 1's spot (world0 is loaded again).
+            server.runCommand("execute in minecraft:overworld run tp @a 0 104 -14 0 25");
+            context.waitTicks(20);
+            singleplayer.getConnection().waitForChunksRender();
+            context.waitTicks(40);
+            context.takeScreenshot("luxium-8-back");
         }
     }
 

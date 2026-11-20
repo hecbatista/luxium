@@ -71,6 +71,7 @@ public final class PackChain {
     private static final Map<Integer, Integer> current = new HashMap<>();
     private static GpuTexture depthCopy;
     private static GpuTextureView depthCopyView;
+    private static GpuTexture noiseTexture;
     private static GpuTextureView noise;
     private static final Map<Integer, GpuTextureView> solid = new HashMap<>();
     private static CompiledRenderPipeline seedPipeline;
@@ -181,10 +182,66 @@ public final class PackChain {
             GpuTexture t = device.createTexture("Luxium noisetex", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING,
                     GpuFormat.RGBA8_UNORM, noiseImage.getWidth(), noiseImage.getHeight(), 1, 1);
             device.createCommandEncoder().writeToTexture(t, noiseImage);
+            noiseTexture = t;
             noise = device.createTextureView(t);
             noiseImage.close();
         }
         compileSeed(device);
+    }
+
+    /**
+     * Forgets the loaded world's programs and frees what depends on them (step 7b: a new world
+     * folder means a new set of programs and buffers), here and in every takeover. Called between
+     * frames, with no pass open. Metal keeps alive whatever an already-recorded frame still uses
+     * (Metallum's command buffers retain their references), so closing now is safe.
+     */
+    public static void unload() {
+        SkyTakeover.unload();
+        TerrainTakeover.unload();
+        EntityTakeover.unload();
+        ShadowTargets.unload();
+        for (Pass p : passes) {
+            p.pipeline().close();
+            if (p.ubo() != null) {
+                p.ubo().close();
+            }
+        }
+        passes.clear();
+        halfViews.values().forEach(v -> {
+            v[0].close();
+            v[1].close();
+        });
+        halves.values().forEach(t -> {
+            t[0].close();
+            t[1].close();
+        });
+        halves.clear();
+        halfViews.clear();
+        current.clear();
+        geometryTargets.clear();
+        if (noiseTexture != null) {
+            noise.close();
+            noiseTexture.close();
+        }
+        noiseTexture = null;
+        noise = null;
+        // These depend on colortex0's format, which the next world may change.
+        for (CompiledRenderPipeline c : new CompiledRenderPipeline[]{seedPipeline, depthPipeline, composePipeline}) {
+            if (c != null) {
+                c.close();
+            }
+        }
+        seedPipeline = null;
+        depthPipeline = null;
+        composePipeline = null;
+        plan = null;
+        width = 0;
+        height = 0;
+        failed = false;
+        cloudsOff = false;
+        deferredRan = false;
+        compositesPending = false;
+        stopped = false;
     }
 
     /** A tiny pass that copies vanilla's image into colortex0, whatever colortex0's format. */
@@ -282,9 +339,10 @@ public final class PackChain {
                     encoder.clearColorTexture(e.getValue()[current.get(e.getKey())], clearColor(t));
                 }
             }
-            // When the pack draws the sky, every pixel the game draws nothing in front of is the
-            // pack's: the sky stands at the far plane, which is reversed-Z 0.
-            encoder.clearColorTexture(coverage, new Vector4f(SkyTakeover.active() ? 0.0f : COVERAGE_NOTHING));
+            // Nothing is the pack's yet. If the pack draws the sky, skyDrawn() marks the whole
+            // background as the pack's when the sky pass opens (the game skips the sky in some
+            // frames: no sky in the world, a boss's world fog, lava or powder snow, blindness).
+            encoder.clearColorTexture(coverage, new Vector4f(COVERAGE_NOTHING));
             SkyTakeover.beginFrame(device, encoder);
             TerrainTakeover.beginFrame();
             EntityTakeover.beginFrame();
@@ -292,6 +350,17 @@ public final class PackChain {
             stopped = false;
         } catch (RuntimeException e) {
             fail("beginFrame threw", e);
+        }
+    }
+
+    /**
+     * The pack is drawing this frame's sky (from SkyRendererMixin, just before the sky pass
+     * opens): every pixel the game draws nothing in front of is the pack's, because the sky stands
+     * at the far plane, which is reversed-Z 0.
+     */
+    public static void skyDrawn(CommandEncoder encoder) {
+        if (coverage != null) {
+            encoder.clearColorTexture(coverage, new Vector4f(0.0f));
         }
     }
 

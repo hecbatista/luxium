@@ -40,7 +40,7 @@ import java.util.function.Supplier;
 abstract class SkyRendererMixin {
     @Inject(method = "render", at = @At("HEAD"))
     private void luxium$skyStart(final GpuBufferSlice skyFog, final SkyRenderState state, final CallbackInfo ci) {
-        SkyTakeover.setOverworldSky(state.skybox == DimensionType.Skybox.OVERWORLD);
+        SkyTakeover.setSkybox(state.skybox);
     }
 
     @Inject(method = "render", at = @At("RETURN"))
@@ -59,6 +59,7 @@ abstract class SkyRendererMixin {
             SkyTakeover.leavePass();
             return original.call(encoder, label, color, clear, depth, clearDepth);
         }
+        PackChain.skyDrawn(encoder);
         return original.call(encoder, (Supplier<String>) () -> "Luxium sky (pack)", colortex0, Optional.<Vector4fc>empty(), depth, OptionalDouble.empty());
     }
 
@@ -81,6 +82,15 @@ abstract class SkyRendererMixin {
                                                final Operation<GpuBufferSlice> original) {
         SkyTakeover.noteTransform(modelView, color);
         return original.call(data, modelView, color);
+    }
+
+    /** The End sky's transform has no colour (DynamicGpuData.writeTransform(Matrix4f): white). */
+    @WrapOperation(method = "*", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/client/renderer/DynamicGpuData;writeTransform(Lorg/joml/Matrix4f;)Lcom/mojang/renderpearl/api/buffers/GpuBufferSlice;"))
+    private GpuBufferSlice luxium$skyTransformWhite(final DynamicGpuData data, final Matrix4f modelView,
+                                                    final Operation<GpuBufferSlice> original) {
+        SkyTakeover.noteTransform(modelView, new Vector4f(1, 1, 1, 1));
+        return original.call(data, modelView);
     }
 
     @WrapOperation(method = "*", at = @At(value = "INVOKE",

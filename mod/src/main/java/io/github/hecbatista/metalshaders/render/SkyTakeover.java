@@ -22,6 +22,7 @@ import io.github.hecbatista.metalshaders.uniform.UniformWriter;
 import net.minecraft.client.renderer.MappableRingBuffer;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.level.dimension.DimensionType;
 import org.joml.Matrix3f;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
@@ -43,8 +44,12 @@ import java.util.function.Function;
  * Following Vitrail's notes (docs/sky-and-shadows.md "The sky"): one compiled program per vanilla
  * pipeline, so each is read for exactly the vertex format it's drawn with; the pipeline's topology,
  * blending and depth state are copied from vanilla's (the sky has no depth state); each piece
- * gets its own model-view (the day rotation is the sun's position) and its renderStage. The End's
- * sky isn't taken over yet, so the takeover is off there ("all eight or none").
+ * gets its own model-view (the day rotation is the sun's position) and its renderStage.
+ * <p>
+ * Step 7b: the End's sky too. Iris draws vanilla's END_SKY pipeline with gbuffers_skytextured
+ * (IrisPipelines: END_SKY -> SKY_TEXTURED), and the End flash is a CELESTIAL draw; both are in
+ * Iris's CUSTOM_SKY stage, because none of the overworld sky calls that set a stage run there
+ * (MixinLevelRenderer, MixinSkyRenderer). A world with no sky (the Nether) has no sky pass.
  */
 public final class SkyTakeover {
     /** A pack program compiled for one vanilla sky pipeline. */
@@ -58,7 +63,8 @@ public final class SkyTakeover {
     /** Albedo sampler names a pack may use for the bound texture (Iris: gtexture, texture, tex). */
     private static final Set<String> ALBEDO = Set.of("gtexture", "texture", "tex", "gcolor");
     private static boolean prepared;
-    private static boolean overworldSky = true;
+    /** The current world's sky type (DimensionType.Skybox), set every frame. */
+    private static DimensionType.Skybox skybox = DimensionType.Skybox.OVERWORLD;
 
     // Per-draw state, filled from vanilla's calls inside the sky pass.
     private static boolean inSkyPass;
@@ -73,11 +79,11 @@ public final class SkyTakeover {
 
     /** True when the pack draws this frame's sky. */
     public static boolean active() {
-        return prepared && overworldSky && PackChain.ready();
+        return prepared && skybox != DimensionType.Skybox.NONE && PackChain.ready();
     }
 
-    public static void setOverworldSky(boolean overworld) {
-        overworldSky = overworld;
+    public static void setSkybox(DimensionType.Skybox current) {
+        skybox = current;
     }
 
     /** Compiles the pack's two sky programs once per vanilla sky pipeline. */
@@ -87,6 +93,7 @@ public final class SkyTakeover {
             add(RenderPipelines.STARS, "gbuffers_skybasic", skybasic);
             add(RenderPipelines.SUNRISE_SUNSET, "gbuffers_skybasic", skybasic);
             add(RenderPipelines.CELESTIAL, "gbuffers_skytextured", skytextured);
+            add(RenderPipelines.END_SKY, "gbuffers_skytextured", skytextured);
             prepared = true;
             MetalShadersClient.LOGGER.info("Sky takeover ready: {} pieces", pieces.size());
         } catch (Exception e) {
@@ -140,6 +147,20 @@ public final class SkyTakeover {
         Piece piece = new Piece(vanilla, program, r, layout, defaults, compiled, new ArrayList<>());
         pieces.put(vanilla, piece);
         byCompiled.put(compiled, piece);
+    }
+
+    /** Forgets the pack's sky programs (a new world folder is being loaded; see PackChain.unload). */
+    static void unload() {
+        for (Piece p : pieces.values()) {
+            p.compiled().close();
+            p.rings().forEach(MappableRingBuffer::close);
+        }
+        pieces.clear();
+        byCompiled.clear();
+        inputs.clear();
+        usedRings.clear();
+        prepared = false;
+        inSkyPass = false;
     }
 
     /** Frame start (from PackChain.beginFrame, no pass open): resolve inputs, reset per-frame state. */
@@ -267,6 +288,7 @@ public final class SkyTakeover {
             case "Moon" -> 5;              // MOON
             case "Stars" -> 6;             // STARS
             case "Dark disc" -> 7;         // VOID
+            case "End sky", "End flash" -> 3;   // CUSTOM_SKY (SkyRenderer.java:316, 236)
             default -> 0;
         };
     }

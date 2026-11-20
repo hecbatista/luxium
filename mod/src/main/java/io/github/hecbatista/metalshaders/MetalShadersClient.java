@@ -3,7 +3,9 @@ package io.github.hecbatista.metalshaders;
 import io.github.hecbatista.metalshaders.glsl.ProgramTranslator;
 import io.github.hecbatista.metalshaders.glsl.Std140Layout;
 import io.github.hecbatista.metalshaders.pack.ItemIds;
+import io.github.hecbatista.metalshaders.pack.PackInfo;
 import io.github.hecbatista.metalshaders.pack.PackOptions;
+import io.github.hecbatista.metalshaders.pack.ProgramSwitches;
 import io.github.hecbatista.metalshaders.pack.RenderTargetPlan;
 import io.github.hecbatista.metalshaders.pack.PackDirectives;
 import io.github.hecbatista.metalshaders.pack.PackPreprocessor;
@@ -20,6 +22,7 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
+import net.minecraft.world.level.dimension.DimensionType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -167,6 +170,17 @@ public final class MetalShadersClient implements ClientModInitializer {
             }
             loadPackValues();
         }
+        // Step 7b: the folder whose programs draw this world; a different one is loaded in place
+        // of the last (Iris keeps one pipeline per world; we keep only the current one).
+        DimensionType.Skybox skybox = mc.level.dimensionType().skybox();
+        io.github.hecbatista.metalshaders.render.SkyTakeover.setSkybox(skybox);
+        if (packInfo != null) {
+            String worldId = mc.level.dimension().identifier().toString();
+            String folder = packInfo.folderFor(packInfo.worldKey(worldId, skybox.getSerializedName()));
+            if (!folder.equals(loadedFolder)) {
+                loadWorld(folder, worldId);
+            }
+        }
         if (customUniforms != null) {
             customUniforms.update(GAME_UNIFORMS::get, (Float) GAME_UNIFORMS.get("frameTime"));
         }
@@ -194,10 +208,16 @@ public final class MetalShadersClient implements ClientModInitializer {
                 com.mojang.blaze3d.systems.RenderSystem.getDevice().getDeviceInfo().isZZeroToOne());
     }
 
+    /** The pack in use, its layout, and its preprocessed shaders.properties (null: no pack). */
+    private static Path packPath;
+    private static PackInfo packInfo;
+    private static String packProperties;
+    /** The world folder whose programs are loaded ("" is the shaders/ root; null: none yet). */
+    private static String loadedFolder;
+
     /**
-     * Once per session, for the first pack found: load its formulas from shaders.properties,
-     * then translate its Overworld terrain program and report which block values are still
-     * missing.
+     * Once per session, for the first pack found: its settings, ids and formulas, which every
+     * world shares. The world's own programs are loaded by {@link #loadWorld}.
      */
     private static void loadPackValues() {
         try {
@@ -209,19 +229,7 @@ public final class MetalShadersClient implements ClientModInitializer {
             if (packOptions == null) {
                 packOptions = loadOptions(pack);
             }
-            var defines = StandardDefines.forMac();
-            var vsh = PackPreprocessor.preprocessProgram(pack, "/world0/gbuffers_terrain.vsh", defines, packOptions);
-            var fsh = PackPreprocessor.preprocessProgram(pack, "/world0/gbuffers_terrain.fsh", defines, packOptions);
-            if (!vsh.ok() || !fsh.ok()) {
-                LOGGER.warn("Coverage check skipped: {}", vsh.ok() ? fsh.error() : vsh.error());
-                return;
-            }
-
-            // wetnessHalflife / drynessHalflife, in Iris's reading order (its bug depends on order).
-            List<Map.Entry<String, Float>> halfLives = PackDirectives.wetnessHalfLives(pack, "world0", defines, packOptions);
-            GAME_UNIFORMS.setWetnessDirectives(halfLives);
-
-            Map<String, String> gameDefines = new LinkedHashMap<>(defines);
+            Map<String, String> gameDefines = new LinkedHashMap<>(StandardDefines.forMac());
             gameDefines.putAll(BiomeIds.defines());
             // The pack's settings, so `#if WORLD_BLUR == -1` and friends work in .properties (as in Iris).
             Map<String, String> propertyDefines = packOptions.propertyDefines(gameDefines);
@@ -242,11 +250,44 @@ public final class MetalShadersClient implements ClientModInitializer {
             customUniforms = CustomUniforms.load(PropertiesPreprocessor.preprocess(properties, propertyDefines),
                     GAME_UNIFORMS.snapshot().keySet());
             customUniforms.update(GAME_UNIFORMS::get, (Float) GAME_UNIFORMS.get("frameTime"));
-            prepareChain(pack, "world0", defines, PropertiesPreprocessor.preprocess(properties, propertyDefines));
+            LOGGER.info("Pack formulas: {} loaded, {} dropped: {}",
+                    customUniforms.size(), customUniforms.dropped().size(), customUniforms.dropped());
+            packProperties = PropertiesPreprocessor.preprocess(properties, propertyDefines);
+            packInfo = PackReader.read(pack);
+            packPath = pack;
+        } catch (Exception e) {
+            LOGGER.error("Loading the pack failed", e);
+        }
+    }
 
-            LOGGER.info("Pack formulas: {} loaded, {} dropped: {} (wetness half-lives from pack: {})",
-                    customUniforms.size(), customUniforms.dropped().size(), customUniforms.dropped(), halfLives);
+    /**
+     * Loads one world folder's programs, after unloading the last world's. Then translates that
+     * folder's terrain program and reports which block values are still missing.
+     */
+    private static void loadWorld(String folder, String worldId) {
+        boolean reload = loadedFolder != null;
+        if (reload) {
+            PackChain.unload();
+        }
+        loadedFolder = folder;
+        long start = System.nanoTime();
+        LOGGER.info("World {}: {} the pack's {} programs", worldId, reload ? "switching to" : "loading",
+                folder.isEmpty() ? "root" : folder + "/");
+        try {
+            var defines = StandardDefines.forMac();
+            // wetnessHalflife / drynessHalflife, in Iris's reading order (its bug depends on order).
+            List<Map.Entry<String, Float>> halfLives = PackDirectives.wetnessHalfLives(packPath, folder, defines, packOptions);
+            GAME_UNIFORMS.setWetnessDirectives(halfLives);
+            prepareChain(packPath, folder, defines, packProperties);
+            LOGGER.info("World {}: {}/ loaded in {} ms (wetness half-lives from pack: {})", worldId, folder,
+                    (System.nanoTime() - start) / 1_000_000, halfLives);
 
+            var vsh = PackPreprocessor.preprocessProgram(packPath, path(folder, "gbuffers_terrain.vsh"), defines, packOptions);
+            var fsh = PackPreprocessor.preprocessProgram(packPath, path(folder, "gbuffers_terrain.fsh"), defines, packOptions);
+            if (!vsh.ok() || !fsh.ok()) {
+                LOGGER.warn("Coverage check skipped: {}", vsh.ok() ? fsh.error() : vsh.error());
+                return;
+            }
             ProgramTranslator.Result program = ProgramTranslator.translate(vsh.result().text(), fsh.result().text());
             Std140Layout.Layout layout = Std140Layout.of(program.uniforms());
             Map<String, String> defaults = new HashMap<>();
@@ -260,13 +301,52 @@ public final class MetalShadersClient implements ClientModInitializer {
             Set<String> notInIris = new java.util.TreeSet<>(missing);
             notInIris.retainAll(GameUniforms.NOT_SUPPLIED_BY_IRIS);
             missing.removeAll(notInIris);
-            LOGGER.info("Coverage for {} world0/gbuffers_terrain: {} of {} block values supplied ({} bytes). "
+            LOGGER.info("Coverage for {} {}/gbuffers_terrain: {} of {} block values supplied ({} bytes). "
                             + "Missing: {}. Zero under Iris too: {}",
-                    pack.getFileName(), layout.members().size() - missing.size() - notInIris.size(),
+                    packPath.getFileName(), folder, layout.members().size() - missing.size() - notInIris.size(),
                     layout.members().size(), layout.size(), missing, notInIris);
         } catch (Exception e) {
-            LOGGER.error("Coverage check failed", e);
+            LOGGER.error("Loading world folder {} failed", folder, e);
         }
+    }
+
+    /** A pack path in a world folder ("" is the shaders/ root). */
+    private static String path(String folder, String file) {
+        return folder.isEmpty() ? "/" + file : "/" + folder + "/" + file;
+    }
+
+    /**
+     * A program's preprocessed vertex and fragment source, or null if it's missing, fails to
+     * preprocess, or shaders.properties switches it off ({@code program.<folder>/<name>.enabled}).
+     */
+    private static String[] program(Path pack, String folder, String name, Map<String, String> defines,
+                                    java.util.Properties props) throws IOException {
+        if (!ProgramSwitches.enabled(props, folder, name, packOptions::booleanValue)) {
+            LOGGER.info("{} is switched off by shaders.properties", path(folder, name));
+            return null;
+        }
+        var vsh = PackPreprocessor.preprocessProgram(pack, path(folder, name + ".vsh"), defines, packOptions);
+        var fsh = PackPreprocessor.preprocessProgram(pack, path(folder, name + ".fsh"), defines, packOptions);
+        if (vsh.ok() && fsh.ok()) {
+            return new String[]{vsh.result().text(), fsh.result().text()};
+        }
+        String error = vsh.ok() ? fsh.error() : vsh.error();
+        if (!error.startsWith("Missing file")) {
+            LOGGER.warn("{} skipped: {}", path(folder, name), error);
+        }
+        return null;
+    }
+
+    /** The first of {@code names} the pack has (Iris's program fallbacks), as name -> source. */
+    private static Map.Entry<String, String[]> firstOf(Path pack, String folder, Map<String, String> defines,
+                                                       java.util.Properties props, String... names) throws IOException {
+        for (String name : names) {
+            String[] glsl = program(pack, folder, name, defines, props);
+            if (glsl != null) {
+                return Map.entry(name, glsl);
+            }
+        }
+        return null;
     }
 
     /**
@@ -280,7 +360,7 @@ public final class MetalShadersClient implements ClientModInitializer {
 
         List<String> fragmentSources = new java.util.ArrayList<>();
         for (String program : PackDirectives.foldOrder(pack, folder)) {
-            var p = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + program + ".fsh", defines, packOptions);
+            var p = PackPreprocessor.preprocessProgram(pack, path(folder, program + ".fsh"), defines, packOptions);
             if (p.ok()) {
                 fragmentSources.add(p.result().text());
             }
@@ -301,22 +381,15 @@ public final class MetalShadersClient implements ClientModInitializer {
         List<Map.Entry<String, String[]>> programs = new java.util.ArrayList<>();
         Map<String, Float> scales = new HashMap<>();
         for (String n : names) {
-            String enabled = props.getProperty("program." + folder + "/" + n + ".enabled", props.getProperty("program." + n + ".enabled", "true")).strip();
-            if (enabled.equals("false")) {
-                LOGGER.info("Chain: {} is switched off by shaders.properties", n);
+            String[] glsl = program(pack, folder, n, defines, props);
+            if (glsl == null) {
                 continue;
             }
             String scale = props.getProperty("scale." + n);
             if (scale != null) {
                 scales.put(n, Float.parseFloat(scale.strip().split("\\s+")[0]));
             }
-            var vsh = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + n + ".vsh", defines, packOptions);
-            var fsh = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + n + ".fsh", defines, packOptions);
-            if (!vsh.ok() || !fsh.ok()) {
-                LOGGER.warn("Chain: {} skipped: {}", n, vsh.ok() ? fsh.error() : vsh.error());
-                continue;
-            }
-            programs.add(Map.entry(n, new String[]{vsh.result().text(), fsh.result().text()}));
+            programs.add(Map.entry(n, glsl));
         }
 
         com.mojang.blaze3d.platform.NativeImage noise = null;
@@ -338,14 +411,10 @@ public final class MetalShadersClient implements ClientModInitializer {
         PackChain.prepare(plan, programs, scales, noise);
 
         // Step 6d-1: the sky, drawn by the pack's own sky programs.
-        var skybasicV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_skybasic.vsh", defines, packOptions);
-        var skybasicF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_skybasic.fsh", defines, packOptions);
-        var skytexV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_skytextured.vsh", defines, packOptions);
-        var skytexF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_skytextured.fsh", defines, packOptions);
-        if (PackChain.ready() && skybasicV.ok() && skybasicF.ok() && skytexV.ok() && skytexF.ok()) {
-            io.github.hecbatista.metalshaders.render.SkyTakeover.prepare(
-                    new String[]{skybasicV.result().text(), skybasicF.result().text()},
-                    new String[]{skytexV.result().text(), skytexF.result().text()});
+        String[] skybasic = program(pack, folder, "gbuffers_skybasic", defines, props);
+        String[] skytextured = program(pack, folder, "gbuffers_skytextured", defines, props);
+        if (PackChain.ready() && skybasic != null && skytextured != null) {
+            io.github.hecbatista.metalshaders.render.SkyTakeover.prepare(skybasic, skytextured);
         } else {
             LOGGER.warn("Sky takeover skipped (the pack lacks a sky program, or the chain isn't ready)");
         }
@@ -353,12 +422,10 @@ public final class MetalShadersClient implements ClientModInitializer {
         // Step 6e: the pack's shadow directives (const directives, Iris PackShadowDirectives), read
         // from the programs that carry them.
         StringBuilder directiveText = new StringBuilder();
-        for (String program : List.of("shadow", "composite", "composite1", "deferred1", "final", "gbuffers_terrain")) {
-            for (String ext : List.of(".vsh", ".fsh")) {
-                var t = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + program + ext, defines, packOptions);
-                if (t.ok()) {
-                    directiveText.append(t.result().text()).append('\n');
-                }
+        for (String name : List.of("shadow", "composite", "composite1", "deferred1", "final", "gbuffers_terrain")) {
+            String[] glsl = program(pack, folder, name, defines, props);
+            if (glsl != null) {
+                directiveText.append(glsl[0]).append('\n').append(glsl[1]).append('\n');
             }
         }
         var sd = io.github.hecbatista.metalshaders.uniform.ShadowMatrices.Directives.DEFAULT;
@@ -373,117 +440,68 @@ public final class MetalShadersClient implements ClientModInitializer {
         LOGGER.info("Shadow directives: {}", shadowDirectives);
 
         // Steps 6d-2/6d-3: terrain drawn by the pack's gbuffers_terrain and gbuffers_water through Sodium.
-        var terrainV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_terrain.vsh", defines, packOptions);
-        var terrainF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_terrain.fsh", defines, packOptions);
-        var waterV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_water.vsh", defines, packOptions);
-        var waterF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_water.fsh", defines, packOptions);
-        if (PackChain.ready() && terrainV.ok() && terrainF.ok()) {
-            io.github.hecbatista.metalshaders.render.TerrainTakeover.prepare(
-                    new String[]{terrainV.result().text(), terrainF.result().text()},
-                    waterV.ok() && waterF.ok() ? new String[]{waterV.result().text(), waterF.result().text()} : null,
-                    props);
+        String[] terrain = program(pack, folder, "gbuffers_terrain", defines, props);
+        String[] water = program(pack, folder, "gbuffers_water", defines, props);
+        if (PackChain.ready() && terrain != null) {
+            io.github.hecbatista.metalshaders.render.TerrainTakeover.prepare(terrain, water, props);
         } else {
             LOGGER.warn("Terrain takeover skipped (the pack lacks gbuffers_terrain, or the chain isn't ready)");
         }
         // Step 6e: the shadow map, drawn by the pack's shadow program (Iris: no program, no shadow pass).
-        var shadowV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/shadow.vsh", defines, packOptions);
-        var shadowF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/shadow.fsh", defines, packOptions);
-        if (shadowV.ok() && shadowF.ok()) {
-            io.github.hecbatista.metalshaders.render.TerrainTakeover.prepareShadow(
-                    new String[]{shadowV.result().text(), shadowF.result().text()}, props);
-            io.github.hecbatista.metalshaders.render.EntityTakeover.prepareShadowEntities(
-                    new String[]{shadowV.result().text(), shadowF.result().text()}, props);
+        String[] shadow = program(pack, folder, "shadow", defines, props);
+        if (shadow != null) {
+            io.github.hecbatista.metalshaders.render.TerrainTakeover.prepareShadow(shadow, props);
+            io.github.hecbatista.metalshaders.render.EntityTakeover.prepareShadowEntities(shadow, props);
         }
 
         // Step 6d-4: the level's solid entities and block entities, drawn by the pack's gbuffers_entities.
-        var entitiesV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_entities.vsh", defines, packOptions);
-        var entitiesF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_entities.fsh", defines, packOptions);
-        var blockV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_block.vsh", defines, packOptions);
-        var blockF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_block.fsh", defines, packOptions);
-        var entitiesTV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_entities_translucent.vsh", defines, packOptions);
-        var entitiesTF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_entities_translucent.fsh", defines, packOptions);
-        if (PackChain.ready() && entitiesV.ok() && entitiesF.ok()) {
-            io.github.hecbatista.metalshaders.render.EntityTakeover.prepare(
-                    new String[]{entitiesV.result().text(), entitiesF.result().text()},
-                    entitiesTV.ok() && entitiesTF.ok() ? new String[]{entitiesTV.result().text(), entitiesTF.result().text()} : null,
-                    blockV.ok() && blockF.ok() ? new String[]{blockV.result().text(), blockF.result().text()} : null,
-                    props);
+        String[] entities = program(pack, folder, "gbuffers_entities", defines, props);
+        String[] block = program(pack, folder, "gbuffers_block", defines, props);
+        String[] entitiesTranslucent = program(pack, folder, "gbuffers_entities_translucent", defines, props);
+        if (PackChain.ready() && entities != null) {
+            io.github.hecbatista.metalshaders.render.EntityTakeover.prepare(entities, entitiesTranslucent, block, props);
         } else {
             LOGGER.warn("Entity takeover skipped (the pack lacks gbuffers_entities, or the chain isn't ready)");
         }
 
-        // Particles, through Iris's program fallbacks (ProgramId: particles -> textured_lit -> textured -> basic).
-        String particleName = null;
-        String[] particles = null;
-        for (String candidate : List.of("gbuffers_particles", "gbuffers_textured_lit", "gbuffers_textured", "gbuffers_basic")) {
-            var v = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".vsh", defines, packOptions);
-            var f = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".fsh", defines, packOptions);
-            if (v.ok() && f.ok()) {
-                particleName = candidate;
-                particles = new String[]{v.result().text(), f.result().text()};
-                break;
-            }
-        }
-        // The hand, through Iris's fallbacks (hand -> textured_lit -> textured -> basic; hand_water -> hand).
-        String handName = null;
-        String[] hand = null;
-        for (String candidate : List.of("gbuffers_hand", "gbuffers_textured_lit", "gbuffers_textured", "gbuffers_basic")) {
-            var v = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".vsh", defines, packOptions);
-            var f = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".fsh", defines, packOptions);
-            if (v.ok() && f.ok()) {
-                handName = candidate;
-                hand = new String[]{v.result().text(), f.result().text()};
-                break;
-            }
-        }
-        var hwV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_hand_water.vsh", defines, packOptions);
-        var hwF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_hand_water.fsh", defines, packOptions);
+        // Particles, through Iris's fallbacks (ProgramId: particles -> textured_lit -> textured -> basic).
+        var particles = firstOf(pack, folder, defines, props, "gbuffers_particles", "gbuffers_textured_lit", "gbuffers_textured", "gbuffers_basic");
+        // The hand, through Iris's fallbacks (hand -> textured_lit -> ...; hand_water -> hand).
+        var hand = firstOf(pack, folder, defines, props, "gbuffers_hand", "gbuffers_textured_lit", "gbuffers_textured", "gbuffers_basic");
+        String[] handWater = program(pack, folder, "gbuffers_hand_water", defines, props);
         if (PackChain.ready() && hand != null) {
-            boolean ownWater = hwV.ok() && hwF.ok();
-            LOGGER.info("Hand: {} (translucent: {})", handName, ownWater ? "gbuffers_hand_water" : handName);
-            io.github.hecbatista.metalshaders.render.EntityTakeover.prepareHand(handName, hand,
-                    ownWater ? "gbuffers_hand_water" : handName,
-                    ownWater ? new String[]{hwV.result().text(), hwF.result().text()} : hand, props);
+            String waterName = handWater != null ? "gbuffers_hand_water" : hand.getKey();
+            LOGGER.info("Hand: {} (translucent: {})", hand.getKey(), waterName);
+            io.github.hecbatista.metalshaders.render.EntityTakeover.prepareHand(hand.getKey(), hand.getValue(),
+                    waterName, handWater != null ? handWater : hand.getValue(), props);
         }
 
         // Programs Iris gives single pipelines, through its fallbacks (ProgramId): spider eyes and
         // beacon beam -> textured -> basic; lightning -> entities -> textured_lit -> textured -> basic.
-        Map<String, List<String>> byPipeline = new LinkedHashMap<>();
-        byPipeline.put("gbuffers_spidereyes", List.of("gbuffers_spidereyes", "gbuffers_textured", "gbuffers_basic"));
-        byPipeline.put("gbuffers_beaconbeam", List.of("gbuffers_beaconbeam", "gbuffers_textured", "gbuffers_basic"));
-        byPipeline.put("gbuffers_lightning", List.of("gbuffers_lightning", "gbuffers_entities", "gbuffers_textured_lit", "gbuffers_textured", "gbuffers_basic"));
-        for (Map.Entry<String, List<String>> e : byPipeline.entrySet()) {
-            for (String candidate : e.getValue()) {
-                var v = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".vsh", defines, packOptions);
-                var f = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".fsh", defines, packOptions);
-                if (PackChain.ready() && v.ok() && f.ok()) {
-                    LOGGER.info("{}: {}", e.getKey(), candidate);
-                    io.github.hecbatista.metalshaders.render.EntityTakeover.prepareByPipeline(e.getKey(), candidate,
-                            new String[]{v.result().text(), f.result().text()}, props);
-                    break;
-                }
+        Map<String, String[]> byPipeline = new LinkedHashMap<>();
+        byPipeline.put("gbuffers_spidereyes", new String[]{"gbuffers_spidereyes", "gbuffers_textured", "gbuffers_basic"});
+        byPipeline.put("gbuffers_beaconbeam", new String[]{"gbuffers_beaconbeam", "gbuffers_textured", "gbuffers_basic"});
+        byPipeline.put("gbuffers_lightning", new String[]{"gbuffers_lightning", "gbuffers_entities", "gbuffers_textured_lit", "gbuffers_textured", "gbuffers_basic"});
+        for (Map.Entry<String, String[]> e : byPipeline.entrySet()) {
+            var found = firstOf(pack, folder, defines, props, e.getValue());
+            if (PackChain.ready() && found != null) {
+                LOGGER.info("{}: {}", e.getKey(), found.getKey());
+                io.github.hecbatista.metalshaders.render.EntityTakeover.prepareByPipeline(e.getKey(), found.getKey(), found.getValue(), props);
             }
         }
 
         // Weather, through Iris's fallbacks (weather -> textured_lit -> textured -> basic).
-        for (String candidate : List.of("gbuffers_weather", "gbuffers_textured_lit", "gbuffers_textured", "gbuffers_basic")) {
-            var v = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".vsh", defines, packOptions);
-            var f = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".fsh", defines, packOptions);
-            if (PackChain.ready() && v.ok() && f.ok()) {
-                LOGGER.info("Weather: {}", candidate);
-                io.github.hecbatista.metalshaders.render.EntityTakeover.prepareWeather(candidate,
-                        new String[]{v.result().text(), f.result().text()}, props);
-                break;
-            }
+        var weather = firstOf(pack, folder, defines, props, "gbuffers_weather", "gbuffers_textured_lit", "gbuffers_textured", "gbuffers_basic");
+        if (PackChain.ready() && weather != null) {
+            LOGGER.info("Weather: {}", weather.getKey());
+            io.github.hecbatista.metalshaders.render.EntityTakeover.prepareWeather(weather.getKey(), weather.getValue(), props);
         }
-        var ptV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_particles_translucent.vsh", defines, packOptions);
-        var ptF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_particles_translucent.fsh", defines, packOptions);
-        boolean ownTranslucent = ptV.ok() && ptF.ok();
+        String[] particlesTranslucent = program(pack, folder, "gbuffers_particles_translucent", defines, props);
         if (PackChain.ready() && particles != null) {
-            LOGGER.info("Particles: {} (translucent: {})", particleName, ownTranslucent ? "gbuffers_particles_translucent" : particleName);
-            io.github.hecbatista.metalshaders.render.EntityTakeover.prepareParticles(particleName, particles,
-                    ownTranslucent ? "gbuffers_particles_translucent" : particleName,
-                    ownTranslucent ? new String[]{ptV.result().text(), ptF.result().text()} : particles, props);
+            String translucentName = particlesTranslucent != null ? "gbuffers_particles_translucent" : particles.getKey();
+            LOGGER.info("Particles: {} (translucent: {})", particles.getKey(), translucentName);
+            io.github.hecbatista.metalshaders.render.EntityTakeover.prepareParticles(particles.getKey(), particles.getValue(),
+                    translucentName, particlesTranslucent != null ? particlesTranslucent : particles.getValue(), props);
         }
     }
 
