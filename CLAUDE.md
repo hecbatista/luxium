@@ -150,6 +150,20 @@ metal-shaders/
 - **Iris and Vitrail are LGPL-3.0.** Any code, tables, grammars or formulas borrowed from them must be credited **file by file**: the source project and class, what was adapted, and what changed. Follow the format of `references/vitrail/NOTICE` (it credits Iris this way). Keep a `NOTICE` file in our own code once anything is borrowed.
 - Metallum and the Axiom skill are MIT; keep their copyright notice if any code is copied.
 
+## Automated in-game screenshots (client game tests)
+Claude can test the game without the user. Fabric API's client game tests (`fabric-client-gametest-api-v1`, Fabric API `0.166.2+26.3`, gametest source set only, not a mod dependency) start the game, build a scene with commands, take screenshots and quit:
+```bash
+cd mod
+export JAVA_HOME=$(/usr/libexec/java_home -v 25)
+MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 ./gradlew runClientGameTest
+```
+- Test: `mod/src/gametest/java/io/github/hecbatista/metalshaders/test/ScreenshotTest.java`.
+- Screenshots land in `mod/build/run/clientGameTest/screenshots/` (854×480); view them with the Read tool. The run takes about 25 s.
+- The test's game folder is cleared every run, so the test copies `mod/run/shaderpacks/*` into it first.
+- Spectator mode and a hidden HUD keep shots clean. In Survival the player falls between teleports.
+- `eula = true` in `mod/build.gradle`: the user agreed to the Minecraft EULA for this on 2026-11-20.
+- API, read from the jar: `context.worldBuilder().create()`, `singleplayer.getServer().runCommand(...)`, `context.waitTicks(n)`, `context.takeScreenshot(name)`, `context.runOnClient(mc -> ...)`, `assertScreenshotEquals(...)`.
+
 ## Running and testing
 Always test with Metal's API validation and GPU shader validation on. To run **our mod** (with Metallum and Sodium):
 ```bash

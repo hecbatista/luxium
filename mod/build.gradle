@@ -42,6 +42,22 @@ test {
 	inputs.dir("run/shaderpacks").optional().withPropertyName("shaderpacks")
 }
 
+// Client game tests (docs.fabricmc.net/develop/automatic-testing): `./gradlew runClientGameTest`
+// starts the game, runs src/gametest's tests (load a world, teleport, take screenshots) and quits.
+fabricApi {
+	configureTests {
+		createSourceSet = true
+		modId = "metalshaders-test"
+		enableGameTests = false        // server-side game tests: not needed
+		enableClientGameTests = true
+		eula = true                    // the user agreed to the Minecraft EULA on 2026-11-20
+	}
+}
+
+dependencies {
+	gametestImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+}
+
 // Fail early, with a clear message, if Metallum hasn't been built yet.
 tasks.named("compileJava") {
 	doFirst {
