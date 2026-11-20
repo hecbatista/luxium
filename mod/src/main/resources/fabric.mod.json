@@ -2,8 +2,9 @@
   "schemaVersion": 1,
   "id": "metalshaders",
   "version": "${version}",
-  "name": "Metal Shaders",
+  "name": "Luxium",
   "description": "Experimental: Iris/OptiFine shader packs on Metallum's Metal backend.",
+  "icon": "assets/metalshaders/icon.png",
   "contact": {
     "sources": "https://github.com/hecbatista/metal-shaders"
   },

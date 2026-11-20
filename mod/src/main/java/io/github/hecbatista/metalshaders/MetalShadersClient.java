@@ -29,7 +29,7 @@ public final class MetalShadersClient implements ClientModInitializer {
         // Where Iris and OptiFine look for packs: a "shaderpacks" folder in the game directory.
         Path shaderpacks = loader.getGameDir().resolve("shaderpacks");
 
-        LOGGER.info("Metal Shaders loaded. Metallum version: {}. Shader packs folder: {}",
+        LOGGER.info("Luxium loaded. Metallum version: {}. Shader packs folder: {}",
                 metallumVersion, shaderpacks);
 
         logPacks(shaderpacks);
