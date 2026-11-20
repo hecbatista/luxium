@@ -97,7 +97,9 @@ public final class MetalShadersClient implements ClientModInitializer {
             LOGGER.info("block.properties: {} ids, {} block states numbered, {} names not in this game, {} entries skipped (tags)",
                     blockIds.lines().size(), states, io.github.hecbatista.metalshaders.sodium.BlockStateIds.unknownNames(),
                     blockIds.skipped().size());
-            LOGGER.info("block.properties ids: stone={} oak_leaves={} gold_block={} oak_log={}",
+            LOGGER.info("block.properties ids: water={} glass={} stone={} oak_leaves={} gold_block={} oak_log={}",
+                    io.github.hecbatista.metalshaders.sodium.BlockStateIds.idOf("minecraft:water"),
+                    io.github.hecbatista.metalshaders.sodium.BlockStateIds.idOf("minecraft:glass"),
                     io.github.hecbatista.metalshaders.sodium.BlockStateIds.idOf("minecraft:stone"),
                     io.github.hecbatista.metalshaders.sodium.BlockStateIds.idOf("minecraft:oak_leaves"),
                     io.github.hecbatista.metalshaders.sodium.BlockStateIds.idOf("minecraft:gold_block"),
@@ -307,12 +309,16 @@ public final class MetalShadersClient implements ClientModInitializer {
             LOGGER.warn("Sky takeover skipped (the pack lacks a sky program, or the chain isn't ready)");
         }
 
-        // Step 6d-2: solid and cutout terrain, drawn by the pack's gbuffers_terrain through Sodium.
+        // Steps 6d-2/6d-3: terrain drawn by the pack's gbuffers_terrain and gbuffers_water through Sodium.
         var terrainV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_terrain.vsh", defines);
         var terrainF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_terrain.fsh", defines);
+        var waterV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_water.vsh", defines);
+        var waterF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_water.fsh", defines);
         if (PackChain.ready() && terrainV.ok() && terrainF.ok()) {
             io.github.hecbatista.metalshaders.render.TerrainTakeover.prepare(
-                    new String[]{terrainV.result().text(), terrainF.result().text()});
+                    new String[]{terrainV.result().text(), terrainF.result().text()},
+                    waterV.ok() && waterF.ok() ? new String[]{waterV.result().text(), waterF.result().text()} : null,
+                    props);
         } else {
             LOGGER.warn("Terrain takeover skipped (the pack lacks gbuffers_terrain, or the chain isn't ready)");
         }

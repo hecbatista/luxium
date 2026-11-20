@@ -7,7 +7,13 @@ import com.mojang.renderpearl.api.commands.CommandEncoder;
 import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.renderpearl.api.textures.GpuSampler;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
+import com.mojang.blaze3d.pipeline.RenderTarget;
+import com.mojang.blaze3d.systems.RenderSystem;
+import io.github.hecbatista.metalshaders.MetalShadersClient;
+import io.github.hecbatista.metalshaders.render.PackChain;
 import io.github.hecbatista.metalshaders.render.TerrainTakeover;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.feature.FeatureRenderDispatcher;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.chunk.ChunkSectionLayerGroup;
 import net.minecraft.client.renderer.chunk.ChunkSectionsToRender;
@@ -54,6 +60,51 @@ abstract class LevelRendererTerrainMixin {
         GpuTextureView atlas = this.textureManager.getTexture(TextureAtlas.LOCATION_BLOCKS).getTextureView();
         TerrainTakeover.drawOpaque(depth, this.chunkLayerSampler, atlas, this.levelRenderState.renderWireframeTerrain);
         return original.call(encoder, label, color, clear, depth, clearDepth);
+    }
+
+    /**
+     * The chain's "after opaque" cut (Vitrail frame.md), right where the level starts its
+     * translucent phase (LevelRenderer.java:461, executeClassicTransparency, inside "Main"):
+     * "Main" is closed, the seed and deferred passes run, the pack's water is drawn, and the rest
+     * of the game's translucent phase (features, clouds, weather) is drawn into a pass on the
+     * translucent catch (same depth) which is then composed onto colortex0.
+     */
+    @WrapOperation(method = "lambda$addMainPass$0", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/client/renderer/LevelRenderer;executeClassicTransparency(Lnet/minecraft/client/renderer/chunk/ChunkSectionsToRender;Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;Lcom/mojang/renderpearl/api/commands/RenderPass;)V"))
+    private void luxium$afterOpaque(final LevelRenderer self, final ChunkSectionsToRender sections,
+                                    final FeatureRenderDispatcher.PreparedFrame featureFrame, final RenderPass mainPass,
+                                    final Operation<Void> original) {
+        RenderTarget main = Minecraft.getInstance().gameRenderer.mainRenderTarget();
+        if (!PackChain.ready() || !TerrainTakeover.drewOpaque()) {
+            original.call(self, sections, featureFrame, mainPass);
+            return;
+        }
+        mainPass.close();   // closing is idempotent: the level's own close at the end of its block does nothing
+        PackChain.drawDeferred(main, MetalShadersClient::value);
+        GpuTextureView atlas = this.textureManager.getTexture(TextureAtlas.LOCATION_BLOCKS).getTextureView();
+        TerrainTakeover.drawTranslucent(main.getDepthTextureView(), this.chunkLayerSampler, atlas, this.levelRenderState.renderWireframeTerrain);
+        GpuTextureView caught = PackChain.catchTarget(main);
+        GpuTextureView color = caught != null ? caught : main.getColorTextureView();
+        try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(
+                () -> caught != null ? "Luxium translucent catch" : "Main (after Luxium deferred)",
+                color, Optional.empty(), main.getDepthTextureView(), OptionalDouble.empty())) {
+            RenderSystem.bindDefaultUniforms(pass);
+            original.call(self, sections, featureFrame, pass);
+        }
+        if (caught != null) {
+            PackChain.composeCatch();
+        }
+    }
+
+    @WrapOperation(method = "executeClassicTransparency", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/client/renderer/chunk/ChunkSectionsToRender;renderGroup(Lnet/minecraft/client/renderer/chunk/ChunkSectionLayerGroup;Lcom/mojang/renderpearl/api/commands/RenderPass;Lcom/mojang/renderpearl/api/textures/GpuSampler;Lcom/mojang/renderpearl/api/textures/GpuTextureView;Z)V"))
+    private void luxium$skipTranslucentTerrain(final ChunkSectionsToRender sections, final ChunkSectionLayerGroup group, final RenderPass pass,
+                                               final GpuSampler sampler, final GpuTextureView atlas, final boolean wireframe,
+                                               final Operation<Void> original) {
+        if (group == ChunkSectionLayerGroup.TRANSLUCENT && TerrainTakeover.drewTranslucent()) {
+            return;
+        }
+        original.call(sections, group, pass, sampler, atlas, wireframe);
     }
 
     @WrapOperation(method = "executeSolid", at = @At(value = "INVOKE",

@@ -51,7 +51,7 @@ class TerrainTranslationTest {
 
     @Test
     void decodesTheChunkVertexAndAddsTheCoverageOutput() throws Exception {
-        ProgramTranslator.Result r = ProgramTranslator.translateForTerrain(VERTEX, FRAGMENT, new ProgramTranslator.Terrain(0.5f));
+        ProgramTranslator.Result r = ProgramTranslator.translateForTerrain(VERTEX, FRAGMENT, new ProgramTranslator.Terrain(0.5f, true));
         List<String> inputs = r.vertexInputs().stream().map(ProgramTranslator.Slot::name).toList();
         assertEquals(List.of("a_Position", "a_TexCoord", "a_LightAndData", "luxium_BlockId", "luxium_MidTexCoord", "luxium_NormalIn"), inputs);
         assertTrue(r.vertex().contains("layout(push_constant) uniform LuxiumSodiumRegion"), r.vertex());
@@ -67,7 +67,7 @@ class TerrainTranslationTest {
 
     @Test
     void solidPassHasNoAlphaTest() throws Exception {
-        ProgramTranslator.Result r = ProgramTranslator.translateForTerrain(VERTEX, FRAGMENT, new ProgramTranslator.Terrain(Float.NaN));
+        ProgramTranslator.Result r = ProgramTranslator.translateForTerrain(VERTEX, FRAGMENT, new ProgramTranslator.Terrain(Float.NaN, true));
         assertFalse(r.fragment().contains("discard"), r.fragment());
     }
 
@@ -79,11 +79,27 @@ class TerrainTranslationTest {
         var vsh = PackPreprocessor.preprocessProgram(pack, "/world0/gbuffers_terrain.vsh", StandardDefines.forMac());
         var fsh = PackPreprocessor.preprocessProgram(pack, "/world0/gbuffers_terrain.fsh", StandardDefines.forMac());
         ProgramTranslator.Result r = ProgramTranslator.translateForTerrain(vsh.result().text(), fsh.result().text(),
-                new ProgramTranslator.Terrain(0.5f));
+                new ProgramTranslator.Terrain(0.5f, true));
         System.out.println("gbuffers_terrain (terrain mode): inputs " + r.vertexInputs().stream().map(ProgramTranslator.Slot::name).toList()
                 + ", draw buffers " + r.drawBuffers() + ", outputs " + r.fragmentOutputs().stream().map(ProgramTranslator.Slot::name).toList()
                 + ", samplers " + r.samplers().stream().map(ProgramTranslator.Sampler::name).toList());
         compile(pack.getFileName().toString(), r);
+    }
+
+    @Test
+    void complementaryWaterCompilesToMetal() throws Exception {
+        List<Path> packs = PackReader.findPacks(Path.of("run/shaderpacks"));
+        assumeFalse(packs.isEmpty(), "No packs in run/shaderpacks/");
+        Path pack = packs.getFirst();
+        var vsh = PackPreprocessor.preprocessProgram(pack, "/world0/gbuffers_water.vsh", StandardDefines.forMac());
+        var fsh = PackPreprocessor.preprocessProgram(pack, "/world0/gbuffers_water.fsh", StandardDefines.forMac());
+        ProgramTranslator.Result r = ProgramTranslator.translateForTerrain(vsh.result().text(), fsh.result().text(),
+                new ProgramTranslator.Terrain(0.0001f, false));
+        System.out.println("gbuffers_water (terrain mode): inputs " + r.vertexInputs().stream().map(ProgramTranslator.Slot::name).toList()
+                + ", draw buffers " + r.drawBuffers() + ", outputs " + r.fragmentOutputs().stream().map(ProgramTranslator.Slot::name).toList()
+                + ", samplers " + r.samplers().stream().map(ProgramTranslator.Sampler::name).toList());
+        assertFalse(r.fragment().contains(ProgramTranslator.COVERAGE_OUTPUT), "water writes no coverage mask");
+        compile(pack.getFileName() + "-water", r);
     }
 
     /** glslang (Vulkan 1.2) -> spirv-cross MSL -> xcrun metal, as TranslateRealPackTest does. */

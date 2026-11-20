@@ -142,6 +142,14 @@ GNU Lesser General Public License version 3
   src/main/java/io/github/hecbatista/metalshaders/pack/PropertiesPreprocessor.java uses Iris's
   exact test for which '#' lines are directives (PropertiesPreprocessor.preprocessSource).
 
+  src/main/java/io/github/hecbatista/metalshaders/render/TerrainTakeover.java (translucent
+  terrain) follows Iris for gbuffers_water: the alpha test (ShaderKey SODIUM_TERRAIN_TRANSLUCENT,
+  ONE_TENTH_ALPHA, unless the pack's alphaTest.<program> says otherwise), the vanilla
+  translucent blend when the pack sets none (ProgramId.Water has no blend override), the
+  OptiFine/Iris blend.<program> and blend.<program>.<buffer> directives, and the render stage
+  number (WorldRenderingPhase.TERRAIN_TRANSLUCENT). mixin/sodium/DefaultFluidRendererMixin.java
+  gives fluid quads the fluid's block id with Iris's fluid bit (SodiumTransformer.replaceMCEntity).
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3
@@ -170,6 +178,14 @@ GNU Lesser General Public License version 3
   sampler2D, four gathered texels compared LEQUAL and blended with the bilinear weights) follows
   Vitrail's glsl/GlslTranslator (ofShadowCompare) as described in its comments. No Vitrail code
   was copied; the GLSL and Java are ours.
+
+  render/PackChain.java cuts the chain as Vitrail's docs/frame.md describes ("The chain is cut in
+  three"): the seed and deferred passes run after the opaque world, before translucents, and the
+  composite and final passes after the level; depthtex1/2 are the depth before translucents. The
+  game's own translucent phase is drawn onto a separate image and composed onto colortex0
+  afterwards (frame.md, "Where the seed does not reach"). mixin/sodium/ChunkVertexMixin.java
+  carries the block id on Sodium's vertex object through copyVertexTo, as Vitrail's
+  ChunkVertexMixin does. No Vitrail code was copied.
 
 JCPP, https://github.com/shevek/jcpp (org.anarres:jcpp 1.4.14)
 Apache License 2.0

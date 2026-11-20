@@ -86,6 +86,12 @@ public final class BlockStateIds {
         return (id + 1) << 1;
     }
 
+    /** The word for a fluid's own block state: the id with Iris's fluid bit (1 alone if unlisted). */
+    public static int ofFluid(BlockState fluidBlock) {
+        Integer id = encoded.get(fluidBlock);
+        return (id == null ? 0 : id) | 1;
+    }
+
     /** The word for a state, 0 (= -1 for the pack) if the pack doesn't list it. */
     public static int of(BlockState state) {
         Integer id = encoded.get(state);

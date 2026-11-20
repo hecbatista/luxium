@@ -74,6 +74,11 @@ public final class LuxiumChunkVertex implements ChunkVertexType {
         BLOCK_ID.get()[0] = encoded;
     }
 
+    /** The block id being meshed on this thread (0 = none). */
+    public static int currentBlockId() {
+        return BLOCK_ID.get()[0];
+    }
+
     @Override
     public VertexFormat getVertexFormat() {
         return VERTEX_FORMAT;
@@ -104,7 +109,10 @@ public final class LuxiumChunkVertex implements ChunkVertexType {
             tangent(vertices, normal, tangent);
             int packedNormal = snorm4(normal[0], normal[1], normal[2], 0f);
             int packedTangent = snorm4(tangent[0], tangent[1], tangent[2], tangent[3]);
-            int id = BLOCK_ID.get()[0];
+            // A quad the translucent sorter kept carries its id on the vertex (ChunkVertexMixin);
+            // one pushed while its block is meshed reads the thread's current block.
+            int carried = vertices[0] instanceof LuxiumVertexData data ? data.luxium$blockId() : 0;
+            int id = carried != 0 ? carried : BLOCK_ID.get()[0];
             boolean separate = separateAo;
 
             for (int i = 0; i < 4; i++) {

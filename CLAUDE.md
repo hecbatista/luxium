@@ -129,16 +129,34 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
     - `at_midBlock` is zero.
     - `fogColor` is still 0.
     - The view-bob split isn't done.
-- **6d-3 handoff (start here next session): water and translucent terrain.**
-  - The visible problem today: the game still draws translucents (water, glass) into its own image, over the **clear colour**, because the terrain went to colortex0, not the main target. So terrain behind water/glass doesn't show in the land shot.
-  - Plan:
-    - Take over Sodium's TRANSLUCENT group the same way, with the pack's `gbuffers_water`. Find where `executeClassicTransparency` calls `renderGroup(TRANSLUCENT, …)` (LevelRenderer.java:689) and draw it in a pack pass before or after "Main" (it's inside "Main" today, after the solid features).
-    - Run deferred1 before it (Vitrail frame.md "The chain is cut in three"): deferred must see opaque terrain only.
-    - Blend state comes from the pack (Iris default for water is translucent blending).
-    - Water is drawn by Sodium's `DefaultFluidRenderer`, not BlockRenderer, so the fluid id (low bit 1) needs a mixin there.
-    - Translucent quads are written later by the translucent sorter (`TranslucentGeometryCollector`), so the thread-local block id doesn't reach them. Carry it on `ChunkVertexEncoder.Vertex` (Vitrail ChunkVertexMixin + `copyVertexTo`).
-    - Decide how the seed treats translucent pixels the pack draws (write the coverage mask from gbuffers_water too).
-- **6d-4: entities, block entities, hand, particles, weather, clouds.** Vitrail entities.md: "the door is a group of draws", plus its own vertex format.
+- **6d-3 result (2026-11-20, ✅): water and translucent terrain drawn by the pack's `gbuffers_water`.**
+  - The chain is cut in two around the world (Vitrail's "after opaque" / "after level"):
+    - `mixin/LevelRendererTerrainMixin.luxium$afterOpaque` wraps `executeClassicTransparency` (LevelRenderer.java:461). It closes the game's "Main" pass (closing is idempotent), then:
+      - `PackChain.drawDeferred`: converts depth (also kept as depthtex1/2 = before translucents), seeds colortex0, runs the deferred passes.
+      - `TerrainTakeover.drawTranslucent`: Sodium's TRANSLUCENT group with `gbuffers_water`.
+      - Then opens a pass on the **translucent catch** (an RGBA8 image cleared to transparent, with the game's depth) for the rest of the game's translucent phase (translucent features, clouds, weather, world border).
+      - `PackChain.composeCatch` then composes it onto colortex0 (premultiplied "over"; the game's TRANSLUCENT blend onto a clear image leaves premultiplied colour).
+    - `PackChain.draw` (before render3dHud) re-converts depthtex0 (now with translucents) and runs composite + final. If the cut wasn't reached (e.g. improved transparency / OIT), it runs the whole chain as before.
+  - Water pipeline:
+    - Writes colortex0 and colortex3, with no coverage output (`ProgramTranslator.Terrain(alpha, coverage)`).
+    - Blend comes from `blend.gbuffers_water[.<buffer>]`, else vanilla TRANSLUCENT. Alpha test from `alphaTest.gbuffers_water` (Complementary: > 0.0001).
+  - Block ids: fluids via `mixin/sodium/DefaultFluidRendererMixin` (fluid bit set). Translucent quads the sorter keeps carry the id on `ChunkVertexEncoder.Vertex` (`mixin/sodium/ChunkVertexMixin` + `sodium/LuxiumVertexData`). Complementary: water = 32000, glass = 32008.
+  - **Bug found and fixed:** gbuffer programs' input textures were resolved at frame start. The water then read the half of colortex5 from *before* deferred1's flip, and Complementary's gbuffers_water discards where `gaux2.a` (cloud depth) is nearer, so every water/glass pixel vanished. Inputs are now resolved right before each terrain pass opens.
+  - Debug additions:
+    - `LUXIUM_SHOW=depthdiff`: |depthtex0 − depthtex1|, ×`LUXIUM_SHOW_SCALE` (default 1000).
+    - `LUXIUM_SHOW=<buffer>:alt`: the other half; after a pass that wrote the buffer, that's what the pass read.
+  - Game test: the glass box and the water are the pack's; the stone floor shows through the water and the gold/log blocks through the glass. 0 validation messages. Unit tests pass (72), scoreboard 90/90.
+  - Known gaps:
+    - Game features drawn after the cut but outside `executeClassicTransparency` (entity outlines, see-through text, always-on-top gizmos) land in the game's image and are overwritten by final.
+    - Translucent features drawn before translucent terrain in vanilla now depth-test against the water (hidden behind it, not seen through it).
+    - The caught layer is the game's finished sRGB colour composed onto the pack's colortex0.
+    - Improved transparency (OIT) isn't taken over.
+    - Water inputs that the chain hasn't written this frame (gaux4 = colortex7) read last frame's values, as under Iris.
+- **6d-4 handoff (start here next session): entities, block entities, hand, particles, weather, clouds.**
+  - Read Vitrail `docs/internals/entities.md` ("the door is a group of draws") and frame.md "The seed".
+  - Solid entities are drawn by `featureFrame.executeSolid(renderPass)` inside "Main", right after the (skipped) opaque terrain call in `executeSolid`. Translucent ones are drawn in `executeClassicTransparency` (now drawn onto the catch).
+  - They need their own vertex format (`DefaultVertexFormat.ENTITY`, DefaultVertexFormat.java:40; elements by name, through `ProgramTranslator.translateForFormat`), plus `entityId`/`blockEntityId`/`entityColor` per draw.
+  - Entities drawn by the pack must write the coverage mask too, so the seed keeps them.
 - **6e: shadow pass.**
 - Metallum's only Sodium mixin picks the graphics API (`metallum.sodium.mixins.json`: `SodiumPreferredGraphicsApiMixin`). Sodium already draws through the game's RenderPearl API, so Vitrail's Sodium-level hooks should apply on Metal too.
 

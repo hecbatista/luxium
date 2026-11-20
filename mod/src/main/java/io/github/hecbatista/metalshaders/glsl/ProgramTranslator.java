@@ -262,8 +262,10 @@ public final class ProgramTranslator {
      *
      * @param alphaTest the pass's alpha test on output 0 ({@code > alphaTest} keeps the fragment),
      *                  or NaN for none (Iris: solid terrain OFF, cutout HALF_ALPHA = 0.5)
+     * @param coverage  whether the fragment stage writes the coverage mask as one more output
+     *                  (opaque terrain, drawn before the seed; translucents are drawn after it)
      */
-    public record Terrain(float alphaTest) {
+    public record Terrain(float alphaTest, boolean coverage) {
     }
 
     /**
@@ -757,7 +759,7 @@ public final class ProgramTranslator {
                 h.append("layout(location = ").append(index).append(") out vec4 luxium_FragData").append(index).append(";\n");
                 fragmentOutputs.add(new Slot("luxium_FragData" + index, "vec4", "", index));
             }
-            if (terrain != null) {
+            if (terrain != null && terrain.coverage()) {
                 int location = coverageLocation(s.tokens, outputsUsed);
                 h.append("layout(location = ").append(location).append(") out vec4 ").append(COVERAGE_OUTPUT).append(";\n");
                 fragmentOutputs.add(new Slot(COVERAGE_OUTPUT, "vec4", "", location));
@@ -797,7 +799,10 @@ public final class ProgramTranslator {
             if (!Float.isNaN(terrain.alphaTest()) && outputsUsed.contains(0)) {
                 main.append("    if (!(luxium_FragData0.a > ").append(terrain.alphaTest()).append(")) discard;\n");
             }
-            main.append("    ").append(COVERAGE_OUTPUT).append(" = vec4(gl_FragCoord.z, 0.0, 0.0, 1.0);\n}\n");
+            if (terrain.coverage()) {
+                main.append("    ").append(COVERAGE_OUTPUT).append(" = vec4(gl_FragCoord.z, 0.0, 0.0, 1.0);\n");
+            }
+            main.append("}\n");
             body += main;
         }
         if (elements != null && vertex) {

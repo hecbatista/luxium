@@ -12,7 +12,9 @@
     "SkyRendererMixin",
     "sodium.BlockRendererMixin",
     "sodium.ChunkMeshFormatsMixin",
-    "sodium.DefaultChunkRendererMixin"
+    "sodium.ChunkVertexMixin",
+    "sodium.DefaultChunkRendererMixin",
+    "sodium.DefaultFluidRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1

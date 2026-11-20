@@ -7,6 +7,8 @@ import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
 import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.renderpearl.api.commands.RenderPassDescriptor;
 import com.mojang.renderpearl.api.pipeline.BindGroupLayout;
+import com.mojang.renderpearl.api.pipeline.BlendFactor;
+import com.mojang.renderpearl.api.pipeline.BlendFunction;
 import com.mojang.renderpearl.api.pipeline.ColorTargetState;
 import com.mojang.renderpearl.api.pipeline.CompiledRenderPipeline;
 import com.mojang.renderpearl.api.pipeline.DepthStencilState;
@@ -64,7 +66,8 @@ import java.util.function.Function;
  */
 public final class TerrainTakeover {
     private record Program(TerrainRenderPass pass, ProgramTranslator.Result result, Std140Layout.Layout layout,
-                           Map<String, String> defaults, CompiledRenderPipeline compiled, List<MappableRingBuffer> rings, int stage) {
+                           Map<String, String> defaults, CompiledRenderPipeline compiled, List<MappableRingBuffer> rings, int stage,
+                           List<Integer> writes, boolean coverage) {
     }
 
     /** Albedo sampler names a pack may read the block atlas under (Iris: gtexture, texture, tex). */
@@ -75,13 +78,13 @@ public final class TerrainTakeover {
 
     private static final Map<TerrainRenderPass, Program> programs = new IdentityHashMap<>();
     private static final Map<String, GpuTextureView> inputs = new HashMap<>();
-    private static List<Integer> drawBuffers = List.of();
     private static boolean prepared;
     private static GpuSampler atlasSampler;
 
     // Per-frame and per-pass state.
     private static ChunkSectionsToRender sections;
     private static boolean drewOpaque;
+    private static boolean drewTranslucent;
     private static boolean inPass;
     private static TerrainRenderPass currentPass;
     private static int ringSlot;
@@ -98,34 +101,106 @@ public final class TerrainTakeover {
         return prepared && !SWITCHED_OFF && PackChain.ready();
     }
 
-    /** Compiles the pack's terrain program for Sodium's solid and cutout passes. */
-    public static void prepare(String[] terrain) {
+    /**
+     * Compiles the pack's terrain program for Sodium's solid and cutout passes, and its water
+     * program (if any) for the translucent pass. {@code properties} is the preprocessed
+     * shaders.properties, for the {@code alphaTest.*} and {@code blend.*} directives.
+     */
+    public static void prepare(String[] terrain, String[] water, java.util.Properties properties) {
         try {
             // Iris ShaderKey: SODIUM_TERRAIN_SOLID is AlphaTests.OFF, SODIUM_TERRAIN_CUTOUT is HALF_ALPHA.
-            add(DefaultTerrainRenderPasses.SOLID, "solid", terrain, Float.NaN, 8);        // WorldRenderingPhase.TERRAIN_SOLID
-            add(DefaultTerrainRenderPasses.CUTOUT, "cutout", terrain, 0.5f, 10);         // WorldRenderingPhase.TERRAIN_CUTOUT
+            add(DefaultTerrainRenderPasses.SOLID, "gbuffers_terrain", "solid", terrain, Float.NaN, 8, true, properties);   // TERRAIN_SOLID
+            add(DefaultTerrainRenderPasses.CUTOUT, "gbuffers_terrain", "cutout", terrain, 0.5f, 10, true, properties);     // TERRAIN_CUTOUT
             atlasSampler = RenderSystem.getDevice().createSampler(AddressMode.CLAMP_TO_EDGE, AddressMode.CLAMP_TO_EDGE,
                     FilterMode.NEAREST, FilterMode.NEAREST, 1, OptionalDouble.empty());
             prepared = true;
             MetalShadersClient.LOGGER.info("Terrain takeover ready: gbuffers_terrain writes colortex{} plus the coverage mask",
-                    drawBuffers);
+                    programs.get(DefaultTerrainRenderPasses.SOLID).writes());
         } catch (Exception e) {
             programs.clear();
             MetalShadersClient.LOGGER.error("Terrain takeover disabled: {}", e.getMessage(), e);
+            return;
+        }
+        if (water == null) {
+            MetalShadersClient.LOGGER.warn("Translucent terrain stays the game's: the pack has no gbuffers_water");
+            return;
+        }
+        try {
+            // Iris ShaderKey: SODIUM_TERRAIN_TRANSLUCENT is ONE_TENTH_ALPHA unless the pack says otherwise.
+            float alpha = alphaTest(properties, "gbuffers_water", 0.1f);
+            add(DefaultTerrainRenderPasses.TRANSLUCENT, "gbuffers_water", "translucent", water, alpha, 17, false, properties); // TERRAIN_TRANSLUCENT
+        } catch (Exception e) {
+            programs.remove(DefaultTerrainRenderPasses.TRANSLUCENT);
+            MetalShadersClient.LOGGER.error("Translucent terrain stays the game's: {}", e.getMessage(), e);
         }
     }
 
-    private static void add(TerrainRenderPass pass, String name, String[] glsl, float alphaTest, int stage) throws Exception {
-        ProgramTranslator.Result r = ProgramTranslator.translateForTerrain(glsl[0], glsl[1], new ProgramTranslator.Terrain(alphaTest));
+    /** {@code alphaTest.<program>=GREATER 0.1} (Iris AlphaTest syntax); only GREATER and off are read. */
+    static float alphaTest(java.util.Properties properties, String program, float fallback) {
+        String v = properties.getProperty("alphaTest." + program);
+        if (v == null) {
+            return fallback;
+        }
+        String[] parts = v.strip().split("\\s+");
+        if (parts[0].equalsIgnoreCase("off")) {
+            return Float.NaN;
+        }
+        if (parts.length == 2 && parts[0].equals("GREATER")) {
+            return Float.parseFloat(parts[1]);
+        }
+        MetalShadersClient.LOGGER.warn("alphaTest.{}={} isn't supported; using > {}", program, v, fallback);
+        return fallback;
+    }
+
+    /**
+     * The blend for one draw buffer of a program (OptiFine/Iris {@code blend.<program>} and
+     * {@code blend.<program>.<buffer>}: "off" or four factors src dst srcAlpha dstAlpha), else
+     * {@code fallback}. The factor names are the same as the game's BlendFactor names.
+     */
+    static Optional<BlendFunction> blend(java.util.Properties properties, String program, int buffer, Optional<BlendFunction> fallback) {
+        String v = null;
+        for (String name : List.of("colortex" + buffer, LEGACY_NAMES.getOrDefault(buffer, ""))) {
+            if (!name.isEmpty() && v == null) {
+                v = properties.getProperty("blend." + program + "." + name);
+            }
+        }
+        if (v == null) {
+            v = properties.getProperty("blend." + program);
+        }
+        if (v == null) {
+            return fallback;
+        }
+        String[] f = v.strip().split("\\s+");
+        if (f.length == 1 && f[0].equalsIgnoreCase("off")) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(new BlendFunction(BlendFactor.valueOf(f[0]), BlendFactor.valueOf(f[1]),
+                    BlendFactor.valueOf(f[2]), BlendFactor.valueOf(f[3])));
+        } catch (RuntimeException e) {
+            MetalShadersClient.LOGGER.warn("blend.{} = {} isn't understood; ignored", program, v);
+            return fallback;
+        }
+    }
+
+    private static final Map<Integer, String> LEGACY_NAMES = Map.of(
+            0, "gcolor", 1, "gdepth", 2, "gnormal", 3, "composite", 4, "gaux1", 5, "gaux2", 6, "gaux3", 7, "gaux4");
+
+    private static void add(TerrainRenderPass pass, String program, String name, String[] glsl, float alphaTest, int stage,
+                            boolean coverage, java.util.Properties properties) throws Exception {
+        ProgramTranslator.Result r = ProgramTranslator.translateForTerrain(glsl[0], glsl[1], new ProgramTranslator.Terrain(alphaTest, coverage));
         List<Integer> writes = r.drawBuffers().isEmpty() ? List.of(0) : r.drawBuffers();
-        int coverageAt = r.fragmentOutputs().stream().filter(s -> s.name().equals(ProgramTranslator.COVERAGE_OUTPUT))
-                .findFirst().orElseThrow().location();
-        if (coverageAt != writes.size()) {
-            throw new IllegalStateException("gbuffers_terrain writes outputs past its draw buffers " + writes);
+        if (coverage) {
+            int coverageAt = r.fragmentOutputs().stream().filter(s -> s.name().equals(ProgramTranslator.COVERAGE_OUTPUT))
+                    .findFirst().orElseThrow().location();
+            if (coverageAt != writes.size()) {
+                throw new IllegalStateException(program + " writes outputs past its draw buffers " + writes);
+            }
         }
         PackChain.requireTargets(writes);
-        drawBuffers = writes;
-        Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/gbuffers_terrain_" + name);
+        // Iris leaves gbuffers_water on the vanilla translucent blend; terrain draws unblended.
+        Optional<BlendFunction> defaultBlend = pass.isTranslucent() ? Optional.of(BlendFunction.TRANSLUCENT) : Optional.empty();
+        Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/" + program + "_" + name);
         RenderPipeline.Builder b = RenderPipeline.builder()
                 .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/terrain/" + name))
                 .withVertexShader(shader).withFragmentShader(shader)
@@ -135,12 +210,17 @@ public final class TerrainTakeover {
                 .withDepthStencilState(DepthStencilState.DEFAULT)
                 .withPushConstantSize(ProgramTranslator.SODIUM_PUSH_CONSTANT_SIZE)
                 .withVertexBinding(0, LuxiumChunkVertex.VERTEX_FORMAT);
+        List<String> blends = new ArrayList<>();
         for (int i = 0; i < writes.size(); i++) {
             int index = writes.get(i);
-            b.withColorTargetState(i, new ColorTargetState(Optional.empty(), PackChain.targetFormat(index),
+            Optional<BlendFunction> blend = blend(properties, program, index, defaultBlend);
+            blends.add("colortex" + index + (blend.isPresent() ? " blended" : " unblended"));
+            b.withColorTargetState(i, new ColorTargetState(blend, PackChain.targetFormat(index),
                     PackChain.promoted(index) ? ColorTargetState.WRITE_COLOR : ColorTargetState.WRITE_ALL));
         }
-        b.withColorTargetState(writes.size(), new ColorTargetState(Optional.empty(), GpuFormat.R32_FLOAT, ColorTargetState.WRITE_ALL));
+        if (coverage) {
+            b.withColorTargetState(writes.size(), new ColorTargetState(Optional.empty(), GpuFormat.R32_FLOAT, ColorTargetState.WRITE_ALL));
+        }
         BindGroupLayout.Builder bindings = BindGroupLayout.builder()
                 .withUniform(ProgramTranslator.SODIUM_GLOBALS, UniformType.UNIFORM_BUFFER);
         if (!r.uniforms().isEmpty()) {
@@ -154,7 +234,7 @@ public final class TerrainTakeover {
                 new LuxiumShaderSource().put(shader, ShaderType.VERTEX, r.vertex()).put(shader, ShaderType.FRAGMENT, r.fragment()),
                 Runnable::run).join().finishCompile();
         if (compiled == null) {
-            throw new IllegalStateException("gbuffers_terrain (" + name + "): the device returned no pipeline");
+            throw new IllegalStateException(program + " (" + name + "): the device returned no pipeline");
         }
         Std140Layout.Layout layout = Std140Layout.of(r.uniforms());
         Map<String, String> defaults = new HashMap<>();
@@ -163,10 +243,11 @@ public final class TerrainTakeover {
                 defaults.put(u.name(), u.defaultValue());
             }
         });
-        programs.put(pass, new Program(pass, r, layout, defaults, compiled, new ArrayList<>(), stage));
-        MetalShadersClient.LOGGER.info("Terrain {}: inputs {}, samplers {}", name,
+        programs.put(pass, new Program(pass, r, layout, defaults, compiled, new ArrayList<>(), stage, writes, coverage));
+        MetalShadersClient.LOGGER.info("Terrain {} ({}): inputs {}, samplers {}, alpha test {}, {}", name, program,
                 r.vertexInputs().stream().map(ProgramTranslator.Slot::name).toList(),
-                r.samplers().stream().map(ProgramTranslator.Sampler::name).toList());
+                r.samplers().stream().map(ProgramTranslator.Sampler::name).toList(),
+                Float.isNaN(alphaTest) ? "off" : "> " + alphaTest, blends);
     }
 
     /** Frame start (from PackChain.beginFrame, no pass open): resolve inputs, reset per-frame state. */
@@ -174,15 +255,22 @@ public final class TerrainTakeover {
         usedRings.forEach(MappableRingBuffer::rotate);
         usedRings.clear();
         drewOpaque = false;
+        drewTranslucent = false;
         ringSlot = 0;
-        if (!active()) {
-            return;
-        }
-        for (Program p : programs.values()) {
-            for (ProgramTranslator.Sampler s : p.result().samplers()) {
-                if (!ALBEDO.contains(s.name())) {
-                    inputs.put(s.name(), PackChain.inputView(s.name()));
-                }
+    }
+
+    /**
+     * What each sampler of {@code p} reads, looked up right before its pass opens (placeholders
+     * may be created, which can't happen inside a pass). Not at frame start: the deferred passes
+     * flip buffers between the opaque and the translucent terrain, and the water must read the
+     * halves they just wrote (Complementary's gbuffers_water discards where gaux2's cloud depth,
+     * written by deferred1, is nearer; a stale half made it discard everything).
+     */
+    private static void resolveInputs(Program p) {
+        inputs.clear();
+        for (ProgramTranslator.Sampler s : p.result().samplers()) {
+            if (!ALBEDO.contains(s.name())) {
+                inputs.put(s.name(), PackChain.inputView(s.name()));
             }
         }
     }
@@ -195,40 +283,64 @@ public final class TerrainTakeover {
 
     /**
      * Just before the game opens its "Main" pass: draws Sodium's opaque terrain (solid, then
-     * cutout) into a pass on the pack's targets, sharing the game's depth.
+     * cutout) into a pass on the pack's targets plus the coverage mask, sharing the game's depth.
      */
     public static void drawOpaque(GpuTextureView depth, GpuSampler sampler, GpuTextureView atlas, boolean wireframe) {
+        drewOpaque = drawGroup(ChunkSectionLayerGroup.OPAQUE, DefaultTerrainRenderPasses.SOLID, depth, sampler, atlas, wireframe);
+    }
+
+    /**
+     * After the deferred passes (the chain's "after opaque" cut): draws Sodium's translucent
+     * terrain with the pack's water program onto the halves the deferred passes wrote.
+     */
+    public static void drawTranslucent(GpuTextureView depth, GpuSampler sampler, GpuTextureView atlas, boolean wireframe) {
+        drewTranslucent = drawGroup(ChunkSectionLayerGroup.TRANSLUCENT, DefaultTerrainRenderPasses.TRANSLUCENT, depth, sampler, atlas, wireframe);
+    }
+
+    private static boolean drawGroup(ChunkSectionLayerGroup group, TerrainRenderPass first, GpuTextureView depth,
+                                     GpuSampler sampler, GpuTextureView atlas, boolean wireframe) {
+        Program p = programs.get(first);
         // Only Sodium's sections: the game's own would draw vanilla pipelines into the pack's targets.
-        if (!active() || !(sections instanceof SodiumChunkSection) || wireframe || depth == null) {
-            return;
+        if (!active() || p == null || !(sections instanceof SodiumChunkSection) || wireframe || depth == null) {
+            return false;
         }
-        RenderPassDescriptor.Builder d = RenderPassDescriptor.builder(() -> "Luxium terrain (pack gbuffers_terrain)");
-        for (int index : drawBuffers) {
+        resolveInputs(p);
+        RenderPassDescriptor.Builder d = RenderPassDescriptor.builder(() -> "Luxium terrain " + group.label() + " (pack)");
+        for (int index : p.writes()) {
             GpuTextureView view = PackChain.gbufferTarget(index);
             if (view == null) {
-                return;   // the chain's buffers aren't allocated yet (first frame)
+                return false;   // the chain's buffers aren't allocated yet (first frame)
             }
             d.withColorAttachment(view);
         }
-        d.withColorAttachment(PackChain.coverageTarget());
+        if (p.coverage()) {
+            d.withColorAttachment(PackChain.coverageTarget());
+        }
         d.withDepthAttachment(depth);
+        int before = ringSlot;
         try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(d.build())) {
             inPass = true;
-            sections.renderGroup(ChunkSectionLayerGroup.OPAQUE, pass, sampler, atlas, false);
+            sections.renderGroup(group, pass, sampler, atlas, false);
         } finally {
             inPass = false;
             currentPass = null;
         }
-        drewOpaque = true;
-        if (System.nanoTime() - logged > 5_000_000_000L) {
+        if (group == ChunkSectionLayerGroup.TRANSLUCENT && System.nanoTime() - logged > 5_000_000_000L) {
             logged = System.nanoTime();
-            MetalShadersClient.LOGGER.info("Terrain drawn by the pack: {} of Sodium's passes this frame (solid, cutout)", ringSlot);
+            MetalShadersClient.LOGGER.info("Terrain drawn by the pack this frame: {} opaque and {} translucent Sodium passes",
+                    before, ringSlot - before);
         }
+        return true;
     }
 
     /** Whether the game's own opaque terrain draw into "Main" should be skipped this frame. */
     public static boolean drewOpaque() {
         return drewOpaque;
+    }
+
+    /** Whether the game's own translucent terrain draw should be skipped this frame. */
+    public static boolean drewTranslucent() {
+        return drewTranslucent;
     }
 
     // ---- Called from DefaultChunkRendererMixin -------------------------------------------------

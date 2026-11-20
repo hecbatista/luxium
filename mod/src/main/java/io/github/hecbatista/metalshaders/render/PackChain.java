@@ -11,6 +11,7 @@ import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.renderpearl.api.commands.RenderPassDescriptor;
 import com.mojang.renderpearl.api.device.GpuDevice;
 import com.mojang.renderpearl.api.pipeline.BindGroupLayout;
+import com.mojang.renderpearl.api.pipeline.BlendFunction;
 import com.mojang.renderpearl.api.pipeline.ColorTargetState;
 import com.mojang.renderpearl.api.pipeline.CompiledRenderPipeline;
 import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
@@ -80,6 +81,9 @@ public final class PackChain {
     public static final float COVERAGE_NOTHING = 2.0f;
     private static GpuTexture depthConverted;
     private static GpuTextureView depthConvertedView;
+    /** depthtex1/2: the depth before translucents, converted (a copy of depthConverted at "after opaque"). */
+    private static GpuTexture depthPre;
+    private static GpuTextureView depthPreView;
     private static boolean failed;
     private static int width;
     private static int height;
@@ -272,12 +276,46 @@ public final class PackChain {
             encoder.clearColorTexture(coverage, new Vector4f(SkyTakeover.active() ? 0.0f : COVERAGE_NOTHING));
             SkyTakeover.beginFrame(device, encoder);
             TerrainTakeover.beginFrame();
+            deferredRan = false;
+            stopped = false;
         } catch (RuntimeException e) {
             fail("beginFrame threw", e);
         }
     }
 
-    /** Runs the whole chain; final ends up on {@code target}. */
+    /** Per frame: whether the seed and deferred passes already ran ("after opaque"), and whether a debug view stopped the chain. */
+    private static boolean deferredRan;
+    private static boolean stopped;
+
+    /**
+     * "After opaque" (Vitrail frame.md, "The chain is cut in three"): the game's opaque world is
+     * done, its translucents aren't drawn yet. Converts the depth (this copy is depthtex1/2, the
+     * depth before translucents, and depthtex0 for now), seeds colortex0 and runs the deferred
+     * passes, so the pack's water is drawn onto the halves they wrote.
+     */
+    public static void drawDeferred(RenderTarget target, Function<String, Object> values) {
+        if (!ready() || deferredRan) {
+            return;
+        }
+        try {
+            GpuDevice device = RenderSystem.getDevice();
+            CommandEncoder encoder = device.createCommandEncoder();
+            ensureTargets(device, target.width, target.height);
+            convertDepth(encoder, target, depthConvertedView);
+            encoder.copyTextureToTexture(depthConverted, depthPre, 0, 0, 0, 0, 0, width, height);
+            seed(device, encoder, target);
+            deferredRan = true;
+            runPasses(device, encoder, target, values, true);
+        } catch (RuntimeException e) {
+            fail("drawing the deferred passes threw", e);
+        }
+    }
+
+    /**
+     * "After level": the composite passes and final, which end up on {@code target}. If the
+     * deferred part didn't run this frame (no split point was reached, e.g. with improved
+     * transparency), the whole chain runs here as before.
+     */
     public static void draw(RenderTarget target, Function<String, Object> values) {
         if (!ready()) {
             return;
@@ -286,84 +324,192 @@ public final class PackChain {
             GpuDevice device = RenderSystem.getDevice();
             CommandEncoder encoder = device.createCommandEncoder();
             ensureTargets(device, target.width, target.height);
-
-            // (Clears happen in beginFrame, before the world is drawn.)
-            // 2. Stand-ins: vanilla's depth, and vanilla's image as colortex0.
-            encoder.copyTextureToTexture(target.getDepthTexture(), depthCopy, 0, 0, 0, 0, 0, width, height);
-            probeDepth(device, encoder, target);
-            try (RenderPass convert = encoder.createRenderPass(() -> "Luxium depth to OpenGL convention", depthConvertedView, Optional.empty())) {
-                convert.setPipeline(depthPipeline);
-                convert.setUniform("reversedDepth", depthCopyView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
-                convert.draw(3, 1, 0, 0);
+            if (!deferredRan) {
+                convertDepth(encoder, target, depthConvertedView);
+                encoder.copyTextureToTexture(depthConverted, depthPre, 0, 0, 0, 0, 0, width, height);
+                seed(device, encoder, target);
+                runPasses(device, encoder, target, values, true);
+            } else {
+                convertDepth(encoder, target, depthConvertedView);   // depthtex0 now includes translucents
             }
-            GpuTexture worldCopy = worldCopy(device, encoder, target);
-            try (RenderPass seed = encoder.createRenderPass(() -> "Luxium seed colortex0", view(0, true), Optional.empty())) {
-                seed.setPipeline(seedPipeline);
-                var nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
-                seed.setUniform("world", worldCopyView, nearest);
-                seed.setUniform("worldDepth", depthCopyView, nearest);
-                seed.setUniform("coverage", coverageView, nearest);
-                seed.draw(3, 1, 0, 0);
-            }
-
-            // 3. The passes.
-            String stopAfter = System.getenv("LUXIUM_STOP_AFTER");
-            if ("seed".equals(stopAfter)) {
-                showDebug(device, encoder, target);
-                return;
-            }
-            for (Pass pass : passes) {
-                if (stopAfter != null && pass.name().equals("final")) {
-                    showDebug(device, encoder, target);
-                    break;
-                }
-                Map<String, GpuTextureView> inputs = new HashMap<>();
-                for (ProgramTranslator.Sampler s : pass.program().samplers()) {
-                    inputs.put(s.name(), input(device, encoder, s.name()));
-                }
-                if (pass.ubo() != null) {
-                    try (GpuBufferSlice.MappedView v = pass.ubo().currentBuffer().map(false, true)) {
-                        UniformWriter.write(pass.layout(), values, pass.defaults(), v.data());
-                    }
-                }
-                RenderPassDescriptor.Builder d = RenderPassDescriptor.builder(() -> "Luxium " + pass.name());
-                if (pass.name().equals("final")) {
-                    d.withColorAttachment(target.getColorTextureView());
-                } else {
-                    for (int index : pass.writes()) {
-                        d.withColorAttachment(view(index, false));
-                    }
-                }
-                if (pass.writes().isEmpty() && !pass.name().equals("final")) {
-                    continue;   // a pass that writes nowhere (no DRAWBUFFERS): Vitrail leaves it empty too
-                }
-                RenderPassDescriptor descriptor = d.withRenderArea(new RenderPass.RenderArea(0, 0,
-                        pass.name().equals("final") ? target.width : width, pass.name().equals("final") ? target.height : height)).build();
-                try (RenderPass rp = encoder.createRenderPass(descriptor)) {
-                    rp.setPipeline(pass.pipeline());
-                    if (pass.ubo() != null) {
-                        rp.setUniform(ProgramTranslator.UNIFORM_BLOCK, pass.ubo().currentBuffer());
-                    }
-                    var samplers = RenderSystem.getSamplerCache();
-                    for (ProgramTranslator.Sampler s : pass.program().samplers()) {
-                        boolean nearest = s.name().startsWith("depthtex") || s.name().startsWith("shadowtex");
-                        rp.setUniform(s.name(), inputs.get(s.name()), samplers.getClampToEdge(nearest ? FilterMode.NEAREST : FilterMode.LINEAR));
-                    }
-                    rp.draw(3, 1, 0, 0);
-                }
-                if (pass.ubo() != null) {
-                    pass.ubo().rotate();
-                }
-                for (int index : new LinkedHashSet<>(pass.writes())) {
-                    current.put(index, 1 - current.get(index));   // the flip
-                }
-                if (pass.name().equals(stopAfter)) {
-                    showDebug(device, encoder, target);
-                    break;
-                }
-            }
+            runPasses(device, encoder, target, values, false);
         } catch (RuntimeException e) {
             fail("drawing threw", e);
+        }
+    }
+
+    /** The game's depth, copied and converted to the OpenGL convention into {@code into}. */
+    private static void convertDepth(CommandEncoder encoder, RenderTarget target, GpuTextureView into) {
+        encoder.copyTextureToTexture(target.getDepthTexture(), depthCopy, 0, 0, 0, 0, 0, width, height);
+        probeDepth(RenderSystem.getDevice(), encoder, target);
+        try (RenderPass convert = encoder.createRenderPass(() -> "Luxium depth to OpenGL convention", into, Optional.empty())) {
+            convert.setPipeline(depthPipeline);
+            convert.setUniform("reversedDepth", depthCopyView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+            convert.draw(3, 1, 0, 0);
+        }
+    }
+
+    /** Brings the game's image into colortex0 where the pack's own geometry isn't the front-most thing. */
+    private static void seed(GpuDevice device, CommandEncoder encoder, RenderTarget target) {
+        worldCopy(device, encoder, target);
+        try (RenderPass seed = encoder.createRenderPass(() -> "Luxium seed colortex0", view(0, true), Optional.empty())) {
+            seed.setPipeline(seedPipeline);
+            var nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
+            seed.setUniform("world", worldCopyView, nearest);
+            seed.setUniform("worldDepth", depthCopyView, nearest);
+            seed.setUniform("coverage", coverageView, nearest);
+            seed.draw(3, 1, 0, 0);
+        }
+        if ("seed".equals(System.getenv("LUXIUM_STOP_AFTER"))) {
+            showDebug(device, encoder, target);
+            stopped = true;
+        }
+    }
+
+    /** The deferred passes ({@code deferred == true}) or the composite passes and final. */
+    private static void runPasses(GpuDevice device, CommandEncoder encoder, RenderTarget target,
+                                  Function<String, Object> values, boolean deferred) {
+        String stopAfter = System.getenv("LUXIUM_STOP_AFTER");
+        for (Pass pass : passes) {
+            if (stopped) {
+                return;
+            }
+            if (pass.name().startsWith("deferred") != deferred) {
+                continue;
+            }
+            if (stopAfter != null && pass.name().equals("final")) {
+                showDebug(device, encoder, target);
+                stopped = true;
+                return;
+            }
+            Map<String, GpuTextureView> inputs = new HashMap<>();
+            for (ProgramTranslator.Sampler s : pass.program().samplers()) {
+                inputs.put(s.name(), input(device, encoder, s.name()));
+            }
+            if (pass.ubo() != null) {
+                try (GpuBufferSlice.MappedView v = pass.ubo().currentBuffer().map(false, true)) {
+                    UniformWriter.write(pass.layout(), values, pass.defaults(), v.data());
+                }
+            }
+            RenderPassDescriptor.Builder d = RenderPassDescriptor.builder(() -> "Luxium " + pass.name());
+            if (pass.name().equals("final")) {
+                d.withColorAttachment(target.getColorTextureView());
+            } else {
+                for (int index : pass.writes()) {
+                    d.withColorAttachment(view(index, false));
+                }
+            }
+            if (pass.writes().isEmpty() && !pass.name().equals("final")) {
+                continue;   // a pass that writes nowhere (no DRAWBUFFERS): Vitrail leaves it empty too
+            }
+            RenderPassDescriptor descriptor = d.withRenderArea(new RenderPass.RenderArea(0, 0,
+                    pass.name().equals("final") ? target.width : width, pass.name().equals("final") ? target.height : height)).build();
+            try (RenderPass rp = encoder.createRenderPass(descriptor)) {
+                rp.setPipeline(pass.pipeline());
+                if (pass.ubo() != null) {
+                    rp.setUniform(ProgramTranslator.UNIFORM_BLOCK, pass.ubo().currentBuffer());
+                }
+                var samplers = RenderSystem.getSamplerCache();
+                for (ProgramTranslator.Sampler s : pass.program().samplers()) {
+                    boolean nearest = s.name().startsWith("depthtex") || s.name().startsWith("shadowtex");
+                    rp.setUniform(s.name(), inputs.get(s.name()), samplers.getClampToEdge(nearest ? FilterMode.NEAREST : FilterMode.LINEAR));
+                }
+                rp.draw(3, 1, 0, 0);
+            }
+            if (pass.ubo() != null) {
+                pass.ubo().rotate();
+            }
+            for (int index : new LinkedHashSet<>(pass.writes())) {
+                current.put(index, 1 - current.get(index));   // the flip
+            }
+            if (pass.name().equals(stopAfter)) {
+                showDebug(device, encoder, target);
+                stopped = true;
+                return;
+            }
+        }
+    }
+
+    // ---- The catch: the game's own translucent phase, composed onto colortex0 -----------------
+
+    private static GpuTexture catchTex;
+    private static GpuTextureView catchView;
+    private static CompiledRenderPipeline composePipeline;
+
+    /**
+     * An image cleared to transparent, for the game's translucent phase (translucent entities,
+     * particles, clouds, weather) drawn after the seed: what it catches is composed onto colortex0
+     * with {@link #composeCatch}. Vitrail does the same for that phase (frame.md, "Where the seed
+     * does not reach"). Call outside any render pass.
+     */
+    public static GpuTextureView catchTarget(RenderTarget target) {
+        if (!ready() || !deferredRan || stopped) {
+            return null;
+        }
+        GpuDevice device = RenderSystem.getDevice();
+        GpuTexture color = target.getColorTexture();
+        if (catchTex == null || catchTex.getWidth(0) != target.width || catchTex.getHeight(0) != target.height
+                || catchTex.getFormat() != color.getFormat()) {
+            if (catchTex != null) {
+                catchView.close();
+                catchTex.close();
+            }
+            catchTex = device.createTexture("Luxium translucent catch",
+                    GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST,
+                    color.getFormat(), target.width, target.height, 1, 1);
+            catchView = device.createTextureView(catchTex);
+        }
+        device.createCommandEncoder().clearColorTexture(catchTex, new Vector4f(0, 0, 0, 0));
+        return catchView;
+    }
+
+    /**
+     * Composes the caught image over colortex0. The game's translucent blending
+     * (BlendFunction.TRANSLUCENT) onto a transparent image leaves colour already multiplied by
+     * its coverage, so the composition is premultiplied "over".
+     */
+    public static void composeCatch() {
+        if (!ready() || catchView == null || stopped) {
+            return;
+        }
+        GpuDevice device = RenderSystem.getDevice();
+        if (composePipeline == null) {
+            Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/compose_catch");
+            String vertex = """
+                    #version 450
+                    layout(location = 0) out vec2 uv;
+                    void main() {
+                        vec2 p = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
+                        uv = p;
+                        gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+                    }
+                    """;
+            String fragment = """
+                    #version 450
+                    uniform sampler2D caught;
+                    layout(location = 0) in vec2 uv;
+                    layout(location = 0) out vec4 color;
+                    void main() { color = texture(caught, uv); }
+                    """;
+            composePipeline = device.compilePipeline(RenderPipeline.builder()
+                            .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/compose_catch"))
+                            .withVertexShader(shader).withFragmentShader(shader)
+                            .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+                            .withBindGroupLayout(BindGroupLayout.builder().withUniform("caught", UniformType.COMBINED_IMAGE_SAMPLER).build())
+                            .withColorTargetState(new ColorTargetState(Optional.of(BlendFunction.TRANSLUCENT_PREMULTIPLIED_ALPHA),
+                                    plan.target(0).format(), plan.target(0).promoted() ? ColorTargetState.WRITE_COLOR : ColorTargetState.WRITE_ALL))
+                            .build(),
+                    new LuxiumShaderSource().put(shader, ShaderType.VERTEX, vertex).put(shader, ShaderType.FRAGMENT, fragment),
+                    Runnable::run).join().finishCompile();
+            if (composePipeline == null) {
+                fail("translucent catch composition failed to compile", null);
+                return;
+            }
+        }
+        try (RenderPass rp = device.createCommandEncoder().createRenderPass(() -> "Luxium compose translucent catch", view(0, true), Optional.empty())) {
+            rp.setPipeline(composePipeline);
+            rp.setUniform("caught", catchView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+            rp.draw(3, 1, 0, 0);
         }
     }
 
@@ -410,11 +556,65 @@ public final class PackChain {
                     new LuxiumShaderSource().put(shader, ShaderType.VERTEX, vertex).put(shader, ShaderType.FRAGMENT, fragment),
                     Runnable::run).join().finishCompile();
         }
-        GpuTextureView view = show.equals("rawdepth") ? depthCopyView
-                : show.equals("maindepth") ? target.getDepthTextureView() : input(device, encoder, show);
+        if (show.equals("depthdiff")) {
+            showDepthDiff(device, encoder, target);
+            return;
+        }
+        // "<name>:alt" shows the other half of a buffer (after a pass that wrote it: what it read).
+        boolean alt = show.endsWith(":alt");
+        String name = alt ? show.substring(0, show.length() - 4) : show;
+        Integer altIndex = alt ? targetIndex(name) : null;
+        GpuTextureView view = altIndex != null && halves.containsKey(altIndex) ? view(altIndex, false)
+                : show.equals("rawdepth") ? depthCopyView
+                : show.equals("maindepth") ? target.getDepthTextureView() : input(device, encoder, name);
         try (RenderPass rp = encoder.createRenderPass(() -> "Luxium debug show " + show, target.getColorTextureView(), Optional.empty())) {
             rp.setPipeline(showPipeline);
             rp.setUniform("shown", view, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+            rp.draw(3, 1, 0, 0);
+        }
+    }
+
+    private static CompiledRenderPipeline diffPipeline;
+
+    /** Debug (LUXIUM_SHOW=depthdiff): |depthtex0 - depthtex1| times LUXIUM_SHOW_SCALE (default 1000), red. */
+    private static void showDepthDiff(GpuDevice device, CommandEncoder encoder, RenderTarget target) {
+        if (diffPipeline == null) {
+            Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/show_depthdiff");
+            String vertex = """
+                    #version 450
+                    layout(location = 0) out vec2 uv;
+                    void main() {
+                        vec2 p = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
+                        uv = p;
+                        gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+                    }
+                    """;
+            String fragment = """
+                    #version 450
+                    uniform sampler2D depth0;
+                    uniform sampler2D depth1;
+                    layout(location = 0) in vec2 uv;
+                    layout(location = 0) out vec4 color;
+                    void main() {
+                        float d = abs(texture(depth0, uv).r - texture(depth1, uv).r) * SCALE;
+                        color = vec4(d, texture(depth0, uv).r < 1.0 ? 0.15 : 0.0, 0.0, 1.0);
+                    }
+                    """.replace("SCALE", System.getenv().getOrDefault("LUXIUM_SHOW_SCALE", "1000.0"));
+            diffPipeline = device.compilePipeline(RenderPipeline.builder()
+                            .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/show_depthdiff"))
+                            .withVertexShader(shader).withFragmentShader(shader)
+                            .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+                            .withBindGroupLayout(BindGroupLayout.builder().withUniform("depth0", UniformType.COMBINED_IMAGE_SAMPLER)
+                                    .withUniform("depth1", UniformType.COMBINED_IMAGE_SAMPLER).build())
+                            .withColorTargetState(ColorTargetState.DEFAULT).build(),
+                    new LuxiumShaderSource().put(shader, ShaderType.VERTEX, vertex).put(shader, ShaderType.FRAGMENT, fragment),
+                    Runnable::run).join().finishCompile();
+        }
+        try (RenderPass rp = encoder.createRenderPass(() -> "Luxium debug depthdiff", target.getColorTextureView(), Optional.empty())) {
+            rp.setPipeline(diffPipeline);
+            var nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
+            rp.setUniform("depth0", depthConvertedView, nearest);
+            rp.setUniform("depth1", depthPreView, nearest);
             rp.draw(3, 1, 0, 0);
         }
     }
@@ -509,6 +709,9 @@ public final class PackChain {
         if (index != null && halves.containsKey(index)) {
             return view(index, true);
         }
+        if (name.equals("depthtex1") || name.equals("depthtex2")) {
+            return depthPreView;
+        }
         if (name.startsWith("depthtex")) {
             return depthConvertedView;
         }
@@ -602,9 +805,16 @@ public final class PackChain {
             depthConvertedView.close();
             depthConverted.close();
         }
-        depthConverted = device.createTexture("Luxium depthtex (OpenGL convention)",
-                GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT, GpuFormat.R32_FLOAT, w, h, 1, 1);
+        depthConverted = device.createTexture("Luxium depthtex0 (OpenGL convention)",
+                GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_COPY_SRC, GpuFormat.R32_FLOAT, w, h, 1, 1);
         depthConvertedView = device.createTextureView(depthConverted);
+        if (depthPre != null) {
+            depthPreView.close();
+            depthPre.close();
+        }
+        depthPre = device.createTexture("Luxium depthtex1/2 (before translucents)",
+                GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.R32_FLOAT, w, h, 1, 1);
+        depthPreView = device.createTextureView(depthPre);
         if (coverage != null) {
             coverageView.close();
             coverage.close();
