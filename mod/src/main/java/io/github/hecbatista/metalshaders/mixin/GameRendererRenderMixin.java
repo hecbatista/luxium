@@ -23,6 +23,13 @@ abstract class GameRendererRenderMixin {
     @Shadow
     public abstract com.mojang.blaze3d.pipeline.RenderTarget mainRenderTarget();
 
+    /** Start of the world's frame: clear the pack's buffers before anything draws into them. */
+    @Inject(method = "render", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/client/renderer/GameRenderer;renderLevel()V"))
+    private void luxium$beforeWorld(final CallbackInfo ci) {
+        PackChain.beginFrame(this.mainRenderTarget());
+    }
+
     @Inject(method = "render", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/renderer/GameRenderer;renderLevel()V", shift = At.Shift.AFTER))
     private void luxium$afterWorld(final CallbackInfo ci) {

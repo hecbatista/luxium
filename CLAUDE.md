@@ -80,6 +80,22 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
   - Cut the chain in three as Vitrail does: begin/prepare before the world, deferred after opaque features (before translucents), composite + final after the level.
   - Add a way to draw one vanilla "family" with the pack's program into colortex targets (several attachments, the game's depth), plus per-draw values (renderStage etc.).
   - Prove it on the sky (`gbuffers_skybasic`/`skytextured`).
+- 6d-1 design (Vitrail `frame.md` "The seed", `sky-and-shadows.md` "The sky"):
+  - Pack gbuffer passes draw **during** the world into colortex current halves, with the **game's depth** attached. So the buffer clears move to **frame start**, before `renderLevel`.
+  - Each pack gbuffer program also writes its fragment depth into a **coverage mask** (R32_FLOAT, cleared to 2.0 = "nothing"). The sky writes the far plane (reversed-Z far = 0).
+  - The **seed** then fills colortex0 with the game's image only where the game drew in front of (or instead of) the pack: `mask` vs world depth, equal within a few ULP. Apple GPUs differ by about 1 ULP on sloped surfaces, in a 32-px tile pattern.
+  - Sky facts:
+    - 8 pieces in 4 vertex formats; declare exactly the bound format's elements.
+    - `renderStage` tells the pieces apart.
+    - The sun/moon/stars/band carry their own model-view (the day rotation), separate from the camera's.
+    - The sky pipeline has **no depth state**; the disc is a triangle fan.
+    - It's all 8 pieces or none, and a boss bar asking for world fog (the ender dragon) skips the sky entirely.
+  - Order: plumbing first (no visible change = regression check), then the sky.
+  - Plumbing ✅ (2026-11-20):
+    - `PackChain.beginFrame` (from `GameRendererRenderMixin`, before `renderLevel`) clears the buffers and the coverage mask.
+    - The seed discards where `mask` matches the raw world depth within 4 ULP (`floatBitsToInt`).
+    - Game test: picture identical to before, 0 validation messages.
+    - Next: the sky.
 - **6d-2: terrain through Sodium.** Vitrail hooks in at a handful of points without rewriting Sodium's meshing:
   - the per-pass pipeline compile (memoised by render pass)
   - the chunk vertex-format accessor (only at renderer rebuild; Sodium 0.9.2's shared geometry arena bakes the stride and needs its own mixin)

@@ -74,6 +74,10 @@ public final class PackChain {
     private static final Map<Integer, GpuTextureView> solid = new HashMap<>();
     private static CompiledRenderPipeline seedPipeline;
     private static CompiledRenderPipeline depthPipeline;
+    /** Depth each pack gbuffer pixel was drawn at; 2.0 where the pack drew nothing (Vitrail's coverage mask). */
+    private static GpuTexture coverage;
+    private static GpuTextureView coverageView;
+    public static final float COVERAGE_NOTHING = 2.0f;
     private static GpuTexture depthConverted;
     private static GpuTextureView depthConvertedView;
     private static boolean failed;
@@ -178,7 +182,9 @@ public final class PackChain {
                 .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/seed"))
                 .withVertexShader(shader).withFragmentShader(shader)
                 .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
-                .withBindGroupLayout(BindGroupLayout.builder().withUniform("world", UniformType.COMBINED_IMAGE_SAMPLER).build())
+                .withBindGroupLayout(BindGroupLayout.builder().withUniform("world", UniformType.COMBINED_IMAGE_SAMPLER)
+                        .withUniform("worldDepth", UniformType.COMBINED_IMAGE_SAMPLER)
+                        .withUniform("coverage", UniformType.COMBINED_IMAGE_SAMPLER).build())
                 .withColorTargetState(new ColorTargetState(Optional.empty(), plan.target(0).format(), ColorTargetState.WRITE_ALL))
                 .build();
         String vertex = """
@@ -190,12 +196,27 @@ public final class PackChain {
                     gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
                 }
                 """;
+        // The game's image goes into colortex0 except where the pack's own geometry is the front-most
+        // thing: there the coverage mask holds the depth the pack drew at, and the world's depth is
+        // the same (within a few units in the last place: on Apple GPUs the two differ by one on
+        // sloped surfaces). Positive floats keep their order as integers, hence floatBitsToInt.
+        // Reversed-Z: the game drawing in front means a larger depth than the mask.
         String fragment = """
                 #version 450
                 uniform sampler2D world;
+                uniform sampler2D worldDepth;
+                uniform sampler2D coverage;
                 layout(location = 0) in vec2 uv;
                 layout(location = 0) out vec4 color;
-                void main() { color = texture(world, uv); }
+                void main() {
+                    float mask = texture(coverage, uv).r;
+                    float depth = texture(worldDepth, uv).r;
+                    bool packOwnsPixel = mask <= 1.5 && abs(floatBitsToInt(depth) - floatBitsToInt(mask)) <= 4;
+                    if (packOwnsPixel) {
+                        discard;
+                    }
+                    color = texture(world, uv);
+                }
                 """;
         seedPipeline = device.compilePipeline(pipeline, new LuxiumShaderSource()
                 .put(shader, ShaderType.VERTEX, vertex).put(shader, ShaderType.FRAGMENT, fragment), Runnable::run).join().finishCompile();
@@ -228,6 +249,30 @@ public final class PackChain {
         }
     }
 
+    /**
+     * Start of a frame, before the world is drawn: clears the buffers the pack marks cleared and
+     * the coverage mask, so pack programs drawn during the world (6d) land on clean buffers.
+     */
+    public static void beginFrame(RenderTarget target) {
+        if (!ready()) {
+            return;
+        }
+        try {
+            GpuDevice device = RenderSystem.getDevice();
+            ensureTargets(device, target.width, target.height);
+            CommandEncoder encoder = device.createCommandEncoder();
+            for (Map.Entry<Integer, GpuTexture[]> e : halves.entrySet()) {
+                RenderTargetPlan.Target t = plan.target(e.getKey());
+                if (t.clear()) {
+                    encoder.clearColorTexture(e.getValue()[current.get(e.getKey())], clearColor(t));
+                }
+            }
+            encoder.clearColorTexture(coverage, new Vector4f(COVERAGE_NOTHING));
+        } catch (RuntimeException e) {
+            fail("beginFrame threw", e);
+        }
+    }
+
     /** Runs the whole chain; final ends up on {@code target}. */
     public static void draw(RenderTarget target, Function<String, Object> values) {
         if (!ready()) {
@@ -238,13 +283,7 @@ public final class PackChain {
             CommandEncoder encoder = device.createCommandEncoder();
             ensureTargets(device, target.width, target.height);
 
-            // 1. Clears, for buffers the pack marks cleared.
-            for (Map.Entry<Integer, GpuTexture[]> e : halves.entrySet()) {
-                RenderTargetPlan.Target t = plan.target(e.getKey());
-                if (t.clear()) {
-                    encoder.clearColorTexture(e.getValue()[current.get(e.getKey())], clearColor(t));
-                }
-            }
+            // (Clears happen in beginFrame, before the world is drawn.)
             // 2. Stand-ins: vanilla's depth, and vanilla's image as colortex0.
             encoder.copyTextureToTexture(target.getDepthTexture(), depthCopy, 0, 0, 0, 0, 0, width, height);
             try (RenderPass convert = encoder.createRenderPass(() -> "Luxium depth to OpenGL convention", depthConvertedView, Optional.empty())) {
@@ -255,7 +294,10 @@ public final class PackChain {
             GpuTexture worldCopy = worldCopy(device, encoder, target);
             try (RenderPass seed = encoder.createRenderPass(() -> "Luxium seed colortex0", view(0, true), Optional.empty())) {
                 seed.setPipeline(seedPipeline);
-                seed.setUniform("world", worldCopyView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+                var nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
+                seed.setUniform("world", worldCopyView, nearest);
+                seed.setUniform("worldDepth", depthCopyView, nearest);
+                seed.setUniform("coverage", coverageView, nearest);
                 seed.draw(3, 1, 0, 0);
             }
 
@@ -487,6 +529,14 @@ public final class PackChain {
         depthConverted = device.createTexture("Luxium depthtex (OpenGL convention)",
                 GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT, GpuFormat.R32_FLOAT, w, h, 1, 1);
         depthConvertedView = device.createTextureView(depthConverted);
+        if (coverage != null) {
+            coverageView.close();
+            coverage.close();
+        }
+        coverage = device.createTexture("Luxium coverage mask",
+                GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_COPY_DST,
+                GpuFormat.R32_FLOAT, w, h, 1, 1);
+        coverageView = device.createTextureView(coverage);
         MetalShadersClient.LOGGER.info("Chain buffers allocated at {}x{}: colortex{}", w, h, used);
     }
 
