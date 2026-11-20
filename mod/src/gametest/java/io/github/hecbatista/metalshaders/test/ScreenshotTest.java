@@ -4,6 +4,7 @@ import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestServerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
+import net.fabricmc.fabric.api.client.gametest.v1.screenshot.TestScreenshotOptions;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -67,6 +68,15 @@ public class ScreenshotTest implements FabricClientGameTest {
             context.waitTicks(3);
             context.takeScreenshot("luxium-1-land");
 
+            // Frame sequences for flicker checks (scripts/FlickerCheck.java): a still camera, one
+            // frame per tick. Wait for the particles to die first so only the scene's own motion
+            // (water, leaves, clouds) is left.
+            context.waitTicks(60);
+            captureFrames(context, "land", 24);
+            server.runCommand("tp @a 0 102 0 0 0");
+            context.waitTicks(40);
+            captureFrames(context, "underwater", 24);
+
             // Shot 3: the pig just hurt (the red hit flash is entityColor in the pack).
             server.runCommand("tp @a -4 101.5 -10.5 0 30");
             context.waitTicks(20);
@@ -100,6 +110,16 @@ public class ScreenshotTest implements FabricClientGameTest {
         }
     }
 
+    /** {@code count} consecutive frames, one per tick, into screenshots/frames-<name>/00.png, 01.png... */
+    private static void captureFrames(ClientGameTestContext context, String name, int count) {
+        Path dir = FabricLoader.getInstance().getGameDir().resolve("screenshots/frames-" + name);
+        for (int i = 0; i < count; i++) {
+            context.takeScreenshot(TestScreenshotOptions.of(String.format("%02d", i))
+                    .disableCounterPrefix().withDestinationDir(dir));
+            context.waitTick();
+        }
+    }
+
     /**
      * The test run's game folder (build/run/clientGameTest) is cleared before each run, so copy
      * the developer's packs from mod/run/shaderpacks/ into it.
@@ -115,6 +135,12 @@ public class ScreenshotTest implements FabricClientGameTest {
             Files.createDirectories(target);
             for (Path pack : packs.filter(Files::isRegularFile).toList()) {
                 Files.copy(pack, target.resolve(pack.getFileName()), StandardCopyOption.REPLACE_EXISTING);
+                // LUXIUM_TEST_SETTINGS="NAME=value;NAME2=value2" writes the pack's settings file
+                // (shaderpacks/<pack>.txt, as Iris names it), to check that changed settings apply.
+                String settings = System.getenv("LUXIUM_TEST_SETTINGS");
+                if (settings != null && pack.getFileName().toString().endsWith(".zip")) {
+                    Files.writeString(target.resolve(pack.getFileName() + ".txt"), settings.replace(';', '\n') + "\n");
+                }
             }
         } catch (IOException e) {
             throw new UncheckedIOException(e);

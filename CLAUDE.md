@@ -5,13 +5,13 @@ GitHub repo: `hecbatista/luxium` (renamed from `metal-shaders` on 2026-11-20; Gi
 ## Goal
 Load and run Iris/OptiFine-format shader packs (the `shaderpacks/` format) on Minecraft's **Metal** backend provided by the Metallum mod, on Apple Silicon macOS.
 
-Status (2026-11-20): steps 1–6 done. The pack draws the sky, terrain, water, entities, block entities, particles, weather, the hand and the shadow map, through its own programs (see the step 6 notes below). Next: step 7 (polish). The text right below describes the early steps. `mod/` loads next to Metallum and, at startup, logs each pack in `shaderpacks/`: its shaders folder, world-to-folder map and program-file counts (`pack/PackReader.java`). Two pieces run in tests only, not yet in the game:
+Status (2026-11-20): steps 1–6 done; step 7 (polish) in progress, see "Step 7" below. The pack draws the sky, terrain, water, entities, block entities, particles, weather, the hand and the shadow map, through its own programs (see the step 6 notes below), with the user's pack settings applied. The text right below describes the early steps. `mod/` loads next to Metallum and, at startup, logs each pack in `shaderpacks/`: its shaders folder, world-to-folder map and program-file counts (`pack/PackReader.java`). Two pieces run in tests only, not yet in the game:
 - The preprocessor: `pack/IncludeExpander.java`, then `pack/GlslPreprocessor.java` (using JCPP), with `pack/StandardDefines.java`.
 - The translator: `glsl/GlslTokenizer.java` → `glsl/Declarations.java` → `glsl/ProgramTranslator.java`, our own code with no glsl-transformer.
 
 Rendering isn't touched.
 
-Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor ✅ (pack's default settings only) · 4 translator ✅ · 5 uniforms ✅ · 6 render pipeline ✅ (gaps listed in the 6d-4 leftovers and the 6e handoff) · 7 polish.
+Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor ✅ · 4 translator ✅ · 5 uniforms ✅ · 6 render pipeline ✅ (gaps listed in the 6d-4 leftovers and the 6e handoff) · 7 polish (in progress).
 
 Step 6 plan (research 2026-11-20). Each sub-step ends with something visible in the game:
 - **6a: first pixels.** Our own tiny full-screen pass after the world draws: a mixin right after `this.renderLevel()` in `GameRenderer.render()` (`GameRenderer.java:497`, before the depth clear). This proves the whole chain: our GLSL → `FrontendGpuDevice.compilePipeline(RenderPipeline, ShaderSource, executor)` → `PipelineBuilder` (shaderc) → `MetalDevice.compilePipeline` (Metallum, `MetalDevice.java:130`) → screen.
@@ -59,7 +59,7 @@ Until 6d (gbuffers) the chain runs on vanilla's image instead of the pack's gbuf
 - The "seed" pass copies vanilla's image into colortex0; depthtex0/1/2 are a copy of vanilla's depth (D32_FLOAT).
 - noisetex is loaded from the pack (`texture.noise`).
 - `program.<folder>/<name>.enabled` and `scale.<name>` come from the preprocessed shaders.properties. Scale goes into the full-screen projection, because Metallum always sets a full viewport.
-- `pack/OptionDefaults.java` gives .properties files the pack's setting defaults (a simple version of Iris's option discovery), so `#if WORLD_BLUR == -1` switches composite3 off.
+- The pack's settings (defaults, or the user's from step 7) are defined for .properties files, so `#if WORLD_BLUR == -1` switches composite3 off. (This was `pack/OptionDefaults.java`, replaced by `pack/PackOptions.java` in step 7.)
 - **Debug view:** `LUXIUM_STOP_AFTER=<pass|seed> LUXIUM_SHOW=<colortexN|depthtex0>` (environment variables, inherited by the game) shows one buffer on screen. NaN or infinity shows as magenta.
 
 Result in the game test: 8 passes compile and run (deferred1, composite, composite1, composite4 @0.4, composite5–7, final), 14 buffers, 0 validation messages, **but the screen is black**.
@@ -254,6 +254,26 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
   - Still open in general (other packs): `invariant gl_Position` against Metal fast-math (no seam seen so far), `.gsh` geometry programs, `gl_VertexID` base vertex.
 - Metallum's only Sodium mixin picks the graphics API (`metallum.sodium.mixins.json`: `SodiumPreferredGraphicsApiMixin`). Sodium already draws through the game's RenderPearl API, so Vitrail's Sodium-level hooks should apply on Metal too.
 
+Step 7 (polish), agreed order with the user (2026-11-20): pack settings → Nether/End → off-screen shadow casters → improved transparency (OIT) → small 6d-4 leftovers → performance → housekeeping. Check in with the user before each slice. **Every slice's final pass includes the frame-sequence flicker check** (user request 2026-11-20; see "Automated in-game screenshots").
+- **7a result (2026-11-20, ✅): pack settings the user changes.**
+  - `pack/PackOptions.java` follows Iris's option rules (credited in NOTICE):
+    - Value options are `#define NAME value // [allowed]`. On/off options are `#define NAME` / `//#define NAME`, and count only if some file in the same include group tests the name with a bare `#ifdef`/`#ifndef`. That rule covers `const bool` options too.
+    - `const` options are limited to Iris's directive names.
+    - Include groups are the weakly connected parts of the include graph, which starts at the program names Iris knows. So `clrwl_*` and `voxy_*` aren't starts.
+    - A name with two different defaults is dropped as ambiguous.
+  - The settings file is Iris's: `shaderpacks/<pack file name>.txt` (e.g. `ComplementaryUnbound_r5.10.zip.txt`), `NAME=value` lines, read once when the pack loads (restart the game after editing). Luxium only reads it; Iris also rewrites it.
+    - On/off options take `true`/`false`. Value options take any value, as in Iris.
+    - Unknown names and bad values are logged as "Pack settings ignored".
+  - Applying: each file's lines are edited before include expansion (`PackPreprocessor.preprocessProgram(..., options)`, an `IncludeExpander.FileSource` wrapper). `.properties` files get `PackOptions.propertyDefines`: options that are on, then the game's defines, then every value option (Iris's order).
+  - Every start writes `shaderpacks/<pack>.luxium-options.txt`: every option with its current value, default, allowed values, and the pack's English names from `lang/en_US.lang`.
+  - Complementary: 407 options (172 on/off, 235 with values), none ambiguous. The `.properties` files test only two names that aren't options (`IRIS_FEATURE_BLOCK_EMISSION_ATTRIBUTE`, `DISTANT_HORIZONS`); the old reader didn't define them either.
+  - Game test: run twice.
+    - Defaults: picture unchanged.
+    - `LUXIUM_TEST_SETTINGS="T_SATURATION=0.00;NOT_A_SETTING=1"`: the whole picture is grey (land and underwater), and the unknown name is logged as ignored.
+    - 0 validation messages, 86 unit tests pass (new: `PackOptionsTest`), scoreboard 90/90.
+    - Flicker check: land worst 0.012% of pixels (edges of the animated mobs), underwater 0.009%. A fake one-frame glitch is caught.
+  - Not done: profiles (`profile.*`), an in-game settings screen, and reloading without a restart. A reload needs every `prepare` (PackChain, takeovers, shadow targets) to free and rebuild its GPU state.
+
 Facts for step 6:
 - **Full-screen passes:** vanilla `PostPass` uses `renderPass.draw(3, 1, 0, 0)` with no vertex buffer. Pack composite vertex shaders expect a quad (`gl_Vertex`, `gl_MultiTexCoord0`), so we need a quad vertex buffer or a special vertex prologue.
 - **Binding:** uniform blocks and textures are bound **by name** (`RenderPass.setUniform(name, buffer)` / `(name, view, sampler)`). The pipeline declares them via `RenderPipeline.Builder.withBindGroupLayout`. Shaders are referenced by `Identifier` (`withVertexShader`/`withFragmentShader`) and resolved through the `ShaderSource` given to `compilePipeline`.
@@ -310,7 +330,7 @@ Step 4 findings (2026-11-20):
   - add Iris's injected names (`projectionMatrix`, `modelViewMatrix`, `vaPosition`…), which `gbuffers_line` needs
 - The highest sampler index is composite1's 14, just under Metal's 16-per-stage limit.
 
-Known gaps: user-changed pack settings aren't applied yet; only the defaults written in the pack are used. `shaders.properties` and `dimension.properties` aren't preprocessed yet (Iris does it at `ShaderPack.java:126` and in `PropertiesPreprocessor`), so `#if` lines in them are ignored. Credits for borrowed Iris material are in `mod/NOTICE`. The repo has **no LICENSE yet**, and the LGPL material in NOTICE affects which license fits.
+Known gaps: pack settings are read only at load (no profiles, no in-game screen). `dimension.properties` isn't preprocessed yet (Iris does it at `ShaderPack.java:126`), so `#if` lines in it are ignored; the other .properties files are. Credits for borrowed Iris material are in `mod/NOTICE`. The repo has **no LICENSE yet**, and the LGPL material in NOTICE affects which license fits.
 
 Target pack: **Complementary Unbound r5.10**. Its license (Complementary License Agreement 1.8) forbids redistributing or modifying it, so never commit any of its files. The mod must run it unmodified. Under Iris's `MC_OS_MAC` define, the pack forces `COLORED_LIGHTING 0`, which turns off its compute, SSBO and 3D-image features.
 
@@ -378,6 +398,14 @@ MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 ./gradlew runClientGameTest
 - The test's game folder is cleared every run, so the test copies `mod/run/shaderpacks/*` into it first.
 - Spectator mode and a hidden HUD keep shots clean. In Survival the player falls between teleports.
 - `eula = true` in `mod/build.gradle`: the user agreed to the Minecraft EULA for this on 2026-11-20.
+- Frame sequences for flicker: after shot 1 the test takes 24 consecutive frames (one per tick, still camera) into `screenshots/frames-land/` and 24 underwater into `frames-underwater/`. Check them with:
+  ```bash
+  java scripts/FlickerCheck.java build/run/clientGameTest/screenshots/frames-land build/run/clientGameTest/screenshots/frames-underwater
+  ```
+  - It flags pixels that jump for one frame and come back (A→B→A, change > 40/255, neighbours within 12/255). It fails (exit 1) above 0.1% of a frame's pixels.
+  - It writes `<dir>-flicker.png` (heat map) and `<dir>.gif` (a looping 20 fps clip to watch). No ffmpeg on this Mac.
+  - Baseline 2026-11-20: land 0.012%, underwater 0.009%.
+- `LUXIUM_TEST_SETTINGS="NAME=value;NAME2=value2"` (environment variable) makes the test write the pack's settings file before the world loads.
 - API, read from the jar: `context.worldBuilder().create()`, `singleplayer.getServer().runCommand(...)`, `context.waitTicks(n)`, `context.takeScreenshot(name)`, `context.runOnClient(mc -> ...)`, `assertScreenshotEquals(...)`.
 
 ## Running and testing

@@ -93,7 +93,24 @@ GNU Lesser General Public License version 3
   src/main/java/io/github/hecbatista/metalshaders/pack/PropertiesPreprocessor.java adapts the
   technique of net.irisshaders.iris.shaderpack.preprocessor.PropertiesPreprocessor (which
   credits GlShader from Canvas, LGPL): lines trimmed, non-directive '#' lines and '#' chars
-  removed, backslashes hidden from JCPP. Changed: our own marker; pack options not yet defined.
+  removed, backslashes hidden from JCPP. Changed: our own marker. The defines it is given
+  (pack options that are on, then the game's, then every value option) follow
+  PropertiesPreprocessor.preprocessSource's order.
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/PackOptions.java follows Iris's shader
+  pack options: which lines are options and how a line is read
+  (net.irisshaders.iris.shaderpack.option.OptionAnnotatedSource, parsing.ParsedString,
+  StringOption.create, the VALID_CONST_OPTION_NAMES table), on/off options counted only when
+  tested by a bare #ifdef/#ifndef in the same weakly connected include group
+  (ShaderPackOptions), the starting program names of the include graph
+  (include.ShaderPackSourceNames, loading.ProgramId / ProgramArrayId / ProgramGroup), dropping
+  a name with two different defaults (OptionSet.Builder, MergedBooleanOption /
+  MergedStringOption), reading values (values.MutableOptionValues), and editing the lines
+  (OptionAnnotatedSource.edit / editConst / setBooleanDefineValue). The settings file name and
+  format follow net.irisshaders.iris.Iris.loadExternalShaderpack / tryReadConfigProperties.
+  Changed: our own code and records; the settings file is only read, never rewritten; profiles
+  aren't supported; components and files are visited in sorted order where Iris uses hash
+  order; a changed line is marked "Luxium: changed option".
 
   src/main/java/io/github/hecbatista/metalshaders/pack/PackDirectives.java follows the order
   in which net.irisshaders.iris.shaderpack.programs.ProgramSet.locateDirectives reads const
