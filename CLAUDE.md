@@ -21,6 +21,11 @@ Step 6 plan (research 2026-11-20). Each sub-step ends with something visible in 
 - **6e: shadow pass.**
 - **6f: correctness gaps** from step 4.
 
+6a result (2026-11-20, ✅): `render/TestPass.java` draws a see-through gradient after the world, through `mixin/GameRendererRenderMixin` (after `renderLevel()`). `render/LuxiumShaderSource.java` feeds our GLSL to `RenderSystem.getDevice().compilePipeline(...)`.
+- In game (validation on, 0 messages) it compiled through shaderc → Metallum, and the user saw **blue at the top, red at the bottom**, under the GUI.
+- So the vertical axis keeps the OpenGL convention end to end (`gl_Position.y = +1` is the top), matching Vitrail's note. `gl_FragCoord`'s origin is still untested.
+- TestPass is always on until 6b replaces it.
+
 Facts for step 6:
 - **Full-screen passes:** vanilla `PostPass` uses `renderPass.draw(3, 1, 0, 0)` with no vertex buffer. Pack composite vertex shaders expect a quad (`gl_Vertex`, `gl_MultiTexCoord0`), so we need a quad vertex buffer or a special vertex prologue.
 - **Binding:** uniform blocks and textures are bound **by name** (`RenderPass.setUniform(name, buffer)` / `(name, view, sampler)`). The pipeline declares them via `RenderPipeline.Builder.withBindGroupLayout`. Shaders are referenced by `Identifier` (`withVertexShader`/`withFragmentShader`) and resolved through the `ShaderSource` given to `compilePipeline`.

@@ -6,7 +6,8 @@
   ],
   "client": [
     "BiomesMixin",
-    "GameRendererMixin"
+    "GameRendererMixin",
+    "GameRendererRenderMixin"
   ],
   "injectors": {
     "defaultRequire": 1
