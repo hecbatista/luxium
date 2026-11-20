@@ -19,6 +19,19 @@ dependencies {
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	implementation "maven.modrinth:sodium:${project.sodium_version}"
 	implementation files(metallumJar)
+
+	// Tests for the parts that don't need the game running (pack reading, later the translator).
+	testImplementation platform("org.junit:junit-bom:${project.junit_version}")
+	testImplementation "org.junit.jupiter:junit-jupiter"
+	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+test {
+	useJUnitPlatform()
+	testLogging {
+		events "passed", "failed", "skipped"
+		exceptionFormat "full"
+	}
 }
 
 // Fail early, with a clear message, if Metallum hasn't been built yet.

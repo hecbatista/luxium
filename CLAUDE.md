@@ -3,7 +3,11 @@
 ## Goal
 Load and run Iris/OptiFine-format shader packs (the `shaderpacks/` format) on Minecraft's **Metal** backend provided by the Metallum mod, on Apple Silicon macOS.
 
-Status (2026-11-20): mod skeleton only. `mod/` loads next to Metallum and logs one line; it doesn't load packs or touch rendering yet.
+Status (2026-11-20): steps 1–2 of 7 done. `mod/` loads next to Metallum and, at startup, logs each pack in `shaderpacks/`: its shaders folder, world-to-folder map and program-file counts (`pack/PackReader.java`). It doesn't read shader code or touch rendering yet.
+
+Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor (`#include`, `#if`, settings, `MC_OS_MAC`) · 4 translator (GLSL → Vulkan-style GLSL; goal: every Complementary program compiles to MSL outside the game) · 5 uniforms · 6 render pipeline · 7 polish. Tests: `./gradlew test` in `mod/` (JUnit, no game needed).
+
+Known gap: `dimension.properties` is read as plain properties. Iris preprocesses it first (`ShaderPack.java:126`), so `#if` lines in it are ignored until step 3.
 
 Target pack: **Complementary Unbound r5.10**. Its license (Complementary License Agreement 1.8) forbids redistributing or modifying it, so never commit any of its files. The mod must run it unmodified. Under Iris's `MC_OS_MAC` define, the pack forces `COLORED_LIGHTING 0`, which turns off its compute, SSBO and 3D-image features.
 
