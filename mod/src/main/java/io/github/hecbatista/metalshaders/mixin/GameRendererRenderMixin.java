@@ -1,7 +1,7 @@
 package io.github.hecbatista.metalshaders.mixin;
 
 import io.github.hecbatista.metalshaders.MetalShadersClient;
-import io.github.hecbatista.metalshaders.render.FinalPass;
+import io.github.hecbatista.metalshaders.render.PackChain;
 import net.minecraft.client.renderer.GameRenderer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -23,6 +23,6 @@ abstract class GameRendererRenderMixin {
     @Inject(method = "render", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/renderer/GameRenderer;renderLevel()V", shift = At.Shift.AFTER))
     private void luxium$afterWorld(final CallbackInfo ci) {
-        FinalPass.draw(this.mainRenderTarget(), MetalShadersClient::value);
+        PackChain.draw(this.mainRenderTarget(), MetalShadersClient::value);
     }
 }

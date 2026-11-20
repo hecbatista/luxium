@@ -53,6 +53,21 @@ Until 6d (gbuffers) the chain runs on vanilla's image instead of the pack's gbuf
 - Metal has no 3-channel pixel formats, so promoted buffers must be cleared with alpha 1 and written color-only (write mask) to read like OpenGL.
 - Complementary's chain in world0: deferred1 (0,5,4) → composite (7,1) → composite1 (0,5) → [composite3 (0), off when WORLD_BLUR == -1] → composite4 (3, at 0.4 scale) → composite5 (3) → composite6 (3,2) → composite7 (3, FXAA) → final.
 
+6c-2 progress (2026-11-20): `render/PackChain.java` runs the full chain after the world.
+- Two halves per buffer with the flip, DRAWBUFFERS routing to multiple attachments, and promoted buffers written color-only.
+- Clears per plan (default clear colors: colortex1 white, others 0; promoted ones get alpha 1).
+- The "seed" pass copies vanilla's image into colortex0; depthtex0/1/2 are a copy of vanilla's depth (D32_FLOAT).
+- noisetex is loaded from the pack (`texture.noise`).
+- `program.<folder>/<name>.enabled` and `scale.<name>` come from the preprocessed shaders.properties. Scale goes into the full-screen projection, because Metallum always sets a full viewport.
+- `pack/OptionDefaults.java` gives .properties files the pack's setting defaults (a simple version of Iris's option discovery), so `#if WORLD_BLUR == -1` switches composite3 off.
+- **Debug view:** `LUXIUM_STOP_AFTER=<pass|seed> LUXIUM_SHOW=<colortexN|depthtex0>` (environment variables, inherited by the game) shows one buffer on screen. NaN or infinity shows as magenta.
+
+Result in the game test: 8 passes compile and run (deferred1, composite, composite1, composite4 @0.4, composite5–7, final), 14 buffers, 0 validation messages, **but the screen is black**.
+- Per-pass debug: the seed colortex0 is correct, and **deferred1 already writes 100% NaN** to colortex0.
+- Prime suspect: the gbuffer matrices aren't supplied yet (all zero), so position reconstruction divides by zero.
+- depthtex0 looks all black. Minecraft 26.x renders **reversed-Z** (far = 0), and Complementary expects the OpenGL convention.
+- Next: capture gbufferModelView/Projection (+ inverse, previous) the way Iris does (`MatrixUniforms`, `CapturedRenderingState`), and convert depth to the OpenGL convention (Iris `iris_undoRevZ`; Vitrail converts the depth image). Check each in the 26.3 sources.
+
 Facts for step 6:
 - **Full-screen passes:** vanilla `PostPass` uses `renderPass.draw(3, 1, 0, 0)` with no vertex buffer. Pack composite vertex shaders expect a quad (`gl_Vertex`, `gl_MultiTexCoord0`), so we need a quad vertex buffer or a special vertex prologue.
 - **Binding:** uniform blocks and textures are bound **by name** (`RenderPass.setUniform(name, buffer)` / `(name, view, sampler)`). The pipeline declares them via `RenderPipeline.Builder.withBindGroupLayout`. Shaders are referenced by `Identifier` (`withVertexShader`/`withFragmentShader`) and resolved through the `ShaderSource` given to `compilePipeline`.

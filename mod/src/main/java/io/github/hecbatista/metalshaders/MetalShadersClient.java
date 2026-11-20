@@ -3,12 +3,14 @@ package io.github.hecbatista.metalshaders;
 import io.github.hecbatista.metalshaders.glsl.ProgramTranslator;
 import io.github.hecbatista.metalshaders.glsl.Std140Layout;
 import io.github.hecbatista.metalshaders.pack.ItemIds;
+import io.github.hecbatista.metalshaders.pack.OptionDefaults;
+import io.github.hecbatista.metalshaders.pack.RenderTargetPlan;
 import io.github.hecbatista.metalshaders.pack.PackDirectives;
 import io.github.hecbatista.metalshaders.pack.PackPreprocessor;
 import io.github.hecbatista.metalshaders.pack.PackReader;
 import io.github.hecbatista.metalshaders.pack.PropertiesPreprocessor;
 import io.github.hecbatista.metalshaders.pack.StandardDefines;
-import io.github.hecbatista.metalshaders.render.FinalPass;
+import io.github.hecbatista.metalshaders.render.PackChain;
 import io.github.hecbatista.metalshaders.uniform.BiomeIds;
 import io.github.hecbatista.metalshaders.uniform.CustomUniforms;
 import io.github.hecbatista.metalshaders.uniform.GameUniforms;
@@ -116,6 +118,9 @@ public final class MetalShadersClient implements ClientModInitializer {
 
             Map<String, String> propertyDefines = new LinkedHashMap<>(defines);
             propertyDefines.putAll(BiomeIds.defines());
+            // The pack's setting defaults, so `#if WORLD_BLUR == -1` and friends work in .properties.
+            Map<String, String> options = PackReader.open(pack, (name, root, shaders) -> OptionDefaults.read(shaders));
+            options.forEach(propertyDefines::putIfAbsent);
             String properties = PackReader.open(pack, (name, root, shaders) ->
                     PackReader.readText(shaders, "/shaders.properties").orElse(""));
             String items = PackReader.open(pack, (name, root, shaders) ->
@@ -127,14 +132,7 @@ public final class MetalShadersClient implements ClientModInitializer {
             customUniforms = CustomUniforms.load(PropertiesPreprocessor.preprocess(properties, propertyDefines),
                     GAME_UNIFORMS.snapshot().keySet());
             customUniforms.update(GAME_UNIFORMS::get, (Float) GAME_UNIFORMS.get("frameTime"));
-            // Step 6b: the pack's final program.
-            var finalVsh = PackPreprocessor.preprocessProgram(pack, "/world0/final.vsh", defines);
-            var finalFsh = PackPreprocessor.preprocessProgram(pack, "/world0/final.fsh", defines);
-            if (finalVsh.ok() && finalFsh.ok()) {
-                FinalPass.prepare(finalVsh.result().text(), finalFsh.result().text());
-            } else {
-                LOGGER.warn("Pack final program skipped: {}", finalVsh.ok() ? finalFsh.error() : finalVsh.error());
-            }
+            prepareChain(pack, "world0", defines, PropertiesPreprocessor.preprocess(properties, propertyDefines));
 
             LOGGER.info("Pack formulas: {} loaded, {} dropped: {} (wetness half-lives from pack: {})",
                     customUniforms.size(), customUniforms.dropped().size(), customUniforms.dropped(), halfLives);
@@ -159,6 +157,72 @@ public final class MetalShadersClient implements ClientModInitializer {
         } catch (Exception e) {
             LOGGER.error("Coverage check failed", e);
         }
+    }
+
+    /**
+     * Step 6c: plan the buffers, pick the full-screen passes in run order (deferred, composite,
+     * then final; numbered ones by number), drop the ones shaders.properties switches off, read
+     * their scale, load noisetex, and compile everything.
+     */
+    private static void prepareChain(Path pack, String folder, Map<String, String> defines, String properties) throws Exception {
+        java.util.Properties props = new java.util.Properties();
+        props.load(new java.io.StringReader(properties));
+
+        List<String> fragmentSources = new java.util.ArrayList<>();
+        for (String program : PackDirectives.foldOrder(pack, folder)) {
+            var p = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + program + ".fsh", defines);
+            if (p.ok()) {
+                fragmentSources.add(p.result().text());
+            }
+        }
+        RenderTargetPlan plan = RenderTargetPlan.fold(fragmentSources);
+        plan.warnings().forEach(w -> LOGGER.warn("Buffer plan: {}", w));
+
+        var info = PackReader.read(pack);
+        List<String> names = info.programFiles().getOrDefault(folder, List.of()).stream()
+                .filter(f -> f.endsWith(".fsh"))
+                .map(f -> f.substring(0, f.length() - 4))
+                .filter(n -> n.matches("(deferred|composite)\\d*|final"))
+                .filter(n -> info.programFiles().get(folder).contains(n + ".vsh"))
+                .sorted(java.util.Comparator.comparingInt((String n) -> n.startsWith("deferred") ? 0 : n.startsWith("composite") ? 1 : 2)
+                        .thenComparingInt(n -> n.replaceAll("\\D", "").isEmpty() ? 0 : Integer.parseInt(n.replaceAll("\\D", ""))))
+                .toList();
+
+        List<Map.Entry<String, String[]>> programs = new java.util.ArrayList<>();
+        Map<String, Float> scales = new HashMap<>();
+        for (String n : names) {
+            String enabled = props.getProperty("program." + folder + "/" + n + ".enabled", props.getProperty("program." + n + ".enabled", "true")).strip();
+            if (enabled.equals("false")) {
+                LOGGER.info("Chain: {} is switched off by shaders.properties", n);
+                continue;
+            }
+            String scale = props.getProperty("scale." + n);
+            if (scale != null) {
+                scales.put(n, Float.parseFloat(scale.strip().split("\\s+")[0]));
+            }
+            var vsh = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + n + ".vsh", defines);
+            var fsh = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + n + ".fsh", defines);
+            if (!vsh.ok() || !fsh.ok()) {
+                LOGGER.warn("Chain: {} skipped: {}", n, vsh.ok() ? fsh.error() : vsh.error());
+                continue;
+            }
+            programs.add(Map.entry(n, new String[]{vsh.result().text(), fsh.result().text()}));
+        }
+
+        com.mojang.blaze3d.platform.NativeImage noise = null;
+        String noisePath = props.getProperty("texture.noise");
+        if (noisePath != null) {
+            String path = "/" + noisePath.strip().replaceFirst("^/", "");
+            byte[] bytes = PackReader.open(pack, (name, root, shaders) -> {
+                Path file = shaders.resolve(path.substring(1)).normalize();
+                return file.startsWith(shaders) && java.nio.file.Files.isRegularFile(file) ? java.nio.file.Files.readAllBytes(file) : null;
+            });
+            if (bytes != null) {
+                noise = com.mojang.blaze3d.platform.NativeImage.read(bytes);
+            }
+        }
+        LOGGER.info("Chain: {} passes in order {}, scales {}", programs.size(), programs.stream().map(Map.Entry::getKey).toList(), scales);
+        PackChain.prepare(plan, programs, scales, noise);
     }
 
     /** A short, readable line of the values worth comparing with the F3 screen. */

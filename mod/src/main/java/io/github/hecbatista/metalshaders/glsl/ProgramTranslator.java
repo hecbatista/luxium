@@ -103,16 +103,30 @@ public final class ProgramTranslator {
 
     /** Corner of the full-screen triangle, 0..1 in screen terms: (0,0), (2,0), (0,2). */
     private static final String FS_CORNER = "vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2)";
-    private static final String FS_PROJECTION =
-            "mat4(vec4(2.0, 0.0, 0.0, 0.0), vec4(0.0, 2.0, 0.0, 0.0), vec4(0.0), vec4(-1.0, -1.0, 0.0, 1.0))";
+    /**
+     * The projection mapping the 0..1 quad onto the screen. A pack's {@code scale.<program> = s}
+     * draws the program into the 0..s part of its targets; Iris does that with a smaller
+     * viewport, and since Metallum always sets a full viewport, the scale goes into this matrix.
+     */
+    static String fsProjection(float scale) {
+        String s = Float.toString(2.0f * scale);
+        return "mat4(vec4(" + s + ", 0.0, 0.0, 0.0), vec4(0.0, " + s + ", 0.0, 0.0), vec4(0.0), vec4(-1.0, -1.0, 0.0, 1.0))";
+    }
 
-    /** Full-screen replacements in both stages. */
-    private static final Map<String, String> FULLSCREEN_BOTH = Map.of(
-            "gl_Color", "vec4(1.0)",
-            "gl_NormalMatrix", "mat3(1.0)",
-            "gl_ModelViewMatrix", "mat4(1.0)",
-            "gl_ProjectionMatrix", FS_PROJECTION,
-            "gl_ModelViewProjectionMatrix", "(" + FS_PROJECTION + " * mat4(1.0))");
+    private static final String FS_PROJECTION = fsProjection(1.0f);
+
+    /** Full-screen replacements in both stages, for a program drawn at {@code scale}. */
+    private static Map<String, String> fullscreenBoth(float scale) {
+        String projection = fsProjection(scale);
+        return Map.of(
+                "gl_Color", "vec4(1.0)",
+                "gl_NormalMatrix", "mat3(1.0)",
+                "gl_ModelViewMatrix", "mat4(1.0)",
+                "gl_ProjectionMatrix", projection,
+                "gl_ModelViewProjectionMatrix", "(" + projection + " * mat4(1.0))");
+    }
+
+    private static final Map<String, String> FULLSCREEN_BOTH = fullscreenBoth(1.0f);
 
     /** Full-screen replacements in the vertex stage only. */
     private static final Map<String, String> FULLSCREEN_VERTEX = Map.of(
@@ -211,6 +225,11 @@ public final class ProgramTranslator {
     }
 
     public static Result translate(String vertexSource, String fragmentSource, Mode mode) throws TranslationException {
+        return translate(vertexSource, fragmentSource, mode, 1.0f);
+    }
+
+    /** @param scale the pack's scale.<program> value (1 = whole screen); only used in FULLSCREEN mode */
+    public static Result translate(String vertexSource, String fragmentSource, Mode mode, float scale) throws TranslationException {
         StageScan vs = new StageScan(Stage.VERTEX, vertexSource);
         StageScan fs = new StageScan(Stage.FRAGMENT, fragmentSource);
         List<String> warnings = new ArrayList<>();
@@ -344,15 +363,15 @@ public final class ProgramTranslator {
 
         // 4. Rewrite each stage.
         List<Slot> fragmentOutputs = new ArrayList<>();
-        String vertex = rewrite(vs, mode, uniforms, vertexInputs, varyings, fragmentOutputs, warnings);
-        String fragment = rewrite(fs, mode, uniforms, vertexInputs, varyings, fragmentOutputs, warnings);
+        String vertex = rewrite(vs, mode, scale, uniforms, vertexInputs, varyings, fragmentOutputs, warnings);
+        String fragment = rewrite(fs, mode, scale, uniforms, vertexInputs, varyings, fragmentOutputs, warnings);
 
         return new Result(vertex, fragment, List.copyOf(uniforms.values()), List.copyOf(vertexInputs.values()),
                 List.copyOf(varyings.values()), List.copyOf(fragmentOutputs), drawBuffers(fs.tokens),
                 List.copyOf(samplers.values()), List.copyOf(warnings));
     }
 
-    private static String rewrite(StageScan s, Mode mode, Map<String, Uniform> uniforms, Map<String, Slot> vertexInputs,
+    private static String rewrite(StageScan s, Mode mode, float scale, Map<String, Uniform> uniforms, Map<String, Slot> vertexInputs,
                                   Map<String, Slot> varyings, List<Slot> fragmentOutputs, List<String> warnings)
             throws TranslationException {
         List<Token> t = s.tokens;
@@ -398,7 +417,7 @@ public final class ProgramTranslator {
             }
             String name = tok.text();
             if (fullscreen) {
-                String expr = FULLSCREEN_BOTH.get(name);
+                String expr = fullscreenBoth(scale).get(name);
                 if (expr == null && vertex) {
                     expr = FULLSCREEN_VERTEX.get(name);
                     if (expr == null && name.matches("gl_MultiTexCoord[1-7]")) {
@@ -485,7 +504,7 @@ public final class ProgramTranslator {
             }
             if (s.identifiers.contains("ftransform")) {
                 h.append(fullscreen
-                        ? "vec4 luxium_ftransform() { return (" + FS_PROJECTION + " * mat4(1.0)) * vec4(" + FS_CORNER + ", 0.0, 1.0); }\n"
+                        ? "vec4 luxium_ftransform() { return (" + fsProjection(scale) + " * mat4(1.0)) * vec4(" + FS_CORNER + ", 0.0, 1.0); }\n"
                         : "vec4 luxium_ftransform() { return luxium_ModelViewProjectionMatrix * luxium_Vertex; }\n");
             }
         } else {
