@@ -323,12 +323,16 @@ public final class PackChain {
         }
     }
 
+    /** Set at "after level", cleared when the composites ran: they wait for the hand. */
+    private static boolean compositesPending;
+
     /**
-     * "After level": the composite passes and final, which end up on {@code target}. If the
-     * deferred part didn't run this frame (no split point was reached, e.g. with improved
-     * transparency), the whole chain runs here as before.
+     * "After level", before the game's 3D HUD (which clears the depth): depthtex0 now includes
+     * the translucents. If the deferred part didn't run this frame (no split point was reached,
+     * e.g. with improved transparency), the seed and deferred passes run here as before. The
+     * composites wait for {@link #afterHand}, so the pack's hand is in the picture they read.
      */
-    public static void draw(RenderTarget target, Function<String, Object> values) {
+    public static void afterLevel(RenderTarget target, Function<String, Object> values) {
         if (!ready()) {
             return;
         }
@@ -344,10 +348,98 @@ public final class PackChain {
             } else {
                 convertDepth(encoder, target, depthConvertedView);   // depthtex0 now includes translucents
             }
-            runPasses(device, encoder, target, values, false);
+            compositesPending = true;
         } catch (RuntimeException e) {
             fail("drawing threw", e);
         }
+    }
+
+    /**
+     * After the game drew the hand (into {@code handDepth}, cleared to "nothing" first): the hand's
+     * depth goes into depthtex0/1/2 where it drew (Iris's depth textures include the hand), then
+     * the composite passes and final run. Screen effects and the crosshair are drawn after this.
+     */
+    public static void afterHand(RenderTarget target, GpuTexture handDepth, Function<String, Object> values) {
+        if (!ready() || !compositesPending) {
+            return;
+        }
+        compositesPending = false;
+        try {
+            GpuDevice device = RenderSystem.getDevice();
+            CommandEncoder encoder = device.createCommandEncoder();
+            if (handDepth != null && handDepth.getWidth(0) == width && handDepth.getHeight(0) == height) {
+                encoder.copyTextureToTexture(handDepth, depthCopy, 0, 0, 0, 0, 0, width, height);
+                mergeHand(device, encoder, depthConverted, depthConvertedView);
+                mergeHand(device, encoder, depthPre, depthPreView);
+            }
+            runPasses(device, encoder, target, values, false);
+        } catch (RuntimeException e) {
+            fail("drawing the composites threw", e);
+        }
+    }
+
+    /** The whole after-level part at once (when no hand hook ran this frame). */
+    public static void draw(RenderTarget target, Function<String, Object> values) {
+        afterLevel(target, values);
+        afterHand(target, null, values);
+    }
+
+    private static CompiledRenderPipeline mergePipeline;
+    private static GpuTexture mergeScratch;
+    private static GpuTextureView mergeScratchView;
+
+    /** {@code into} = 1 - hand depth where the hand drew (reversed-Z: anything above 0), else as it was. */
+    private static void mergeHand(GpuDevice device, CommandEncoder encoder, GpuTexture into, GpuTextureView intoView) {
+        if (mergePipeline == null) {
+            Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/merge_hand_depth");
+            String vertex = """
+                    #version 450
+                    layout(location = 0) out vec2 uv;
+                    void main() {
+                        vec2 p = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
+                        uv = p;
+                        gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+                    }
+                    """;
+            String fragment = """
+                    #version 450
+                    uniform sampler2D previous;
+                    uniform sampler2D handDepth;
+                    layout(location = 0) in vec2 uv;
+                    layout(location = 0) out vec4 depth;
+                    void main() {
+                        float h = texture(handDepth, uv).r;
+                        depth = vec4(h > 0.0 ? 1.0 - h : texture(previous, uv).r);
+                    }
+                    """;
+            mergePipeline = device.compilePipeline(RenderPipeline.builder()
+                            .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/merge_hand_depth"))
+                            .withVertexShader(shader).withFragmentShader(shader)
+                            .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+                            .withBindGroupLayout(BindGroupLayout.builder().withUniform("previous", UniformType.COMBINED_IMAGE_SAMPLER)
+                                    .withUniform("handDepth", UniformType.COMBINED_IMAGE_SAMPLER).build())
+                            .withColorTargetState(new ColorTargetState(Optional.empty(), GpuFormat.R32_FLOAT, ColorTargetState.WRITE_ALL))
+                            .build(),
+                    new LuxiumShaderSource().put(shader, ShaderType.VERTEX, vertex).put(shader, ShaderType.FRAGMENT, fragment),
+                    Runnable::run).join().finishCompile();
+        }
+        if (mergeScratch == null || mergeScratch.getWidth(0) != width || mergeScratch.getHeight(0) != height) {
+            if (mergeScratch != null) {
+                mergeScratchView.close();
+                mergeScratch.close();
+            }
+            mergeScratch = device.createTexture("Luxium hand depth merge", GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_COPY_SRC,
+                    GpuFormat.R32_FLOAT, width, height, 1, 1);
+            mergeScratchView = device.createTextureView(mergeScratch);
+        }
+        try (RenderPass rp = encoder.createRenderPass(() -> "Luxium merge hand depth", mergeScratchView, Optional.empty())) {
+            rp.setPipeline(mergePipeline);
+            var nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
+            rp.setUniform("previous", intoView, nearest);
+            rp.setUniform("handDepth", depthCopyView, nearest);
+            rp.draw(3, 1, 0, 0);
+        }
+        encoder.copyTextureToTexture(mergeScratch, into, 0, 0, 0, 0, 0, width, height);
     }
 
     /** The game's depth, copied and converted to the OpenGL convention into {@code into}. */
@@ -818,7 +910,8 @@ public final class PackChain {
             depthConverted.close();
         }
         depthConverted = device.createTexture("Luxium depthtex0 (OpenGL convention)",
-                GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_COPY_SRC, GpuFormat.R32_FLOAT, w, h, 1, 1);
+                GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_COPY_SRC | GpuTexture.USAGE_COPY_DST,
+                GpuFormat.R32_FLOAT, w, h, 1, 1);
         depthConvertedView = device.createTextureView(depthConverted);
         if (depthPre != null) {
             depthPreView.close();

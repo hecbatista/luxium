@@ -20,7 +20,7 @@ import java.util.stream.Stream;
  * <p>
  * The scene, made with commands at noon in clear weather: a stone floor and a sealed glass box
  * full of water, an oak-log block, a gold block, a leaves block, a pig and a chest. Shot 1 looks at the box from
- * outside; shot 2 is from inside the water; shot 3 is the pig just hurt; shot 4 is rain.
+ * outside; shot 2 is from inside the water; shot 3 is the pig just hurt; shot 4 is rain; shot 5 is the hand holding a sword.
  */
 @SuppressWarnings("UnstableApiUsage")
 public class ScreenshotTest implements FabricClientGameTest {
@@ -81,6 +81,18 @@ public class ScreenshotTest implements FabricClientGameTest {
             context.waitTicks(140);
             context.takeScreenshot("luxium-4-rain");
             server.runCommand("weather clear");
+
+            // Shot 5: the player's hand holding an item (needs a non-spectator player and the HUD on).
+            server.runCommand("gamemode creative @a");
+            server.runCommand("item replace entity @a weapon.mainhand with minecraft:iron_sword");
+            server.runCommand("tp @a 0 100 -14 0 10");
+            context.runOnClient(mc -> {
+                if (mc.gui.hud.isHidden()) {
+                    mc.gui.hud.toggle();
+                }
+            });
+            context.waitTicks(40);
+            context.takeScreenshot("luxium-5-hand");
         }
     }
 

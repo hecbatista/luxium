@@ -41,7 +41,7 @@ public final class RenderMatrices {
      * Reversed-Z back to OpenGL's depth convention, Iris's MatrixUtils.undoRevZ: with depth 0..1
      * (Metal, and Metallum says so), z' = w - 2z, so depth 1 - d maps to OpenGL's -1..1 range.
      */
-    static Matrix4f undoRevZ(Matrix4f m, boolean zZeroToOne) {
+    public static Matrix4f undoRevZ(Matrix4f m, boolean zZeroToOne) {
         if (zZeroToOne) {
             m.m02(m.m03() - 2.0f * m.m02());
             m.m12(m.m13() - 2.0f * m.m12());

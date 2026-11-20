@@ -91,6 +91,8 @@ public final class EntityTakeover {
         final Set<String> elements;
         /** Iris's alpha test for the family when it doesn't follow the pipeline (particles: one tenth). */
         final boolean alwaysTenth;
+        /** The hand: Iris's depth squeeze, and the hand's projection (see openHandWindow). */
+        boolean hand;
         boolean prepared;
         /** One uniform buffer per draw this frame (each draw has its own ids). */
         final List<MappableRingBuffer> rings = new java.util.ArrayList<>();
@@ -119,7 +121,7 @@ public final class EntityTakeover {
             Program p = byAlpha.get(alpha);
             if (p == null) {
                 ProgramTranslator.Result r = ProgramTranslator.translateForDraw(glsl[0], glsl[1], elements,
-                        new ProgramTranslator.Format(alpha, coverage(), RENAMES));
+                        new ProgramTranslator.Format(alpha, coverage(), RENAMES, hand));
                 Map<String, String> defaults = new HashMap<>();
                 r.uniforms().forEach(u -> {
                     if (u.defaultValue() != null) {
@@ -155,10 +157,18 @@ public final class EntityTakeover {
             DefaultVertexFormat.PARTICLE, PARTICLE_ELEMENTS, true);
     /** Rain and snow (Iris ShaderKey WEATHER: the PARTICLE format, one tenth; WorldRenderingPhase.RAIN_SNOW = 21). */
     private static final Family WEATHER = new Family("gbuffers_weather", true, 21, DefaultVertexFormat.PARTICLE, PARTICLE_ELEMENTS, true);
-    private static final List<Family> ALL = List.of(SOLID, BLOCK, TRANSLUCENT, PARTICLES, PARTICLES_TRANSLUCENT, WEATHER);
+    /** The hand (Iris ShaderKey HAND_CUTOUT / HAND_TRANSLUCENT: one tenth; WorldRenderingPhase HAND_SOLID 16, HAND_TRANSLUCENT 23). */
+    private static final Family HAND = new Family("gbuffers_hand", false, 16, DefaultVertexFormat.ENTITY, ELEMENTS, true);
+    private static final Family HAND_TRANSLUCENT = new Family("gbuffers_hand_water", true, 23, DefaultVertexFormat.ENTITY, ELEMENTS, true);
+    private static final List<Family> ALL = List.of(SOLID, BLOCK, TRANSLUCENT, PARTICLES, PARTICLES_TRANSLUCENT, WEATHER, HAND, HAND_TRANSLUCENT);
+
+    static {
+        HAND.hand = true;
+        HAND_TRANSLUCENT.hand = true;
+    }
 
     /** Which part of the level's features is being drawn. */
-    private enum Phase { SOLID, TRANSLUCENT }
+    private enum Phase { SOLID, TRANSLUCENT, HAND }
     private static final Map<CompiledRenderPipeline, Program> programOf = new IdentityHashMap<>();
     private static int compiledCount;
 
@@ -206,6 +216,33 @@ public final class EntityTakeover {
         prepareFamily(PARTICLES_TRANSLUCENT, translucent, properties, translucentName);
     }
 
+    /**
+     * The hand programs, already resolved through Iris's fallbacks (hand -> textured_lit -> ...;
+     * hand_water -> hand). {@code name}s are the programs found.
+     */
+    public static void prepareHand(String name, String[] hand, String translucentName, String[] translucent, Properties properties) {
+        prepareFamily(HAND, hand, properties, name);
+        prepareFamily(HAND_TRANSLUCENT, translucent, properties, translucentName);
+    }
+
+    public static boolean handActive() {
+        return active(HAND);
+    }
+
+    /** The hand's projection (the hud's, OpenGL convention) and depth, for the hand window. */
+    private static Matrix4f handProjection;
+    private static GpuTextureView holdDepth;
+
+    /**
+     * Around the game's hand draw (GameRenderer.renderItemInHand): the hand's draws go to the
+     * pack's hand programs, under the hand's projection, depth-tested against the hand's depth.
+     */
+    public static void openHandWindow(Function<String, Object> values, Matrix4f projection, GpuTextureView depth) {
+        handProjection = projection;
+        holdDepth = depth;
+        open(Phase.HAND, values, List.of(HAND, HAND_TRANSLUCENT));
+    }
+
     /** The weather program, already resolved through Iris's fallbacks (weather -> textured_lit -> textured -> basic). */
     public static void prepareWeather(String name, String[] weather, Properties properties) {
         prepareFamily(WEATHER, weather, properties, name);
@@ -242,7 +279,11 @@ public final class EntityTakeover {
      * entity's solid draws go to gbuffers_block (Iris ProgramId.Block), falling back to
      * gbuffers_entities if the pack has none.
      */
-    private static Family familyFor(DrawIds.Ids ids) {
+    private static Family familyFor(DrawIds.Ids ids, RenderPipeline pipeline) {
+        if (window == Phase.HAND) {
+            boolean blended = pipeline.getColorTargetStates().size() == 1 && pipeline.getColorTargetStates().getFirst().blendFunction().isPresent();
+            return blended ? HAND_TRANSLUCENT : HAND;
+        }
         if (window == Phase.TRANSLUCENT) {
             return TRANSLUCENT;
         }
@@ -255,8 +296,8 @@ public final class EntityTakeover {
     /** Whether the open window serves this draw; if so, the next {@link #hold()} and draw use its family. */
     public static boolean serves(net.minecraft.client.renderer.rendertype.PreparedRenderType type) {
         DrawIds.Ids ids = DrawIds.of(type);
-        Family f = familyFor(ids);
         RenderPipeline pipeline = type.pipeline();
+        Family f = familyFor(ids, pipeline);
         if (f == null || !active(f) || !targetsReady(f) || f.refused.contains(pipeline)) {
             return false;
         }
@@ -419,6 +460,8 @@ public final class EntityTakeover {
     public static void closeWindow() {
         releaseHold();
         window = null;
+        handProjection = null;
+        holdDepth = null;
         particleFamily = null;
         for (Family f : ALL) {
             if (f.served > 0 && System.nanoTime() - logged > 5_000_000_000L) {
@@ -532,7 +575,7 @@ public final class EntityTakeover {
             if (f.coverage()) {
                 d.withColorAttachment(PackChain.coverageTarget());
             }
-            d.withDepthAttachment(Minecraft.getInstance().gameRenderer.mainRenderTarget().getDepthTextureView());
+            d.withDepthAttachment(holdDepth != null ? holdDepth : Minecraft.getInstance().gameRenderer.mainRenderTarget().getDepthTextureView());
             hold = RenderSystem.getDevice().createCommandEncoder().createRenderPass(d.build());
         }
         return hold;
@@ -622,7 +665,11 @@ public final class EntityTakeover {
      */
     private static Function<String, Object> perFrame(Function<String, Object> values) {
         Matrix4f modelView = values.apply("gbufferModelView") instanceof Matrix4fc m ? new Matrix4f(m) : new Matrix4f();
-        Matrix4f projection = values.apply("gbufferProjection") instanceof Matrix4fc m ? new Matrix4f(m) : new Matrix4f();
+        // The hand is drawn under the hud projection (its own field of view), and that's what the
+        // hand programs' gl_ProjectionMatrix is (Vitrail frame.md: "the one family whose
+        // gl_ProjectionMatrix is not the frame's"); gbufferProjection stays the world's.
+        Matrix4f projection = handProjection != null ? new Matrix4f(handProjection)
+                : values.apply("gbufferProjection") instanceof Matrix4fc m ? new Matrix4f(m) : new Matrix4f();
         Matrix4fc[] textureMatrices = new Matrix4fc[8];
         Arrays.fill(textureMatrices, new Matrix4f());
         textureMatrices[1] = LIGHTMAP_MATRIX;

@@ -38,7 +38,30 @@ abstract class GameRendererRenderMixin {
     @Inject(method = "renderLevel", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/renderer/GameRenderer;render3dHud(Lnet/minecraft/client/renderer/state/level/CameraRenderState;Lnet/minecraft/client/renderer/state/level/PlayerRenderState;Lnet/minecraft/client/renderer/state/OptionsRenderState;Z)V"))
     private void luxium$afterWorld(final CallbackInfo ci) {
-        PackChain.draw(this.mainRenderTarget(), MetalShadersClient::value);
+        PackChain.afterLevel(this.mainRenderTarget(), MetalShadersClient::value);
+        if (!io.github.hecbatista.metalshaders.render.EntityTakeover.handActive()) {
+            // The game draws the hand itself: the composites must run first, as before 6d-4,
+            // or final would paint over it.
+            PackChain.afterHand(this.mainRenderTarget(), null, MetalShadersClient::value);
+        }
+    }
+
+    /**
+     * After the game drew the hand (render3dHud -> renderItemInHand, GameRenderer.java:691), and
+     * before the screen effects and the crosshair: the hand's depth joins depthtex0/1/2 and the
+     * pack's composites and final run, so the pack's hand is in the picture they read.
+     */
+    @Inject(method = "render3dHud", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/client/renderer/GameRenderer;renderItemInHand(Lnet/minecraft/client/renderer/state/level/CameraRenderState;Lnet/minecraft/client/renderer/state/level/PlayerRenderState;Lcom/mojang/renderpearl/api/textures/GpuTextureView;)V",
+            shift = At.Shift.AFTER))
+    private void luxium$afterHand(final CallbackInfo ci, @Local final com.mojang.renderpearl.api.textures.GpuTexture depthTexture) {
+        PackChain.afterHand(this.mainRenderTarget(), depthTexture, MetalShadersClient::value);
+    }
+
+    /** If render3dHud didn't run this frame, the composites still do (they always end the level). */
+    @Inject(method = "renderLevel", at = @At("RETURN"))
+    private void luxium$levelDone(final CallbackInfo ci) {
+        PackChain.afterHand(this.mainRenderTarget(), null, MetalShadersClient::value);
     }
 
     /**

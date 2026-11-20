@@ -256,8 +256,14 @@ public final class ProgramTranslator {
      * @param coverage       as {@link Terrain#coverage()}
      * @param samplerRenames pack sampler name -> the game's (e.g. tex -> Sampler0), so the game's
      *                       own draw binds the texture it would have bound for its shader
+     * @param handDepth      squeeze the depth into 0.4375..0.5625 (OpenGL convention) as Iris does
+     *                       for the hand (HandRenderer.DEPTH = 0.125, MC_HAND_DEPTH), so packs can
+     *                       tell hand pixels apart (Complementary: depth < 0.56)
      */
-    public record Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames) {
+    public record Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames, boolean handDepth) {
+        public Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames) {
+            this(alphaTest, coverage, samplerRenames, false);
+        }
     }
 
     /** The game's overlay texture (hit flash, damage tint), bound by its entity draws (entity.vsh). */
@@ -928,7 +934,12 @@ public final class ProgramTranslator {
                     + "    entityColor = vec4(luxium_overlay.rgb, 1.0 - luxium_overlay.a);\n"
                     + "    entityColor.rgb *= float(entityColor.a != 0.0);\n"
                     : "";
-            body += "\nvoid main() {\n" + prologue + "    luxium_pack_main();\n    gl_Position.z = (gl_Position.w - gl_Position.z) * 0.5;\n}\n";
+            // Reversed-Z (see the comment above). For the hand, the OpenGL depth d is first squeezed
+            // to 0.4375 + 0.125 d (Iris HandRenderer); stored reversed that's 0.5 w - 0.0625 z.
+            String depth = dynamic && format.handDepth()
+                    ? "    gl_Position.z = 0.5 * gl_Position.w - 0.0625 * gl_Position.z;\n"
+                    : "    gl_Position.z = (gl_Position.w - gl_Position.z) * 0.5;\n";
+            body += "\nvoid main() {\n" + prologue + "    luxium_pack_main();\n" + depth + "}\n";
         }
         return h + body;
     }

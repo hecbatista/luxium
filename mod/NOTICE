@@ -183,6 +183,14 @@ GNU Lesser General Public License version 3
   (ShaderKey WEATHER one tenth, unless alphaTest.<program> says otherwise) and the render stage
   (WorldRenderingPhase.RAIN_SNOW).
 
+  The hand (mixin/GameRendererHandMixin.java, render/EntityTakeover.java, glsl/ProgramTranslator
+  Format.handDepth) follows net.irisshaders.iris.pathways.HandRenderer: the hand's depth squeezed
+  by DEPTH = 0.125 around the middle (0.4375 + 0.125 d), its own projection (the hud field of
+  view), and the program chain (ProgramId: hand -> textured_lit; hand_water -> hand) with alpha
+  one tenth (ShaderKey HAND_CUTOUT, HAND_TRANSLUCENT). Running the composites after the hand,
+  with its depth in depthtex0, follows Vitrail's docs/frame.md ("The hand is the one family the
+  engine has to move rather than intercept").
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3

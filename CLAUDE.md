@@ -199,21 +199,24 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
   - The program comes through Iris's fallbacks (Complementary: gbuffers_weather, targets 0 and 4). The alpha test follows the pack's `alphaTest.gbuffers_weather` (> 0.0001); stage RAIN_SNOW = 21.
   - **Metallum / vanilla bug found:** during rain with no snow, vanilla draws snow with `drawIndexed(0, …)`. Metallum passes that to Metal, and Metal's validation aborts the game ("indexCount(0) must be non-zero"). It happens without our takeover too (`LUXIUM_NO_ENTITIES=1`). `LevelPass` and `RoutingPass` now skip zero-count draws. Worth reporting to Metallum.
   - Game test shot 4 (rain): Complementary's rain look (overcast sky, wet floor, streaks). 0 validation messages, 74 unit tests pass, scoreboard 90/90.
+- **6d-4, sixth slice (2026-11-20, ✅): the hand.**
+  - Depth: Complementary treats depth < 0.56 as "hand" (held-item reflections, TAA, edges). Iris squeezes the hand's 0..1 depth to 0.4375 + 0.125 d (`HandRenderer.DEPTH`).
+    - In draw mode, `Format.handDepth` writes reversed `0.5 w − 0.0625 z`.
+    - The hand's projection is the hud's (`hudProjection.getMatrix` → `RenderMatrices.undoRevZ`).
+  - Chain order changed:
+    - `PackChain.afterLevel` (before `render3dHud`) converts depth.
+    - `PackChain.afterHand` runs right after `renderItemInHand`, before screen effects and the crosshair: it merges the hand's depth into depthtex0/1/2 (hand > 0 → 1 − hand), then runs composites + final.
+    - Fallback at `renderLevel` RETURN. If the pack's hand isn't active, the composites run before the hand as before.
+  - `mixin/GameRendererHandMixin`: the "Item in hand" pass is a `LevelPass`, and the hand window opens around `renderAllFeatures`, with the hold depth = the hand's own depth view.
+  - Families `gbuffers_hand` (stage 16) and `gbuffers_hand_water` (falls back to hand, stage 23), one tenth.
+  - Game test shot 5 (creative, iron sword, HUD on): the sword (`item_cutout`) and the arm (`entity_translucent`) are the pack's. 0 validation messages, 74 unit tests pass, scoreboard 90/90.
 - **6d-4 handoff (start here next session): what's left of 6d-4.**
-  - **The hand** (the biggest piece left).
-    - Today `GameRenderer.render3dHud` clears the depth (GameRenderer.java:689) and draws the hand *after* the chain (the chain runs before render3dHud), so the pack never sees it.
-    - The pack expects `gbuffers_hand` before the deferred/composite passes. Complementary's composite1 tells hand pixels by depth (`z0 <= 0.56`), so the hand needs its own depth range in depthtex0.
-    - Read Iris `pathways/HandRenderer.java` and Vitrail frame.md "The hand is the one family the engine has to move rather than intercept".
-    - 26.3 facts (GameRenderer.java:382-420, 678-723):
-      - `render3dHud` sets the hud projection (`hudProjection.setupPerspective(0.05, depthFar, hudFov, …)`) and clears depth to 0.
-      - `renderItemInHand` queues the hand into its own `handAndScreenSubmitNodeStorage` (`firstPersonHandsAndItemsRenderer.submitHandsWithItems`), prepares it with the GameRenderer's *own* `featureRenderDispatcher` (not the level's), and draws it with `renderAllFeatures` into an "Item in hand" pass on the main target.
-      - So the hand is a separate dispatcher run that the existing entity routing could serve if a window were open around it.
-    - Open question, check before coding: Iris squeezes the hand's clip depth (`HandRenderer.DEPTH = 0.125`: m22 = 0.125, m32 = 0.4375). By my arithmetic that puts hand depth at about 0.66–0.78 in window space, yet Complementary's composite1 treats `z0 <= 0.56` as hand. Work out which convention the pack really expects (OptiFine's `MC_HAND_DEPTH`) before choosing the hand's depth range on reversed-Z.
-    - The game test needs a non-spectator player holding something.
   - `currentRenderedItemId` (items and held items: `submitItem` → `ItemFeatureRenderer`, render types inside `ItemQuads`) is still 0.
   - The `current_player` entity name isn't special-cased yet.
-  - Glint, beacon beam, lightning, spider eyes (gbuffers_spidereyes); translucent particle layers aren't in the test scene yet.
-  - Watch: `LevelPass` covers "Main" and the catch only. The OIT path (improved transparency) is untouched.
+  - Glint, beacon beam, lightning, spider eyes (gbuffers_spidereyes).
+  - Translucent particle layers aren't in the test scene yet.
+  - Hand draws the pack doesn't serve (any non-ENTITY format) are drawn by the game into its image and then painted over by final.
+  - Watch: `LevelPass` covers "Main", the catch and the hand pass only. The OIT path (improved transparency) is untouched.
 - **6e: shadow pass.**
 - Metallum's only Sodium mixin picks the graphics API (`metallum.sodium.mixins.json`: `SodiumPreferredGraphicsApiMixin`). Sodium already draws through the game's RenderPearl API, so Vitrail's Sodium-level hooks should apply on Metal too.
 

@@ -361,6 +361,28 @@ public final class MetalShadersClient implements ClientModInitializer {
                 break;
             }
         }
+        // The hand, through Iris's fallbacks (hand -> textured_lit -> textured -> basic; hand_water -> hand).
+        String handName = null;
+        String[] hand = null;
+        for (String candidate : List.of("gbuffers_hand", "gbuffers_textured_lit", "gbuffers_textured", "gbuffers_basic")) {
+            var v = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".vsh", defines);
+            var f = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".fsh", defines);
+            if (v.ok() && f.ok()) {
+                handName = candidate;
+                hand = new String[]{v.result().text(), f.result().text()};
+                break;
+            }
+        }
+        var hwV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_hand_water.vsh", defines);
+        var hwF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_hand_water.fsh", defines);
+        if (PackChain.ready() && hand != null) {
+            boolean ownWater = hwV.ok() && hwF.ok();
+            LOGGER.info("Hand: {} (translucent: {})", handName, ownWater ? "gbuffers_hand_water" : handName);
+            io.github.hecbatista.metalshaders.render.EntityTakeover.prepareHand(handName, hand,
+                    ownWater ? "gbuffers_hand_water" : handName,
+                    ownWater ? new String[]{hwV.result().text(), hwF.result().text()} : hand, props);
+        }
+
         // Weather, through Iris's fallbacks (weather -> textured_lit -> textured -> basic).
         for (String candidate : List.of("gbuffers_weather", "gbuffers_textured_lit", "gbuffers_textured", "gbuffers_basic")) {
             var v = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".vsh", defines);
