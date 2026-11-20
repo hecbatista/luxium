@@ -647,10 +647,16 @@ public final class PackChain {
                         vec4 c = texture(shown, uv);
                         bool bad = any(isnan(c)) || any(isinf(c));
                         color = bad ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(abs(c.rgb) * SCALE, 1.0);
+                        if (FRAGCOORD) {
+                            // Debug (LUXIUM_SHOW=fragcoord): green = gl_FragCoord.y / height, red = uv.y.
+                            // OpenGL's convention has both grow upward, so they should match.
+                            color = vec4(uv.y, gl_FragCoord.y / float(textureSize(shown, 0).y), 0.0, 1.0);
+                        }
                     }
                     """;
             // LUXIUM_SHOW_SCALE multiplies what is shown, to make tiny values (raw depth) visible.
-            fragment = fragment.replace("SCALE", System.getenv().getOrDefault("LUXIUM_SHOW_SCALE", "1.0"));
+            fragment = fragment.replace("SCALE", System.getenv().getOrDefault("LUXIUM_SHOW_SCALE", "1.0"))
+                    .replace("FRAGCOORD", show.equals("fragcoord") ? "true" : "false");
             showPipeline = device.compilePipeline(RenderPipeline.builder()
                             .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/show"))
                             .withVertexShader(shader).withFragmentShader(shader)
@@ -668,6 +674,9 @@ public final class PackChain {
         boolean alt = show.endsWith(":alt");
         String name = alt ? show.substring(0, show.length() - 4) : show;
         Integer altIndex = alt ? targetIndex(name) : null;
+        if (show.equals("fragcoord")) {
+            name = "colortex0";
+        }
         GpuTextureView view = altIndex != null && halves.containsKey(altIndex) ? view(altIndex, false)
                 : show.equals("rawdepth") ? depthCopyView
                 : show.equals("maindepth") ? target.getDepthTextureView() : input(device, encoder, name);

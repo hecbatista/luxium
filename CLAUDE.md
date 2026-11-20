@@ -5,13 +5,13 @@ GitHub repo: `hecbatista/luxium` (renamed from `metal-shaders` on 2026-11-20; Gi
 ## Goal
 Load and run Iris/OptiFine-format shader packs (the `shaderpacks/` format) on Minecraft's **Metal** backend provided by the Metallum mod, on Apple Silicon macOS.
 
-Status (2026-11-20): steps 1–5 done and step 6 well along: the pack's sky, opaque terrain and deferred/composite/final chain draw in game (see the step 6 notes below). The text right below describes the early steps. `mod/` loads next to Metallum and, at startup, logs each pack in `shaderpacks/`: its shaders folder, world-to-folder map and program-file counts (`pack/PackReader.java`). Two pieces run in tests only, not yet in the game:
+Status (2026-11-20): steps 1–6 done. The pack draws the sky, terrain, water, entities, block entities, particles, weather, the hand and the shadow map, through its own programs (see the step 6 notes below). Next: step 7 (polish). The text right below describes the early steps. `mod/` loads next to Metallum and, at startup, logs each pack in `shaderpacks/`: its shaders folder, world-to-folder map and program-file counts (`pack/PackReader.java`). Two pieces run in tests only, not yet in the game:
 - The preprocessor: `pack/IncludeExpander.java`, then `pack/GlslPreprocessor.java` (using JCPP), with `pack/StandardDefines.java`.
 - The translator: `glsl/GlslTokenizer.java` → `glsl/Declarations.java` → `glsl/ProgramTranslator.java`, our own code with no glsl-transformer.
 
 Rendering isn't touched.
 
-Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor ✅ (pack's default settings only) · 4 translator ✅ v1 (compiles; correctness comes in step 6) · 5 uniforms ✅ (render-time values come with step 6) · 6 render pipeline · 7 polish.
+Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor ✅ (pack's default settings only) · 4 translator ✅ · 5 uniforms ✅ · 6 render pipeline ✅ (gaps listed in the 6d-4 leftovers and the 6e handoff) · 7 polish.
 
 Step 6 plan (research 2026-11-20). Each sub-step ends with something visible in the game:
 - **6a: first pixels.** Our own tiny full-screen pass after the world draws: a mixin right after `this.renderLevel()` in `GameRenderer.render()` (`GameRenderer.java:497`, before the depth clear). This proves the whole chain: our GLSL → `FrontendGpuDevice.compilePipeline(RenderPipeline, ShaderSource, executor)` → `PipelineBuilder` (shaderc) → `MetalDevice.compilePipeline` (Metallum, `MetalDevice.java:130`) → screen.
@@ -244,7 +244,14 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
   - Fixed: Sodium's block-face culling (`DefaultChunkRenderer.prepare` reads `useBlockFaceCulling`) is off while the pack's shadow pass is active, so faces turned away from the camera still cast shadows; the camera's pipelines cull back faces anyway.
   - No hand casters, and no beacon beams (BLOCK format) or particles in the map.
   - No shadowcolor format or clear directives; no mipmaps or hardware filtering; the shadow map isn't drawn a frame ahead.
-- **6f: correctness gaps** (from step 4): gl_FragCoord origin, textures without mips, packUnorm on Apple, gl_VertexID base vertex, .csh/.gsh programs; also the 6d-4 leftovers above.
+- **6f result (2026-11-20, ✅): the step-4 correctness gaps, checked on Complementary.**
+  - `gl_FragCoord` origin: measured with the new debug view `LUXIUM_SHOW=fragcoord` (`LUXIUM_STOP_AFTER=seed`): `uv.y` and `gl_FragCoord.y / height` both read 0.98 at the top and 0.02 at the bottom. So it already follows OpenGL's bottom-left origin (Metallum flips the viewport), and no rewrite is needed.
+  - Not used by Complementary's world0 programs, so nothing to fix for the target pack:
+    - `gl_VertexID` (only `gbuffers_line`, which isn't taken over);
+    - `packUnorm` / `unpackUnorm` / `packHalf`;
+    - `textureLod` (no mip-less sampling trap);
+    - compute (`shadowcomp.csh`: coloured lighting, off under `MC_OS_MAC`).
+  - Still open in general (other packs): `invariant gl_Position` against Metal fast-math (no seam seen so far), `.gsh` geometry programs, `gl_VertexID` base vertex.
 - Metallum's only Sodium mixin picks the graphics API (`metallum.sodium.mixins.json`: `SodiumPreferredGraphicsApiMixin`). Sodium already draws through the game's RenderPearl API, so Vitrail's Sodium-level hooks should apply on Metal too.
 
 Facts for step 6:
