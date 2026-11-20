@@ -240,7 +240,8 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
     - The draw's pose is moved to the light: `gl_ModelViewMatrix = luxium_ShadowFix * ModelViewMat`, with `luxium_ShadowFix = shadowModelView · inverse(gbufferModelView)` (`Format.shadow`: forward depth).
   - Game test: the pig, slime and chest cast shadows (floor beside the pig 89/106/120 → 65/77/90). 0 validation messages, 74 unit tests pass, scoreboard 90/90.
 - **6e handoff: what's left of the shadow pass.**
-  - Casters are only Sodium's camera-visible sections, with the camera's per-face batch culling. Vitrail does a second culling walk for the light and keeps its own batches (sky-and-shadows.md "Culling for the light"; Vitrail MixinRenderRegion, SodiumApi.drawShadowLayer).
+  - Casters are only Sodium's camera-visible sections: anything off-screen or occlusion-culled casts no shadow. Vitrail does a second culling walk for the light and keeps its own batches (sky-and-shadows.md "Culling for the light"; Vitrail MixinRenderRegion, SodiumApi.drawShadowLayer).
+  - Fixed: Sodium's block-face culling (`DefaultChunkRenderer.prepare` reads `useBlockFaceCulling`) is off while the pack's shadow pass is active, so faces turned away from the camera still cast shadows; the camera's pipelines cull back faces anyway.
   - No hand casters, and no beacon beams (BLOCK format) or particles in the map.
   - No shadowcolor format or clear directives; no mipmaps or hardware filtering; the shadow map isn't drawn a frame ahead.
 - **6f: correctness gaps** (from step 4): gl_FragCoord origin, textures without mips, packUnorm on Apple, gl_VertexID base vertex, .csh/.gsh programs; also the 6d-4 leftovers above.
