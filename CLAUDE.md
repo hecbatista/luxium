@@ -13,6 +13,24 @@ Rendering isn't touched.
 
 Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor ✅ (pack's default settings only) · 4 translator ✅ v1 (compiles; correctness comes in step 6) · 5 uniforms ✅ (render-time values come with step 6) · 6 render pipeline · 7 polish.
 
+Step 6 plan (research 2026-11-20). Each sub-step ends with something visible in the game:
+- **6a: first pixels.** Our own tiny full-screen pass after the world draws: a mixin right after `this.renderLevel()` in `GameRenderer.render()` (`GameRenderer.java:497`, before the depth clear). This proves the whole chain: our GLSL → `FrontendGpuDevice.compilePipeline(RenderPipeline, ShaderSource, executor)` → `PipelineBuilder` (shaderc) → `MetalDevice.compilePipeline` (Metallum, `MetalDevice.java:130`) → screen.
+- **6b: the pack's `final` program.** Translated, with `colortex0` = a copy of the world image and `LuxiumUniforms` filled each frame by `UniformWriter`.
+- **6c: render targets and the deferred/composite chain.** Covers colortex formats from the pack, DRAWBUFFERS routing, ping-pong, depthtex copies and noisetex.
+- **6d: gbuffers.** The pack's terrain/entity/sky programs replace vanilla's, including Sodium's terrain path (see Vitrail `docs/internals/terrain.md`), plus the gbuffer matrices.
+- **6e: shadow pass.**
+- **6f: correctness gaps** from step 4.
+
+Facts for step 6:
+- **Full-screen passes:** vanilla `PostPass` uses `renderPass.draw(3, 1, 0, 0)` with no vertex buffer. Pack composite vertex shaders expect a quad (`gl_Vertex`, `gl_MultiTexCoord0`), so we need a quad vertex buffer or a special vertex prologue.
+- **Binding:** uniform blocks and textures are bound **by name** (`RenderPass.setUniform(name, buffer)` / `(name, view, sampler)`). The pipeline declares them via `RenderPipeline.Builder.withBindGroupLayout`. Shaders are referenced by `Identifier` (`withVertexShader`/`withFragmentShader`) and resolved through the `ShaderSource` given to `compilePipeline`.
+- **Multiple render targets:** `withColorTargetState(index, …)` in the API; Metallum handles lists of color attachments (`MetalCommandEncoder.java:271`).
+- **Vitrail's 26.3 seam:** `common/src/mc26.3/java/dev/vitrail/render/GraphicsApi.java` and `AheadCompiler.java` (`device.compilePipeline(pipeline, source, Runnable::run).join().finishCompile()`). Its Vulkan-only mixins are for compute and storage images, which we don't need with `MC_OS_MAC`.
+- Vitrail `docs/internals/game-graphics-api.md` warns:
+  - Precompile every pipeline with its real source before the first pass, or it silently compiles with no source.
+  - Scene depth is cleared a few lines after the seam, so copy it there.
+  - Detect resizes by comparing sizes every frame, not with the resize event.
+
 Step 4 result: `TranslateRealPackTest` (the scoreboard) translates every vertex+fragment program, then runs glslang for Vulkan 1.2 with only `--auto-map-bindings` (no `-R`, no `--aml`), spirv-cross with Metallum's MSL options, and `xcrun metal`. On Complementary that's **90/90** programs: 30 per world, excluding dh_/clrwl_/voxy programs that need mods we don't have. A reflection check (`spirv-cross --reflect`) found 0 vertex/fragment interface mismatches. Outputs go to `mod/build/translated/<pack>/`, plus `scoreboard.txt`.
 
 Step 5 progress (2026-11-20):
