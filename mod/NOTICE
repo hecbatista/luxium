@@ -98,6 +98,13 @@ GNU Lesser General Public License version 3
   broken formulas with their dependents. Iris's expression library (kroppeb.stareval) was not
   copied; the operator precedence is the usual C one.
 
+  src/main/java/io/github/hecbatista/metalshaders/pack/RenderTargetPlan.java contains Iris's
+  table of buffer format names (net.irisshaders.iris.gl.texture.InternalTextureFormat), mapped
+  onto the game's GpuFormat by us, and follows Iris's buffer directive rules from
+  net.irisshaders.iris.shaderpack.properties.PackRenderTargetDirectives: names colortexN and
+  gcolor..gaux4, keys <name>Format / Clear / ClearColor, defaults RGBA and cleared, and the
+  32-buffer limit of net.irisshaders.iris.gl.IrisLimits.
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3
@@ -108,6 +115,13 @@ GNU Lesser General Public License version 3
   with a matrix taking one location per column. This design is described in Vitrail's
   docs/translation.md ("The unit of translation is the program, not the file"). No Vitrail
   code was read or copied for it.
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/RenderTargetPlan.java and
+  PackDirectives.java follow rules described in Vitrail's docs/internals/render-targets.md:
+  format directives are found inside comments but only on live lines, they're folded in the
+  reference's program order with final among the gbuffer programs, three-channel formats are
+  promoted to four, old fixed-point formats map to 8-bit RGBA, and RGB9_E5 maps to a float
+  format. The mapping table itself is ours.
 
 JCPP, https://github.com/shevek/jcpp (org.anarres:jcpp 1.4.14)
 Apache License 2.0

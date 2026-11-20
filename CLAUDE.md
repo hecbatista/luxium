@@ -38,6 +38,21 @@ Step 6 plan (research 2026-11-20). Each sub-step ends with something visible in 
 - Gap: the uniform byte layout isn't yet proven value-by-value on the GPU; composite passes (6c) depend on it heavily.
 - Every texture the pipeline lists must be bound before drawing (`FrontendRenderPass.java:486-490`).
 
+6c plan:
+- 6c-1 ✅ buffer plan.
+- 6c-2: run the chain (two halves per buffer, the flip rule, DRAWBUFFERS routing, depth copies, noisetex from the pack, `program.X.enabled`, and `scale.composite4 = 0.4`).
+- 6c-3: wire final to the chain.
+
+Until 6d (gbuffers) the chain runs on vanilla's image instead of the pack's gbuffer data, so the picture will look partly wrong.
+
+6c-1 result (2026-11-20):
+- `pack/RenderTargetPlan.java` folds `const` buffer directives in Iris's order (`PackDirectives.foldOrder`; final counts with the gbuffers).
+- Complementary world0 has 14 buffers. Formats: colortex0 RG11B10_FLOAT; 1 RGBA8_SNORM (from RGB8_SNORM); 2 RGBA16_FLOAT (from RGB16F); 3, 5, 12, 19 RGBA8; 4 RGBA8_SNORM; 6 RGBA8 (from RGB8); 7, 8 RGBA16_FLOAT; 13, 18 R8; 14 RGBA16_UNORM (from RGB16).
+- Not cleared each frame: 1, 2, 4, 5, 7, 14, 18, 19.
+- Iris allows 32 buffers (`IrisLimits.MAX_COLOR_BUFFERS`).
+- Metal has no 3-channel pixel formats, so promoted buffers must be cleared with alpha 1 and written color-only (write mask) to read like OpenGL.
+- Complementary's chain in world0: deferred1 (0,5,4) → composite (7,1) → composite1 (0,5) → [composite3 (0), off when WORLD_BLUR == -1] → composite4 (3, at 0.4 scale) → composite5 (3) → composite6 (3,2) → composite7 (3, FXAA) → final.
+
 Facts for step 6:
 - **Full-screen passes:** vanilla `PostPass` uses `renderPass.draw(3, 1, 0, 0)` with no vertex buffer. Pack composite vertex shaders expect a quad (`gl_Vertex`, `gl_MultiTexCoord0`), so we need a quad vertex buffer or a special vertex prologue.
 - **Binding:** uniform blocks and textures are bound **by name** (`RenderPass.setUniform(name, buffer)` / `(name, view, sampler)`). The pipeline declares them via `RenderPipeline.Builder.withBindGroupLayout`. Shaders are referenced by `Identifier` (`withVertexShader`/`withFragmentShader`) and resolved through the `ShaderSource` given to `compilePipeline`.
