@@ -75,6 +75,24 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
 - Result: **0% NaN at every pass** (was 100% from deferred1). The land shot shows the scene with Complementary's fog and sky look, plus a thin white streak near the top-left (unexplained).
 - The underwater shot is almost black. Likely cause: the stand-ins (no gbuffers_water data). Re-check after 6d.
 
+6d plan (research 2026-11-20; Vitrail `docs/frame.md`, `docs/internals/terrain.md`, `entities.md`). Each piece should end visible in the game test:
+- **6d-1: gbuffer plumbing + sky.**
+  - Cut the chain in three as Vitrail does: begin/prepare before the world, deferred after opaque features (before translucents), composite + final after the level.
+  - Add a way to draw one vanilla "family" with the pack's program into colortex targets (several attachments, the game's depth), plus per-draw values (renderStage etc.).
+  - Prove it on the sky (`gbuffers_skybasic`/`skytextured`).
+- **6d-2: terrain through Sodium.** Vitrail hooks in at a handful of points without rewriting Sodium's meshing:
+  - the per-pass pipeline compile (memoised by render pass)
+  - the chunk vertex-format accessor (only at renderer rebuild; Sodium 0.9.2's shared geometry arena bakes the stride and needs its own mixin)
+  - the call that opens Sodium's render pass, which needs the pack's targets
+  - the draw context, for binding uniforms and samplers
+  - the quad-writing sites, to carry block id, block position and light emission
+  - Also needed: block.properties ids (mc_Entity), mc_midTexCoord and at_tangent, and decoding Sodium's compact vertex into gl_Vertex etc. (Iris SodiumTransformer).
+  - Traps: a pipeline's declared vertex stride must match the mesh's ("stretched coloured spikes"), and view bobbing is in the projection while packs expect it in the model-view (terrain.md:381).
+- **6d-3: water and translucent terrain**, drawn on the halves the deferred stage already wrote.
+- **6d-4: entities, block entities, hand, particles, weather, clouds.** Vitrail entities.md: "the door is a group of draws", plus its own vertex format.
+- **6e: shadow pass.**
+- Metallum's only Sodium mixin picks the graphics API (`metallum.sodium.mixins.json`: `SodiumPreferredGraphicsApiMixin`). Sodium already draws through the game's RenderPearl API, so Vitrail's Sodium-level hooks should apply on Metal too.
+
 Facts for step 6:
 - **Full-screen passes:** vanilla `PostPass` uses `renderPass.draw(3, 1, 0, 0)` with no vertex buffer. Pack composite vertex shaders expect a quad (`gl_Vertex`, `gl_MultiTexCoord0`), so we need a quad vertex buffer or a special vertex prologue.
 - **Binding:** uniform blocks and textures are bound **by name** (`RenderPass.setUniform(name, buffer)` / `(name, view, sampler)`). The pipeline declares them via `RenderPipeline.Builder.withBindGroupLayout`. Shaders are referenced by `Identifier` (`withVertexShader`/`withFragmentShader`) and resolved through the `ShaderSource` given to `compilePipeline`.
