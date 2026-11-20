@@ -92,6 +92,43 @@ public final class ProgramTranslator {
 
     public enum Stage { VERTEX, FRAGMENT }
 
+    /**
+     * GBUFFERS: geometry programs, fed by real vertex data.
+     * FULLSCREEN: composite/deferred/final programs, drawn as one triangle over the screen with no
+     * vertex buffer. The old built-ins become fixed values, as Iris's CompositeTransformer does:
+     * position and texture coordinate come from the triangle, color is white, the normal is
+     * (0,0,1), matrices are identity except a projection mapping 0..1 onto the screen.
+     */
+    public enum Mode { GBUFFERS, FULLSCREEN }
+
+    /** Corner of the full-screen triangle, 0..1 in screen terms: (0,0), (2,0), (0,2). */
+    private static final String FS_CORNER = "vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2)";
+    private static final String FS_PROJECTION =
+            "mat4(vec4(2.0, 0.0, 0.0, 0.0), vec4(0.0, 2.0, 0.0, 0.0), vec4(0.0), vec4(-1.0, -1.0, 0.0, 1.0))";
+
+    /** Full-screen replacements in both stages. */
+    private static final Map<String, String> FULLSCREEN_BOTH = Map.of(
+            "gl_Color", "vec4(1.0)",
+            "gl_NormalMatrix", "mat3(1.0)",
+            "gl_ModelViewMatrix", "mat4(1.0)",
+            "gl_ProjectionMatrix", FS_PROJECTION,
+            "gl_ModelViewProjectionMatrix", "(" + FS_PROJECTION + " * mat4(1.0))");
+
+    /** Full-screen replacements in the vertex stage only. */
+    private static final Map<String, String> FULLSCREEN_VERTEX = Map.of(
+            "gl_Vertex", "vec4(" + FS_CORNER + ", 0.0, 1.0)",
+            "gl_MultiTexCoord0", "vec4(" + FS_CORNER + ", 0.0, 1.0)",
+            "gl_Normal", "vec3(0.0, 0.0, 1.0)");
+
+    /** Which mode a program runs in, by its name (e.g. "composite3", "final", "gbuffers_terrain"). */
+    public static Mode modeFor(String program) {
+        return program.matches("(composite|deferred|prepare|begin|shadowcomp)\\d*(_.*)?|final") ? Mode.FULLSCREEN : Mode.GBUFFERS;
+    }
+
+    /** A sampler or image the program declares; the pipeline has to list and bind every one. */
+    public record Sampler(String type, String name) {
+    }
+
     /** A loose uniform that became a block member. {@code defaultValue} is its initializer, if any. */
     public record Uniform(String type, String name, String array, String defaultValue) {
     }
@@ -109,7 +146,7 @@ public final class ProgramTranslator {
      */
     public record Result(String vertex, String fragment, List<Uniform> uniforms, List<Slot> vertexInputs,
                          List<Slot> varyings, List<Slot> fragmentOutputs, List<Integer> drawBuffers,
-                         List<String> warnings) {
+                         List<Sampler> samplers, List<String> warnings) {
     }
 
     /** Thrown when the program uses something version 1 can't translate. */
@@ -132,6 +169,7 @@ public final class ProgramTranslator {
         final List<Declaration> declarations;
         final Set<String> identifiers = new LinkedHashSet<>();
         final Set<String> declaredNames = new LinkedHashSet<>();
+        final Map<String, Integer> identifierCount = new java.util.HashMap<>();
 
         StageScan(Stage stage, String source) {
             this.stage = stage;
@@ -139,6 +177,7 @@ public final class ProgramTranslator {
             for (Token t : tokens) {
                 if (t.kind() == Kind.IDENT) {
                     identifiers.add(t.text());
+                    identifierCount.merge(t.text(), 1, Integer::sum);
                 } else if (t.kind() == Kind.DIRECTIVE && t.text().startsWith("#extension")) {
                     extensions.add(t.text());
                 }
@@ -150,12 +189,58 @@ public final class ProgramTranslator {
                 }
             }
         }
+
+        /**
+         * Whether a sampler declared here is mentioned anywhere but its own declaration. Unmentioned
+         * ones are dropped: the game's reflection lists every declared resource and gives each a
+         * Metal slot, and Metal has only 16 sampler slots per stage (0-15), so a pack that declares
+         * every texture in a shared file runs out (Vitrail hit the same, docs/translation.md:182-187).
+         */
+        boolean mentions(String sampler) {
+            long declaredHere = declarations.stream().flatMap(d -> d.declarators().stream())
+                    .filter(x -> x.name().equals(sampler)).count();
+            return identifierCount.getOrDefault(sampler, 0) > declaredHere;
+        }
     }
 
+    /** Metal's sampler slots per stage ([[sampler(0..15)]]). */
+    static final int MAX_SAMPLERS_PER_STAGE = 16;
+
     public static Result translate(String vertexSource, String fragmentSource) throws TranslationException {
+        return translate(vertexSource, fragmentSource, Mode.GBUFFERS);
+    }
+
+    public static Result translate(String vertexSource, String fragmentSource, Mode mode) throws TranslationException {
         StageScan vs = new StageScan(Stage.VERTEX, vertexSource);
         StageScan fs = new StageScan(Stage.FRAGMENT, fragmentSource);
         List<String> warnings = new ArrayList<>();
+        boolean fullscreen = mode == Mode.FULLSCREEN;
+
+        // 0. Every sampler/image either stage declares and mentions (pipeline layout and binding need
+        //    all of them; unmentioned ones are dropped from the source in rewrite()).
+        Map<String, Sampler> samplers = new TreeMap<>();
+        for (StageScan s : List.of(vs, fs)) {
+            int inStage = 0;
+            for (Declaration d : s.declarations) {
+                if (d.storage().equals("uniform") && isOpaque(d.type())) {
+                    for (Declarator x : d.declarators()) {
+                        if (!s.mentions(x.name())) {
+                            continue;
+                        }
+                        inStage++;
+                        Sampler old = samplers.putIfAbsent(x.name(), new Sampler(d.type(), x.name()));
+                        if (old != null && !old.type().equals(d.type())) {
+                            throw new TranslationException("Sampler " + x.name() + " is " + old.type()
+                                    + " in one stage and " + d.type() + " in the other");
+                        }
+                    }
+                }
+            }
+            if (inStage > MAX_SAMPLERS_PER_STAGE) {
+                throw new TranslationException("The " + s.stage.name().toLowerCase() + " stage uses " + inStage
+                        + " textures; Metal allows " + MAX_SAMPLERS_PER_STAGE + " per stage");
+            }
+        }
 
         // 1. The shared uniform block: loose uniforms from both stages, plus built-ins used.
         Map<String, Uniform> uniforms = new TreeMap<>();
@@ -173,7 +258,8 @@ public final class ProgramTranslator {
                 }
             }
             for (Map.Entry<String, Builtin> b : BUILTIN_UNIFORMS.entrySet()) {
-                if (s.identifiers.contains(b.getKey())) {
+                boolean replacedByFullscreen = fullscreen && (FULLSCREEN_BOTH.containsKey(b.getKey()) || b.getKey().equals("gl_TextureMatrix"));
+                if (s.identifiers.contains(b.getKey()) && !replacedByFullscreen) {
                     Builtin v = b.getValue();
                     uniforms.putIfAbsent(v.name(), new Uniform(v.type(), v.name(), v.array(), null));
                 }
@@ -184,7 +270,7 @@ public final class ProgramTranslator {
                     uniforms.putIfAbsent(v.name(), new Uniform(v.type(), v.name(), v.array(), null));
                 }
             }
-            if (s.identifiers.contains("ftransform")) {
+            if (s.identifiers.contains("ftransform") && !fullscreen) {
                 uniforms.putIfAbsent("luxium_ModelViewProjectionMatrix",
                         new Uniform("mat4", "luxium_ModelViewProjectionMatrix", "", null));
             }
@@ -195,6 +281,9 @@ public final class ProgramTranslator {
         int nextInput = 0;
         Map<String, Builtin> usedInputs = new TreeMap<>();
         for (Map.Entry<String, Builtin> b : BUILTIN_INPUTS.entrySet()) {
+            if (fullscreen) {
+                break;   // full-screen programs get no vertex data: these all become fixed values
+            }
             if (vs.identifiers.contains(b.getKey()) || (b.getKey().equals("gl_Vertex") && vs.identifiers.contains("ftransform"))) {
                 usedInputs.put(b.getValue().name(), b.getValue());
             }
@@ -255,26 +344,28 @@ public final class ProgramTranslator {
 
         // 4. Rewrite each stage.
         List<Slot> fragmentOutputs = new ArrayList<>();
-        String vertex = rewrite(vs, uniforms, vertexInputs, varyings, fragmentOutputs, warnings);
-        String fragment = rewrite(fs, uniforms, vertexInputs, varyings, fragmentOutputs, warnings);
+        String vertex = rewrite(vs, mode, uniforms, vertexInputs, varyings, fragmentOutputs, warnings);
+        String fragment = rewrite(fs, mode, uniforms, vertexInputs, varyings, fragmentOutputs, warnings);
 
         return new Result(vertex, fragment, List.copyOf(uniforms.values()), List.copyOf(vertexInputs.values()),
                 List.copyOf(varyings.values()), List.copyOf(fragmentOutputs), drawBuffers(fs.tokens),
-                List.copyOf(warnings));
+                List.copyOf(samplers.values()), List.copyOf(warnings));
     }
 
-    private static String rewrite(StageScan s, Map<String, Uniform> uniforms, Map<String, Slot> vertexInputs,
+    private static String rewrite(StageScan s, Mode mode, Map<String, Uniform> uniforms, Map<String, Slot> vertexInputs,
                                   Map<String, Slot> varyings, List<Slot> fragmentOutputs, List<String> warnings)
             throws TranslationException {
         List<Token> t = s.tokens;
         boolean vertex = s.stage == Stage.VERTEX;
+        boolean fullscreen = mode == Mode.FULLSCREEN;
 
         // a) Replace declarations, last first so earlier indices stay valid.
         List<Declaration> ds = new ArrayList<>(s.declarations);
         for (int k = ds.size() - 1; k >= 0; k--) {
             Declaration d = ds.get(k);
             String replacement = switch (d.storage()) {
-                case "uniform" -> isOpaque(d.type()) ? null : "";   // loose uniforms move into the block
+                // Loose uniforms move into the block; samplers stay, minus the ones this stage never mentions.
+                case "uniform" -> isOpaque(d.type()) ? mentionedSamplers(d, s) : "";
                 case "attribute", "in" -> vertex ? slotDeclarations(d, "in", vertexInputs)
                         : slotDeclarations(d, "in", varyings);
                 case "out", "varying" -> vertex ? slotDeclarations(d, "out", varyings)
@@ -306,6 +397,32 @@ public final class ProgramTranslator {
                 continue;
             }
             String name = tok.text();
+            if (fullscreen) {
+                String expr = FULLSCREEN_BOTH.get(name);
+                if (expr == null && vertex) {
+                    expr = FULLSCREEN_VERTEX.get(name);
+                    if (expr == null && name.matches("gl_MultiTexCoord[1-7]")) {
+                        expr = "vec4(0.0, 0.0, 0.0, 1.0)";
+                    }
+                }
+                if (name.equals("gl_TextureMatrix")) {
+                    // gl_TextureMatrix [ N ]  ->  identity
+                    int open = nextCode(t, i + 1);
+                    int num = open < 0 ? -1 : nextCode(t, open + 1);
+                    int close = num < 0 ? -1 : nextCode(t, num + 1);
+                    if (open < 0 || !t.get(open).is("[") || num < 0 || close < 0 || !t.get(close).is("]")) {
+                        throw new TranslationException("gl_TextureMatrix with an index that isn't a plain number");
+                    }
+                    for (int q = i + 1; q <= close; q++) {
+                        t.set(q, new Token(Kind.SPACE, ""));
+                    }
+                    expr = "mat4(1.0)";
+                }
+                if (expr != null) {
+                    t.set(i, new Token(Kind.IDENT, "(" + expr + ")"));
+                    continue;
+                }
+            }
             String renamed = FUNCTION_RENAMES.get(name);
             if (renamed == null && BUILTIN_UNIFORMS.containsKey(name)) {
                 renamed = BUILTIN_UNIFORMS.get(name).name();
@@ -367,7 +484,9 @@ public final class ProgramTranslator {
                 }
             }
             if (s.identifiers.contains("ftransform")) {
-                h.append("vec4 luxium_ftransform() { return luxium_ModelViewProjectionMatrix * luxium_Vertex; }\n");
+                h.append(fullscreen
+                        ? "vec4 luxium_ftransform() { return (" + FS_PROJECTION + " * mat4(1.0)) * vec4(" + FS_CORNER + ", 0.0, 1.0); }\n"
+                        : "vec4 luxium_ftransform() { return luxium_ModelViewProjectionMatrix * luxium_Vertex; }\n");
             }
         } else {
             for (int index : outputsUsed) {
@@ -382,6 +501,22 @@ public final class ProgramTranslator {
             h.append("vec4 luxium_shadow2DLod(sampler2DShadow s, vec3 c, float lod) { return vec4(textureLod(s, c, lod)); }\n");
         }
         return h + GlslTokenizer.join(t);
+    }
+
+    /** A sampler declaration without its unmentioned names; null keeps it as written, "" drops it. */
+    private static String mentionedSamplers(Declaration d, StageScan s) {
+        List<Declarator> kept = d.declarators().stream().filter(x -> s.mentions(x.name())).toList();
+        if (kept.size() == d.declarators().size()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Declarator x : kept) {
+            if (!d.layout().isEmpty()) {
+                sb.append(d.layout()).append(' ');
+            }
+            sb.append("uniform ").append(d.type()).append(' ').append(x.name()).append(x.arraySuffix()).append(";\n");
+        }
+        return sb.toString();
     }
 
     /** Re-declares each name of an in/out declaration on its own, with its location. */

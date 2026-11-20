@@ -8,6 +8,7 @@ import io.github.hecbatista.metalshaders.pack.PackPreprocessor;
 import io.github.hecbatista.metalshaders.pack.PackReader;
 import io.github.hecbatista.metalshaders.pack.PropertiesPreprocessor;
 import io.github.hecbatista.metalshaders.pack.StandardDefines;
+import io.github.hecbatista.metalshaders.render.FinalPass;
 import io.github.hecbatista.metalshaders.uniform.BiomeIds;
 import io.github.hecbatista.metalshaders.uniform.CustomUniforms;
 import io.github.hecbatista.metalshaders.uniform.GameUniforms;
@@ -84,7 +85,7 @@ public final class MetalShadersClient implements ClientModInitializer {
     }
 
     /** Every value a pack can read this frame: its own formulas first, then the game's. */
-    private static Object value(String name) {
+    public static Object value(String name) {
         Object own = customUniforms == null ? null : customUniforms.get(name);
         return own != null ? own : GAME_UNIFORMS.get(name);
     }
@@ -126,6 +127,15 @@ public final class MetalShadersClient implements ClientModInitializer {
             customUniforms = CustomUniforms.load(PropertiesPreprocessor.preprocess(properties, propertyDefines),
                     GAME_UNIFORMS.snapshot().keySet());
             customUniforms.update(GAME_UNIFORMS::get, (Float) GAME_UNIFORMS.get("frameTime"));
+            // Step 6b: the pack's final program.
+            var finalVsh = PackPreprocessor.preprocessProgram(pack, "/world0/final.vsh", defines);
+            var finalFsh = PackPreprocessor.preprocessProgram(pack, "/world0/final.fsh", defines);
+            if (finalVsh.ok() && finalFsh.ok()) {
+                FinalPass.prepare(finalVsh.result().text(), finalFsh.result().text());
+            } else {
+                LOGGER.warn("Pack final program skipped: {}", finalVsh.ok() ? finalFsh.error() : finalVsh.error());
+            }
+
             LOGGER.info("Pack formulas: {} loaded, {} dropped: {} (wetness half-lives from pack: {})",
                     customUniforms.size(), customUniforms.dropped().size(), customUniforms.dropped(), halfLives);
 

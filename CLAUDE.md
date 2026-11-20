@@ -26,6 +26,18 @@ Step 6 plan (research 2026-11-20). Each sub-step ends with something visible in 
 - So the vertical axis keeps the OpenGL convention end to end (`gl_Position.y = +1` is the top), matching Vitrail's note. `gl_FragCoord`'s origin is still untested.
 - TestPass is always on until 6b replaces it.
 
+6b result (2026-11-20, ✅ with one gap): `render/FinalPass.java` runs Complementary's translated `final` program after the world draws, replacing TestPass.
+- Translator **FULLSCREEN mode** (Iris CompositeTransformer rules): gl_Vertex/gl_MultiTexCoord0 come from `gl_VertexIndex`, color is white, matrices are identity plus a 0..1 projection, and there are no vertex inputs. `ProgramTranslator.modeFor(name)` picks the mode.
+- The world image is copied to `colortex0`/`colortex3`, the 1x1 noise texture is neutral, depth/shadow textures are white, and the rest are black.
+- `LuxiumUniforms` comes from a `MappableRingBuffer` filled by `UniformWriter` every frame.
+- Two bugs found and fixed in game:
+  - The game's reflection lists **every declared** sampler (`SPIRVModule.reflect` uses `spvc_compiler_create_shader_resources`), and each gets a Metal slot. With 24 declared, Metallum's MSL failed with "'sampler' attribute parameter is out of bounds: must be between 0 and 15". Fix: the translator drops sampler declarations a stage never mentions, and refuses more than 16 per stage. Complementary's maximum is 14 (composite1).
+  - Placeholder textures were uploaded while a render pass was open, which raised "Close the existing render pass before performing additional commands". Fix: resolve every input before opening the pass.
+- Result: 0 validation messages. A readback measurement (every 5 s, logged as "Final pass measurement") shows about 98% of pixels changed by about 8/255 per channel, consistent with IMAGE_SHARPENING 5.
+- The underwater distortion is real but only about ±1 px (0.0007 × screen width), too small to see or to separate in that measurement. The user saw a faint shimmer.
+- Gap: the uniform byte layout isn't yet proven value-by-value on the GPU; composite passes (6c) depend on it heavily.
+- Every texture the pipeline lists must be bound before drawing (`FrontendRenderPass.java:486-490`).
+
 Facts for step 6:
 - **Full-screen passes:** vanilla `PostPass` uses `renderPass.draw(3, 1, 0, 0)` with no vertex buffer. Pack composite vertex shaders expect a quad (`gl_Vertex`, `gl_MultiTexCoord0`), so we need a quad vertex buffer or a special vertex prologue.
 - **Binding:** uniform blocks and textures are bound **by name** (`RenderPass.setUniform(name, buffer)` / `(name, view, sampler)`). The pipeline declares them via `RenderPipeline.Builder.withBindGroupLayout`. Shaders are referenced by `Identifier` (`withVertexShader`/`withFragmentShader`) and resolved through the `ShaderSource` given to `compilePipeline`.

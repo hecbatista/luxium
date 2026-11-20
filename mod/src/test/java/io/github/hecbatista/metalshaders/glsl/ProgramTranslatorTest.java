@@ -119,6 +119,55 @@ class ProgramTranslatorTest {
     }
 
     @Test
+    void fullScreenProgramsGetFixedValuesInsteadOfVertexData() throws Exception {
+        ProgramTranslator.Result r = ProgramTranslator.translate("""
+                #version 130
+                out vec2 texCoord;
+                void main() {
+                    gl_Position = ftransform();
+                    texCoord = (gl_TextureMatrix[0] * gl_MultiTexCoord0).xy;
+                }
+                """, """
+                #version 130
+                uniform sampler2D colortex3;
+                uniform float viewWidth;
+                in vec2 texCoord;
+                void main() { gl_FragData[0] = texture2D(colortex3, texCoord) * gl_Color; }
+                """, ProgramTranslator.Mode.FULLSCREEN);
+
+        assertEquals(List.of(), r.vertexInputs(), "no vertex buffer for full-screen programs");
+        assertFalse(r.vertex().contains("luxium_TextureMatrix"));
+        assertTrue(r.vertex().contains("(mat4(1.0)) * (vec4(vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2), 0.0, 1.0))"), r.vertex());
+        assertTrue(r.fragment().contains("* (vec4(1.0))"), r.fragment());
+        assertEquals(List.of("viewWidth"), r.uniforms().stream().map(ProgramTranslator.Uniform::name).toList());
+        assertEquals(List.of(new ProgramTranslator.Sampler("sampler2D", "colortex3")), r.samplers());
+    }
+
+    @Test
+    void samplersAStageNeverMentionsAreDropped() throws Exception {
+        ProgramTranslator.Result r = ProgramTranslator.translate("""
+                void main() { gl_Position = vec4(0.0); }
+                """, """
+                uniform sampler2D colortex3, colortex4;
+                uniform sampler2D shadowtex0;
+                void main() { gl_FragData[0] = texture2D(colortex3, vec2(0.5)); }
+                """);
+        assertTrue(r.fragment().contains("uniform sampler2D colortex3;"), r.fragment());
+        assertFalse(r.fragment().contains("colortex4"), r.fragment());
+        assertFalse(r.fragment().contains("shadowtex0"), r.fragment());
+        assertEquals(List.of(new ProgramTranslator.Sampler("sampler2D", "colortex3")), r.samplers());
+    }
+
+    @Test
+    void modeComesFromTheProgramName() {
+        assertEquals(ProgramTranslator.Mode.FULLSCREEN, ProgramTranslator.modeFor("final"));
+        assertEquals(ProgramTranslator.Mode.FULLSCREEN, ProgramTranslator.modeFor("composite12"));
+        assertEquals(ProgramTranslator.Mode.FULLSCREEN, ProgramTranslator.modeFor("deferred1"));
+        assertEquals(ProgramTranslator.Mode.GBUFFERS, ProgramTranslator.modeFor("gbuffers_terrain"));
+        assertEquals(ProgramTranslator.Mode.GBUFFERS, ProgramTranslator.modeFor("shadow"));
+    }
+
+    @Test
     void uniformWithDifferentTypesInTheTwoStagesIsAnError() {
         assertThrows(ProgramTranslator.TranslationException.class, () -> ProgramTranslator.translate(
                 "uniform float x;\nvoid main() {}", "uniform int x;\nvoid main() {}"));

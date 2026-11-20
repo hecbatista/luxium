@@ -91,7 +91,8 @@ class TranslateRealPackTest {
         try {
             ProgramTranslator.Result r;
             try {
-                r = ProgramTranslator.translate(sources.get(program + ".vsh"), sources.get(program + ".fsh"));
+                r = ProgramTranslator.translate(sources.get(program + ".vsh"), sources.get(program + ".fsh"),
+                        ProgramTranslator.modeFor(program.substring(program.lastIndexOf('/') + 1)));
             } catch (ProgramTranslator.TranslationException e) {
                 return new Outcome(name, "1-translate", e.getMessage());
             }
