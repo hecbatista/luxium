@@ -260,6 +260,9 @@ public final class ProgramTranslator {
     public record Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames) {
     }
 
+    /** The game's overlay texture (hit flash, damage tint), bound by its entity draws (entity.vsh). */
+    public static final String OVERLAY_SAMPLER = "Sampler1";
+
     /** The game's per-draw transform block (minecraft:include/dynamictransforms.glsl, 26.3). */
     public static final String DYNAMIC_TRANSFORMS = "DynamicTransforms";
     private static final String DYNAMIC_TRANSFORMS_BLOCK = """
@@ -426,6 +429,10 @@ public final class ProgramTranslator {
         Map<String, String> renames = format == null ? Map.of() : format.samplerRenames();
         StageScan vs = new StageScan(Stage.VERTEX, vertexSource);
         StageScan fs = new StageScan(Stage.FRAGMENT, fragmentSource);
+        // entityColor (the hit flash) from the overlay texture, as Iris's EntityPatcher does: a
+        // value the vertex stage reads from Sampler1 at UV1 and hands to the fragment stage.
+        boolean overlay = dynamic && elements.contains("UV1")
+                && (vs.declaredNames.contains("entityColor") || fs.declaredNames.contains("entityColor"));
         List<String> warnings = new ArrayList<>();
         boolean fullscreen = mode == Mode.FULLSCREEN;
 
@@ -456,12 +463,19 @@ public final class ProgramTranslator {
             }
         }
 
+        if (overlay) {
+            samplers.putIfAbsent(OVERLAY_SAMPLER, new Sampler("sampler2D", OVERLAY_SAMPLER));
+        }
+
         // 1. The shared uniform block: loose uniforms from both stages, plus built-ins used.
         Map<String, Uniform> uniforms = new TreeMap<>();
         for (StageScan s : List.of(vs, fs)) {
             for (Declaration d : s.declarations) {
                 if (d.storage().equals("uniform") && !isOpaque(d.type())) {
                     for (Declarator x : d.declarators()) {
+                        if (overlay && x.name().equals("entityColor")) {
+                            continue;   // becomes a varying (see the overlay prologue)
+                        }
                         Uniform u = new Uniform(d.type(), x.name(), x.arraySuffix(), x.initializer());
                         Uniform old = uniforms.putIfAbsent(x.name(), u);
                         if (old != null && !(old.type() + old.array()).equals(u.type() + u.array())) {
@@ -509,6 +523,7 @@ public final class ProgramTranslator {
             needs.put("UV0", vs.identifiers.contains("gl_MultiTexCoord0"));
             needs.put("UV2", vs.identifiers.contains("gl_MultiTexCoord1") || vs.identifiers.contains("gl_MultiTexCoord2"));
             needs.put("Normal", vs.identifiers.contains("gl_Normal"));
+            needs.put("UV1", overlay);
             for (Map.Entry<String, Boolean> e : needs.entrySet()) {
                 if (e.getValue() && elements.contains(e.getKey())) {
                     String type = ELEMENT_TYPES.get(e.getKey());
@@ -577,6 +592,10 @@ public final class ProgramTranslator {
         Map<String, Slot> varyingTypes = new TreeMap<>();
         Set<String> vertexOut = new LinkedHashSet<>();
         Set<String> fragmentIn = new LinkedHashSet<>();
+        if (overlay) {
+            varyingTypes.put("entityColor", new Slot("entityColor", "vec4", "", -1));
+            vertexOut.add("entityColor");
+        }
         for (Declaration d : vs.declarations) {
             if (d.storage().equals("out") || d.storage().equals("varying")) {
                 for (Declarator x : d.declarators()) {
@@ -630,6 +649,7 @@ public final class ProgramTranslator {
         Map<String, String> renames = dynamic ? format.samplerRenames() : Map.of();
         // The fragment epilogue (alpha test, coverage mask): terrain's, or a game draw's.
         Terrain out = terrain != null ? terrain : dynamic ? new Terrain(format.alphaTest(), format.coverage()) : null;
+        boolean overlay = dynamic && vertexInputs.containsKey("UV1") && varyings.containsKey("entityColor");
 
         // a) Replace declarations, last first so earlier indices stay valid.
         List<Declaration> ds = new ArrayList<>(s.declarations);
@@ -805,6 +825,13 @@ public final class ProgramTranslator {
         if (dynamic) {
             h.append(DYNAMIC_TRANSFORMS_BLOCK);
         }
+        if (overlay) {
+            Slot v = varyings.get("entityColor");
+            h.append("layout(location = ").append(v.location()).append(vertex ? ") out vec4 entityColor;\n" : ") in vec4 entityColor;\n");
+            if (vertex) {
+                h.append("uniform sampler2D ").append(OVERLAY_SAMPLER).append(";\n");
+            }
+        }
         if (uniforms.containsKey("luxium_Fog")) {
             h.append("struct LuxiumFog { vec4 color; float density; float start; float end; float scale; };\n");
         }
@@ -895,7 +922,13 @@ public final class ProgramTranslator {
             // Vertex epilogue: the pack writes OpenGL clip depth (-w..w, near = -w); the pass shares
             // the game's depth buffer, which is reversed-Z in 0..1 (far = 0). z' = (w - z) / 2 maps
             // one onto the other, matching undoRevZ on the projection the pack reads.
-            body += "\nvoid main() {\n    luxium_pack_main();\n    gl_Position.z = (gl_Position.w - gl_Position.z) * 0.5;\n}\n";
+            String prologue = overlay
+                    // Iris EntityPatcher: no flash reads as rgb 0 (packs that ignore alpha rely on it).
+                    ? "    vec4 luxium_overlay = texelFetch(" + OVERLAY_SAMPLER + ", UV1, 0);\n"
+                    + "    entityColor = vec4(luxium_overlay.rgb, 1.0 - luxium_overlay.a);\n"
+                    + "    entityColor.rgb *= float(entityColor.a != 0.0);\n"
+                    : "";
+            body += "\nvoid main() {\n" + prologue + "    luxium_pack_main();\n    gl_Position.z = (gl_Position.w - gl_Position.z) * 0.5;\n}\n";
         }
         return h + body;
     }

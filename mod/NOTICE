@@ -158,6 +158,13 @@ GNU Lesser General Public License version 3
   render/EntityTakeover.java keys the served draws by RenderPipeline and uses Iris's alpha tests
   for entities (pipeline.programs.ShaderKey ENTITIES_SOLID off, ENTITIES_CUTOUT ONE_TENTH_ALPHA).
 
+  glsl/ProgramTranslator.java turns entityColor into a value the vertex stage reads from the
+  overlay texture, as net.irisshaders.iris.pipeline.transform.transformer.EntityPatcher
+  .patchOverlayColor does: texelFetch(overlay, UV1), vec4(rgb, 1 - alpha), and rgb zeroed when
+  there's no flash. render/EntityTakeover.java falls back from gbuffers_entities_translucent to
+  gbuffers_entities as Iris's ProgramId fallback does, and render/PackChain.java honours
+  clouds=off as net.irisshaders.iris.shaderpack.properties.ShaderProperties reads it.
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3

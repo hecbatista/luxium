@@ -108,14 +108,46 @@ abstract class LevelRendererTerrainMixin {
         TerrainTakeover.drawTranslucent(main.getDepthTextureView(), this.chunkLayerSampler, atlas, this.levelRenderState.renderWireframeTerrain);
         GpuTextureView caught = PackChain.catchTarget(main);
         GpuTextureView color = caught != null ? caught : main.getColorTextureView();
-        try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(
-                () -> caught != null ? "Luxium translucent catch" : "Main (after Luxium deferred)",
-                color, Optional.empty(), main.getDepthTextureView(), OptionalDouble.empty())) {
-            RenderSystem.bindDefaultUniforms(pass);
+        java.util.function.Supplier<String> label = () -> caught != null ? "Luxium translucent catch" : "Main (after Luxium deferred)";
+        RenderPass real = RenderSystem.getDevice().createCommandEncoder().createRenderPass(
+                label, color, Optional.empty(), main.getDepthTextureView(), OptionalDouble.empty());
+        RenderSystem.bindDefaultUniforms(real);
+        // A stand-in again, so the pack's translucent entities can step into the middle of it.
+        LevelPass pass = new LevelPass(real, label, color, main.getDepthTextureView());
+        try {
             original.call(self, sections, featureFrame, pass);
+        } finally {
+            pass.close();
         }
         if (caught != null) {
             PackChain.composeCatch();
+        }
+    }
+
+    /** The pack's clouds=off: the game's clouds aren't drawn (the pack draws its own in its passes). */
+    @WrapOperation(method = "executeClassicTransparency", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/client/renderer/CloudRenderer;render(Lnet/minecraft/client/CloudStatus;Lcom/mojang/renderpearl/api/commands/RenderPass;)V"))
+    private void luxium$clouds(final net.minecraft.client.renderer.CloudRenderer clouds, final net.minecraft.client.CloudStatus status,
+                               final RenderPass pass, final Operation<Void> original) {
+        if (!PackChain.cloudsOff()) {
+            original.call(clouds, status, pass);
+        }
+    }
+
+    /** The level's translucent features (after the deferred cut): the pack's translucent entity window. */
+    @WrapOperation(method = "executeClassicTransparency", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;executeTranslucent(Lcom/mojang/renderpearl/api/commands/RenderPass;)V"))
+    private void luxium$translucentFeatures(final FeatureRenderDispatcher.PreparedFrame frame, final RenderPass pass, final Operation<Void> original) {
+        if (!(pass instanceof LevelPass level)) {
+            original.call(frame, pass);
+            return;
+        }
+        level.suspend();
+        EntityTakeover.openTranslucentWindow(MetalShadersClient::value);
+        try {
+            original.call(frame, pass);
+        } finally {
+            EntityTakeover.closeWindow();
         }
     }
 

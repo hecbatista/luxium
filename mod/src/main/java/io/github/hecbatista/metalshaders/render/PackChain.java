@@ -95,6 +95,17 @@ public final class PackChain {
         return !failed && !passes.isEmpty();
     }
 
+    /** The pack's {@code clouds=off} (shaders.properties): the game's clouds aren't drawn (Iris ShaderProperties). */
+    private static boolean cloudsOff;
+
+    public static void setCloudsOff(boolean off) {
+        cloudsOff = off;
+    }
+
+    public static boolean cloudsOff() {
+        return cloudsOff && ready();
+    }
+
     /**
      * Translates and compiles every pass. {@code programs} is name -> (vertex, fragment) GLSL,
      * already preprocessed, in run order; final last.

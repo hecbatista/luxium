@@ -294,6 +294,9 @@ public final class MetalShadersClient implements ClientModInitializer {
             }
         }
         LOGGER.info("Chain: {} passes in order {}, scales {}", programs.size(), programs.stream().map(Map.Entry::getKey).toList(), scales);
+        String clouds = props.getProperty("clouds", "").strip();
+        PackChain.setCloudsOff(clouds.equals("off"));
+        LOGGER.info("Chain: clouds={} (the game's clouds are {})", clouds.isEmpty() ? "(not set)" : clouds, clouds.equals("off") ? "hidden" : "drawn");
         PackChain.prepare(plan, programs, scales, noise);
 
         // Step 6d-1: the sky, drawn by the pack's own sky programs.
@@ -326,9 +329,13 @@ public final class MetalShadersClient implements ClientModInitializer {
         // Step 6d-4: the level's solid entities and block entities, drawn by the pack's gbuffers_entities.
         var entitiesV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_entities.vsh", defines);
         var entitiesF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_entities.fsh", defines);
+        var entitiesTV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_entities_translucent.vsh", defines);
+        var entitiesTF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_entities_translucent.fsh", defines);
         if (PackChain.ready() && entitiesV.ok() && entitiesF.ok()) {
             io.github.hecbatista.metalshaders.render.EntityTakeover.prepare(
-                    new String[]{entitiesV.result().text(), entitiesF.result().text()});
+                    new String[]{entitiesV.result().text(), entitiesF.result().text()},
+                    entitiesTV.ok() && entitiesTF.ok() ? new String[]{entitiesTV.result().text(), entitiesTF.result().text()} : null,
+                    props);
         } else {
             LOGGER.warn("Entity takeover skipped (the pack lacks gbuffers_entities, or the chain isn't ready)");
         }
