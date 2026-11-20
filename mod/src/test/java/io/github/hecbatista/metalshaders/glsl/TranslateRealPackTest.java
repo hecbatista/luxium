@@ -33,11 +33,11 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  */
 class TranslateRealPackTest {
     /** Programs that only run with mods we don't have, so a failure there means nothing yet. */
-    private static boolean needsMissingMod(String name) {
+    static boolean needsMissingMod(String name) {
         return name.startsWith("dh_") || name.startsWith("clrwl_") || name.startsWith("voxy");
     }
 
-    private record Outcome(String program, String failedAt, String error) {
+    record Outcome(String program, String failedAt, String error) {
     }
 
     @Test
@@ -86,7 +86,7 @@ class TranslateRealPackTest {
         }
     }
 
-    private static Outcome run(String program, Map<String, String> sources, Path out) {
+    static Outcome run(String program, Map<String, String> sources, Path out) {
         String name = program.substring(1);
         try {
             ProgramTranslator.Result r;
@@ -139,18 +139,23 @@ class TranslateRealPackTest {
         return p.exitValue() == 0 ? null : new String(output, StandardCharsets.UTF_8);
     }
 
-    /** The first error line, without file paths and line numbers so similar errors group together. */
+    /**
+     * The first error line, without file paths and line numbers so similar errors group together.
+     * glslang's leading 'name' (the identifier the error is about) is kept, since that's what tells
+     * one gap from another; later quoted parts are collapsed.
+     */
     private static String firstError(String output) {
         for (String line : output.split("\n")) {
             if (line.contains("ERROR") || line.contains("error")) {
-                return line.replaceAll("^ERROR: [^ ]*:\\d+: ", "").replaceAll("^.*?:\\d+:\\d+: error: ", "")
-                        .replaceAll("'[^']*'", "'…'").strip();
+                String msg = line.replaceAll("^ERROR: .*?:\\d+: ", "").replaceAll("^.*?:\\d+:\\d+: error: ", "");
+                int head = msg.startsWith("'") ? msg.indexOf('\'', 1) + 1 : 0;
+                return (msg.substring(0, head) + msg.substring(head).replaceAll("'[^']*'", "'…'")).strip();
             }
         }
         return output.lines().findFirst().orElse("").strip();
     }
 
-    private static boolean toolExists(String tool) {
+    static boolean toolExists(String tool) {
         try {
             return new ProcessBuilder("which", tool).start().waitFor() == 0;
         } catch (IOException | InterruptedException e) {

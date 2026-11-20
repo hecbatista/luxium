@@ -8,6 +8,7 @@ import io.github.hecbatista.metalshaders.pack.RenderTargetPlan;
 import io.github.hecbatista.metalshaders.pack.PackDirectives;
 import io.github.hecbatista.metalshaders.pack.PackPreprocessor;
 import io.github.hecbatista.metalshaders.pack.PackReader;
+import io.github.hecbatista.metalshaders.pack.PackSelection;
 import io.github.hecbatista.metalshaders.pack.PropertiesPreprocessor;
 import io.github.hecbatista.metalshaders.pack.StandardDefines;
 import io.github.hecbatista.metalshaders.render.PackChain;
@@ -106,7 +107,7 @@ public final class MetalShadersClient implements ClientModInitializer {
     }
 
     /**
-     * Once per session, for the first pack found: load its formulas from shaders.properties,
+     * Once per session, for the pack {@link PackSelection} picks (LUXIUM_PACK, else the first): load its formulas from shaders.properties,
      * then translate its Overworld terrain program and report which block values are still
      * missing.
      */
@@ -116,7 +117,8 @@ public final class MetalShadersClient implements ClientModInitializer {
             if (packs.isEmpty()) {
                 return;
             }
-            Path pack = packs.getFirst();
+            Path pack = PackSelection.choose(packs).orElseThrow();
+            LOGGER.info("Loading pack {}", pack.getFileName());
             var defines = StandardDefines.forMac();
             var vsh = PackPreprocessor.preprocessProgram(pack, "/world0/gbuffers_terrain.vsh", defines);
             var fsh = PackPreprocessor.preprocessProgram(pack, "/world0/gbuffers_terrain.fsh", defines);

@@ -60,12 +60,21 @@ public class ScreenshotTest implements FabricClientGameTest {
 
     /**
      * The test run's game folder (build/run/clientGameTest) is cleared before each run, so copy
-     * the developer's packs from mod/run/shaderpacks/ into it.
+     * the developer's packs from mod/run/shaderpacks/ into it. When LUXIUM_PACK picks a pack, the
+     * test packs from mod/run/testpacks/ (scripts/fetch-testpacks.sh) are copied too, so it can
+     * name one of them. Without LUXIUM_PACK they're left out, so the default pack stays the same.
      */
     private static void copyShaderPacks() {
         Path gameDir = FabricLoader.getInstance().getGameDir();
-        Path source = gameDir.resolve("../../../run/shaderpacks").normalize();
         Path target = gameDir.resolve("shaderpacks");
+        copyPacks(gameDir.resolve("../../../run/shaderpacks").normalize(), target);
+        String wanted = System.getenv("LUXIUM_PACK");
+        if (wanted != null && !wanted.isBlank()) {
+            copyPacks(gameDir.resolve("../../../run/testpacks").normalize(), target);
+        }
+    }
+
+    private static void copyPacks(Path source, Path target) {
         if (!Files.isDirectory(source)) {
             return;
         }
