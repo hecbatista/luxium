@@ -59,6 +59,45 @@ GNU Lesser General Public License version 3
   checks for the effect first instead of relying on Iris's mixin into
   GameRenderer.nightVisionScale (same result in vanilla).
 
+  GameUniforms.java also reproduces wetness from net.irisshaders.iris.uniforms.transforms
+  .SmoothedFloat and PackDirectives (defaults 600/200, the 0.1 factor, and the bug where
+  drynessHalflife sets the rising half-life), and biome / biome_precipitation from
+  net.irisshaders.iris.uniforms.BiomeUniforms.
+
+  GameUniforms.java also follows net.irisshaders.iris.uniforms.IrisExclusiveUniforms
+  (eyePosition, relativeEyePosition, playerLookVector, cloudHeight, isElytraFlying, heavyFog,
+  lightningBoltPosition, endFlashIntensity via EndFlashStorage) and IdMapUniforms (heldItemId,
+  heldBlockLightValue for both hands, with the item light rule of
+  net.irisshaders.iris.api.v0.item.IrisItemLightProvider). Changed: old hand light isn't applied
+  yet. velocity is deliberately not supplied, because Iris 26.3 defines it in
+  HardcodedCustomUniforms but never calls that.
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/ItemIds.java follows
+  net.irisshaders.iris.shaderpack.IdMap.parseIdMap and materialmap.NamespacedId for
+  item.properties: "minecraft:" by default, block-state entries skipped, -1 for unlisted items.
+
+  src/main/java/io/github/hecbatista/metalshaders/uniform/BiomeIds.java and
+  mixin/BiomesMixin.java number biomes in vanilla registration order and name them
+  BIOME_<PATH>, as net.irisshaders.iris.mixin.MixinBiomes and
+  net.irisshaders.iris.shaderpack.IrisDefines do.
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/PropertiesPreprocessor.java adapts the
+  technique of net.irisshaders.iris.shaderpack.preprocessor.PropertiesPreprocessor (which
+  credits GlShader from Canvas, LGPL): lines trimmed, non-directive '#' lines and '#' chars
+  removed, backslashes hidden from JCPP. Changed: our own marker; pack options not yet defined.
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/PackDirectives.java follows the order
+  in which net.irisshaders.iris.shaderpack.programs.ProgramSet.locateDirectives reads const
+  directives from fragment stages.
+
+  src/main/java/io/github/hecbatista/metalshaders/uniform/Formula.java and CustomUniforms.java
+  are our own parser and evaluator for custom uniforms. They follow the behavior of Iris's
+  net.irisshaders.iris.uniforms.custom.CustomUniforms, net.irisshaders.iris.parsing.IrisFunctions
+  and net.irisshaders.iris.parsing.SmoothFloat: int/float typing, if/in/smooth and the math
+  functions, smooth's 0.1 factor and unsmoothed first value, dependency ordering, and dropping
+  broken formulas with their dependents. Iris's expression library (kroppeb.stareval) was not
+  copied; the operator precedence is the usual C one.
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3

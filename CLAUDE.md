@@ -11,7 +11,7 @@ Status (2026-11-20): steps 1–4 of 7 done; nothing draws yet. `mod/` loads next
 
 Rendering isn't touched.
 
-Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor ✅ (pack's default settings only) · 4 translator ✅ v1 (compiles; correctness comes in step 6) · 5 uniforms · 6 render pipeline · 7 polish.
+Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor ✅ (pack's default settings only) · 4 translator ✅ v1 (compiles; correctness comes in step 6) · 5 uniforms ✅ (render-time values come with step 6) · 6 render pipeline · 7 polish.
 
 Step 4 result: `TranslateRealPackTest` (the scoreboard) translates every vertex+fragment program, then runs glslang for Vulkan 1.2 with only `--auto-map-bindings` (no `-R`, no `--aml`), spirv-cross with Metallum's MSL options, and `xcrun metal`. On Complementary that's **90/90** programs: 30 per world, excluding dh_/clrwl_/voxy programs that need mods we don't have. A reflection check (`spirv-cross --reflect`) found 0 vertex/fragment interface mismatches. Outputs go to `mod/build/translated/<pack>/`, plus `scoreboard.txt`.
 
@@ -24,7 +24,18 @@ Step 5 progress (2026-11-20):
 - Game values v1:
   - `uniform/GameUniforms.java` updates once per frame from `mixin/GameRendererMixin` (TAIL of `GameRenderer.extract`). `uniform/UniformWriter.java` packs the values into std140 bytes; missing names get the pack's default or zero and are reported.
   - In game (2026-11-20, validation on, 0 messages): the logged values matched F3 (camera = feet + 1.62, 1708×960, frameTime ≈ 1/fps, worldTime frozen while paused, sunAngle follows vanilla's eased curve).
-  - Coverage for world0/gbuffers_terrain is **34 of 88** values. Still missing: the ~25 pack formulas, matrices (gbuffer*, shadow*, luxium_*), per-draw values, and smaller ones (fogColor, wetness, eyePosition, relativeEyePosition, playerLookVector, velocity, atlasSize, heldItem*, lightningBoltPosition, endFlash*, darknessLightFactor).
+- Pack formulas (2026-11-20): `pack/PropertiesPreprocessor.java` runs `shaders.properties` through JCPP with the game defines plus `BIOME_*`. `uniform/Formula.java` (parser + typed evaluator, bounded) and `uniform/CustomUniforms.java` (ordering, cycles, dropping) evaluate the formulas once per frame.
+  - Complementary: 27 formulas loaded, 4 dropped. `BIOME_ICE_CAVES` doesn't exist in 26.3; `endFlashIntensity` isn't supplied yet.
+  - In game they reacted correctly: water, tree shade, walking, frame timing. Coverage rose to **55 of 88**.
+  - The remaining 33 are mostly matrices and per-draw values (step 6).
+  - Biome ids come from `mixin/BiomesMixin` in Iris's order (FOREST = 8).
+  - Wetness half-lives come from `pack/PackDirectives.java` (Complementary: 300 from shadow + composite6).
+- Step 5 done (2026-11-20). Added: eyePosition, relativeEyePosition, playerLookVector, cloudHeight, isElytraFlying, heavyFog, lightningBoltPosition, endFlashIntensity, plus heldItemId/heldBlockLightValue for both hands (`pack/ItemIds.java` reads item.properties; 244 items).
+  - Checked in game: torch = 44002 with light 14, empty hand = air = 40008.
+  - Formulas: 30 of 31 load; only `BIOME_ICE_CAVES` is dropped, as in Iris.
+  - Coverage is **64 of 88**, plus `velocity` (Iris 26.3 never supplies it: `HardcodedCustomUniforms` is never called, so we deliberately leave it 0).
+  - The 23 still missing are all render-time values for step 6: gbuffer*/shadow* matrices, luxium_* per-draw matrices, entityId/blockEntityId/currentRenderedItemId/entityColor/renderStage/atlasSize, plus fogColor, darknessLightFactor and endFlashPosition, which Iris captures while drawing.
+- Earlier coverage for world0/gbuffers_terrain was **34 of 88** values. Still missing: the ~25 pack formulas, matrices (gbuffer*, shadow*, luxium_*), per-draw values, and smaller ones (fogColor, wetness, eyePosition, relativeEyePosition, playerLookVector, velocity, atlasSize, heldItem*, lightningBoltPosition, endFlash*, darknessLightFactor).
 
 Translator v1 only makes programs **compile**. These things are known to matter for drawing correctly and aren't handled yet:
 - `gl_FragCoord` origin: GL is bottom-left, Vulkan/Metal are top-left.

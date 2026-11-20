@@ -5,7 +5,17 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.GameRenderer;
+import io.github.hecbatista.metalshaders.pack.ItemIds;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.LightningBolt;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.BlockItemStateProperties;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.attribute.EnvironmentAttributes;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
@@ -28,8 +38,8 @@ import java.util.Map;
  * <p>
  * Each value follows the Iris (branch 26.3) rule named next to it, including quirks packs are
  * tuned against. All Minecraft calls were checked in the 26.3 sources. See NOTICE.
- * Not here yet: matrices and per-draw values (step 6), pack formulas and {@code wetness}
- * (they need the smoothing in step 5's formula part).
+ * Not here yet: matrices and per-draw values (step 6). The pack's own formulas are in
+ * {@link CustomUniforms}.
  */
 public final class GameUniforms {
     private final Map<String, Object> values = new HashMap<>();
@@ -101,7 +111,9 @@ public final class GameUniforms {
         values.put("previousCameraPositionFract", fract(camera.previousUnshifted));
 
         // CommonUniforms: weather and sky
-        values.put("rainStrength", clamp01(level.getRainLevel(partialTick)));
+        float rain = clamp01(level.getRainLevel(partialTick));
+        values.put("rainStrength", rain);
+        values.put("wetness", wetness(rain));
         Vector3fc sky = cam.attributeProbe().getValue(EnvironmentAttributes.SKY_COLOR, partialTick);
         values.put("skyColor", new float[]{sky.x(), sky.y(), sky.z()});
 
@@ -115,6 +127,130 @@ public final class GameUniforms {
         values.put("is_invisible", mc.player != null && mc.player.isInvisible());
         values.put("playerMood", viewer instanceof LocalPlayer p ? clamp01(p.getCurrentMood()) : 0f);
         values.put("eyeBrightness", eyeBrightness(level, viewer));
+
+        // IrisExclusiveUniforms
+        if (viewer != null) {
+            Vec3 eye = viewer.getEyePosition(partialTick);
+            values.put("eyePosition", new float[]{(float) eye.x, (float) eye.y, (float) eye.z});
+            double[] cam0 = camera.currentUnshifted;
+            values.put("relativeEyePosition", new float[]{(float) (cam0[0] - eye.x), (float) (cam0[1] - eye.y), (float) (cam0[2] - eye.z)});
+        }
+        if (viewer instanceof LivingEntity lv) {
+            Vec3 look = lv.getViewVector(partialTick);
+            values.put("playerLookVector", new float[]{(float) look.x, (float) look.y, (float) look.z});
+        } else {
+            values.put("playerLookVector", new float[]{0, 0, 0});
+        }
+        values.put("cloudHeight", cam.attributeProbe().getValue(EnvironmentAttributes.CLOUD_HEIGHT, partialTick));
+        values.put("isElytraFlying", mc.player != null && mc.player.isFallFlying());
+        values.put("heavyFog", mc.gui.hud.getBossOverlay().shouldCreateWorldFog());
+        var endFlash = level.endFlashState();
+        values.put("endFlashIntensity", endFlash == null ? 0f : endFlash.getIntensity(partialTick));
+        values.put("lightningBoltPosition", lightningBolt(mc, level));
+
+        // BiomeUniforms: the biome at the player's block, and its precipitation (0 none, 1 rain, 2 snow).
+        LocalPlayer player = mc.player;
+        if (player != null) {
+            var biome = player.level().getBiome(player.blockPosition());
+            values.put("biome", BiomeIds.of(biome.unwrapKey().orElse(null)));
+            values.put("biome_precipitation", switch (biome.value().getPrecipitationAt(player.blockPosition(), player.level().getSeaLevel())) {
+                case NONE -> 0;
+                case RAIN -> 1;
+                case SNOW -> 2;
+            });
+        } else {
+            values.put("biome", 0);
+            values.put("biome_precipitation", 0);
+        }
+
+        // IdMapUniforms: held items, numbered by the pack's item.properties.
+        heldItem(player, InteractionHand.MAIN_HAND, "heldItemId", "heldBlockLightValue");
+        heldItem(player, InteractionHand.OFF_HAND, "heldItemId2", "heldBlockLightValue2");
+    }
+
+    /**
+     * Names Iris doesn't supply either, though packs declare them. Iris defines velocity in
+     * HardcodedCustomUniforms, but nothing in Iris 26.3 calls that, so packs get 0. Reported
+     * apart from real gaps so the log doesn't read like a debt (Vitrail's rule).
+     */
+    public static final java.util.Set<String> NOT_SUPPLIED_BY_IRIS = java.util.Set.of("velocity");
+
+    private ItemIds itemIds = ItemIds.EMPTY;
+
+    public void setItemIds(ItemIds ids) {
+        this.itemIds = ids;
+    }
+
+    private void heldItem(LocalPlayer player, InteractionHand hand, String idName, String lightName) {
+        if (player == null) {
+            values.put(idName, -1);
+            values.put(lightName, 0);
+            return;
+        }
+        ItemStack stack = player.getItemInHand(hand);
+        Identifier id = stack.get(DataComponents.ITEM_MODEL);
+        if (id == null) {
+            id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        }
+        values.put(idName, itemIds.of(id.getNamespace() + ":" + id.getPath()));
+        int light = 0;
+        if (stack.getItem() instanceof BlockItem blockItem) {
+            BlockState state = blockItem.getBlock().defaultBlockState();
+            BlockItemStateProperties props = stack.getComponents().get(DataComponents.BLOCK_STATE);
+            if (props != null) {
+                state = props.apply(state);
+            }
+            light = state.getLightEmission();
+        }
+        values.put(lightName, light);
+    }
+
+    /** The first lightning bolt being drawn, relative to the camera, w = 1; or all zero. */
+    private float[] lightningBolt(Minecraft mc, ClientLevel level) {
+        for (Entity e : level.entitiesForRendering()) {
+            if (e instanceof LightningBolt bolt) {
+                // Iris uses the partial tick that ignores a frozen game here (true), unlike elsewhere.
+                Vec3 p = bolt.getPosition(mc.getDeltaTracker().getGameTimeDeltaPartialTick(true));
+                double[] c = camera.currentUnshifted;
+                return new float[]{(float) (p.x - c[0]), (float) (p.y - c[1]), (float) (p.z - c[2]), 1f};
+            }
+        }
+        return new float[]{0, 0, 0, 0};
+    }
+
+    // ---- wetness: rainStrength smoothed, as Iris's SmoothedFloat does it ----------------------
+
+    /** Iris's defaults (PackDirectives.java:63-64), in the pack's units (Iris multiplies by 0.1). */
+    private float wetnessHalfLifeUp = 600.0f;
+    private float wetnessHalfLifeDown = 200.0f;
+    private float wetnessValue;
+    private boolean wetnessStarted;
+
+    /**
+     * Sets the half-lives from the pack's {@code const float wetnessHalflife} and
+     * {@code drynessHalflife}. Copies Iris's bug (PackDirectives.java:280-284): both directives set
+     * the rising half-life, the later one winning, and the falling one stays at its default.
+     * Packs are tuned against that, so it's reproduced, not fixed.
+     *
+     * @param inOrder the values in the order the directives appear, as (name, value) pairs
+     */
+    public void setWetnessDirectives(java.util.List<Map.Entry<String, Float>> inOrder) {
+        for (Map.Entry<String, Float> d : inOrder) {
+            wetnessHalfLifeUp = d.getValue();
+        }
+    }
+
+    private float wetness(float rain) {
+        if (!wetnessStarted) {
+            wetnessStarted = true;
+            wetnessValue = rain;
+            return wetnessValue;
+        }
+        float halfLife = (rain > wetnessValue ? wetnessHalfLifeUp : wetnessHalfLifeDown) * 0.1f;
+        float k = (float) (1.0f / (halfLife / Math.log(2.0)));
+        float factor = 1.0f - (float) Math.exp(-k * frameTime);
+        wetnessValue = (1 - factor) * wetnessValue + factor * rain;
+        return wetnessValue;
     }
 
     private void updateTime(long now) {
