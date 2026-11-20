@@ -77,6 +77,10 @@ public final class TerrainTakeover {
             0.00390625f, 0, 0, 0, 0, 0.00390625f, 0, 0, 0, 0, 0.00390625f, 0, 0.03125f, 0.03125f, 0.03125f, 1);
 
     private static final Map<TerrainRenderPass, Program> programs = new IdentityHashMap<>();
+    /** The pack's shadow programs for the solid and cutout passes (shadow.vsh/fsh, step 6e). */
+    private static final Map<TerrainRenderPass, Program> shadowPrograms = new IdentityHashMap<>();
+    /** True while the shadow map is being drawn: the shadow programs and the light's matrices. */
+    private static boolean shadowDrawing;
     private static final Map<String, GpuTextureView> inputs = new HashMap<>();
     private static boolean prepared;
     private static GpuSampler atlasSampler;
@@ -135,6 +139,64 @@ public final class TerrainTakeover {
         }
     }
 
+    /**
+     * The pack's shadow program for Sodium's solid and cutout passes (Iris ShaderKey
+     * SHADOW_SODIUM_TERRAIN_SOLID off, _CUTOUT half), drawn into the shadow map before the terrain.
+     */
+    public static void prepareShadow(String[] shadow, java.util.Properties properties) {
+        if (!prepared) {
+            return;
+        }
+        try {
+            add(DefaultTerrainRenderPasses.SOLID, "shadow", "shadow_solid", shadow, Float.NaN, 8, false, properties, true);
+            add(DefaultTerrainRenderPasses.CUTOUT, "shadow", "shadow_cutout", shadow, 0.5f, 10, false, properties, true);
+            MetalShadersClient.LOGGER.info("Shadow pass ready: shadow writes shadowcolor{} at {}x{}",
+                    shadowPrograms.get(DefaultTerrainRenderPasses.SOLID).writes(),
+                    io.github.hecbatista.metalshaders.uniform.ShadowMatrices.directives().resolution(),
+                    io.github.hecbatista.metalshaders.uniform.ShadowMatrices.directives().resolution());
+        } catch (Exception e) {
+            shadowPrograms.clear();
+            MetalShadersClient.LOGGER.error("Shadow pass disabled: {}", e.getMessage(), e);
+        }
+    }
+
+    public static boolean shadowActive() {
+        return active() && !shadowPrograms.isEmpty();
+    }
+
+    /**
+     * The shadow map, drawn just before the opaque terrain from Sodium's sections for this frame
+     * (the camera's visible ones: v1 has no culling walk of its own for the light). Cleared every
+     * frame: depth to 1, colours to white (Iris's shadowcolor defaults).
+     */
+    public static void drawShadow(GpuSampler sampler, GpuTextureView atlas, boolean wireframe) {
+        Program p = shadowPrograms.get(DefaultTerrainRenderPasses.SOLID);
+        if (!shadowActive() || p == null || !(sections instanceof SodiumChunkSection) || wireframe) {
+            return;
+        }
+        ShadowTargets.ensure(io.github.hecbatista.metalshaders.uniform.ShadowMatrices.directives().resolution(), p.writes());
+        ShadowTargets.clear();
+        shadowDrawing = true;
+        try {
+            resolveInputs(p);
+            RenderPassDescriptor.Builder d = RenderPassDescriptor.builder(() -> "Luxium shadow map (pack shadow)");
+            for (int index : p.writes()) {
+                d.withColorAttachment(ShadowTargets.color(index));
+            }
+            d.withDepthAttachment(ShadowTargets.depthAttachment());
+            try (RenderPass pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(d.build())) {
+                inPass = true;
+                sections.renderGroup(ChunkSectionLayerGroup.OPAQUE, pass, sampler, atlas, false);
+            } finally {
+                inPass = false;
+                currentPass = null;
+            }
+        } finally {
+            shadowDrawing = false;
+        }
+        ShadowTargets.publish();
+    }
+
     /** {@code alphaTest.<program>=GREATER 0.1} (Iris AlphaTest syntax); only GREATER and off are read. */
     static float alphaTest(java.util.Properties properties, String program, float fallback) {
         String v = properties.getProperty("alphaTest." + program);
@@ -188,7 +250,12 @@ public final class TerrainTakeover {
 
     private static void add(TerrainRenderPass pass, String program, String name, String[] glsl, float alphaTest, int stage,
                             boolean coverage, java.util.Properties properties) throws Exception {
-        ProgramTranslator.Result r = ProgramTranslator.translateForTerrain(glsl[0], glsl[1], new ProgramTranslator.Terrain(alphaTest, coverage));
+        add(pass, program, name, glsl, alphaTest, stage, coverage, properties, false);
+    }
+
+    private static void add(TerrainRenderPass pass, String program, String name, String[] glsl, float alphaTest, int stage,
+                            boolean coverage, java.util.Properties properties, boolean shadow) throws Exception {
+        ProgramTranslator.Result r = ProgramTranslator.translateForTerrain(glsl[0], glsl[1], new ProgramTranslator.Terrain(alphaTest, coverage, shadow));
         List<Integer> writes = r.drawBuffers().isEmpty() ? List.of(0) : r.drawBuffers();
         if (coverage) {
             int coverageAt = r.fragmentOutputs().stream().filter(s -> s.name().equals(ProgramTranslator.COVERAGE_OUTPUT))
@@ -197,7 +264,9 @@ public final class TerrainTakeover {
                 throw new IllegalStateException(program + " writes outputs past its draw buffers " + writes);
             }
         }
-        PackChain.requireTargets(writes);
+        if (!shadow) {
+            PackChain.requireTargets(writes);
+        }
         // Iris leaves gbuffers_water on the vanilla translucent blend; terrain draws unblended.
         Optional<BlendFunction> defaultBlend = pass.isTranslucent() ? Optional.of(BlendFunction.TRANSLUCENT) : Optional.empty();
         Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/" + program + "_" + name);
@@ -206,8 +275,10 @@ public final class TerrainTakeover {
                 .withVertexShader(shader).withFragmentShader(shader)
                 // Sodium's chunk pipeline state (ShaderChunkRenderer.createShader, 0.9.2).
                 .withPrimitiveTopology(PrimitiveTopology.QUADS)
-                .withCull(true)
-                .withDepthStencilState(DepthStencilState.DEFAULT)
+                // The shadow pass draws both sides and keeps forward depth (cleared to 1, less-or-equal).
+                .withCull(!shadow)
+                .withDepthStencilState(shadow ? new DepthStencilState(com.mojang.renderpearl.api.pipeline.CompareOp.LESS_THAN_OR_EQUAL, true)
+                        : DepthStencilState.DEFAULT)
                 .withPushConstantSize(ProgramTranslator.SODIUM_PUSH_CONSTANT_SIZE)
                 .withVertexBinding(0, LuxiumChunkVertex.VERTEX_FORMAT);
         List<String> blends = new ArrayList<>();
@@ -215,7 +286,7 @@ public final class TerrainTakeover {
             int index = writes.get(i);
             Optional<BlendFunction> blend = blend(properties, program, index, defaultBlend);
             blends.add("colortex" + index + (blend.isPresent() ? " blended" : " unblended"));
-            b.withColorTargetState(i, new ColorTargetState(blend, PackChain.targetFormat(index),
+            b.withColorTargetState(i, new ColorTargetState(blend, shadow ? ShadowTargets.FORMAT : PackChain.targetFormat(index),
                     PackChain.promoted(index) ? ColorTargetState.WRITE_COLOR : ColorTargetState.WRITE_ALL));
         }
         if (coverage) {
@@ -243,7 +314,7 @@ public final class TerrainTakeover {
                 defaults.put(u.name(), u.defaultValue());
             }
         });
-        programs.put(pass, new Program(pass, r, layout, defaults, compiled, new ArrayList<>(), stage, writes, coverage));
+        (shadow ? shadowPrograms : programs).put(pass, new Program(pass, r, layout, defaults, compiled, new ArrayList<>(), stage, writes, coverage));
         MetalShadersClient.LOGGER.info("Terrain {} ({}): inputs {}, samplers {}, alpha test {}, {}", name, program,
                 r.vertexInputs().stream().map(ProgramTranslator.Slot::name).toList(),
                 r.samplers().stream().map(ProgramTranslator.Sampler::name).toList(),
@@ -286,6 +357,7 @@ public final class TerrainTakeover {
      * cutout) into a pass on the pack's targets plus the coverage mask, sharing the game's depth.
      */
     public static void drawOpaque(GpuTextureView depth, GpuSampler sampler, GpuTextureView atlas, boolean wireframe) {
+        drawShadow(sampler, atlas, wireframe);
         drewOpaque = drawGroup(ChunkSectionLayerGroup.OPAQUE, DefaultTerrainRenderPasses.SOLID, depth, sampler, atlas, wireframe);
     }
 
@@ -351,13 +423,13 @@ public final class TerrainTakeover {
 
     /** The pack's pipeline for the terrain pass being drawn, or Sodium's own. */
     public static CompiledRenderPipeline pipelineFor(CompiledRenderPipeline original) {
-        Program p = currentPass == null ? null : programs.get(currentPass);
+        Program p = currentPass == null ? null : (shadowDrawing ? shadowPrograms : programs).get(currentPass);
         return p != null ? p.compiled() : original;
     }
 
     /** After Sodium sets the pipeline: the pack's uniform block and textures. */
     public static void bind(RenderPass pass, Function<String, Object> values) {
-        Program p = currentPass == null ? null : programs.get(currentPass);
+        Program p = currentPass == null ? null : (shadowDrawing ? shadowPrograms : programs).get(currentPass);
         if (p == null) {
             return;
         }
@@ -392,8 +464,11 @@ public final class TerrainTakeover {
 
     /** Terrain values over the frame's: the camera's matrices, the lightmap matrix, the stage. */
     private static Function<String, Object> perDraw(Function<String, Object> values, int stage, GpuTextureView atlas) {
-        Matrix4f modelView = values.apply("gbufferModelView") instanceof Matrix4fc m ? new Matrix4f(m) : new Matrix4f();
-        Matrix4f projection = values.apply("gbufferProjection") instanceof Matrix4fc m ? new Matrix4f(m) : new Matrix4f();
+        // In the shadow pass the fixed-function pair *is* the light's (Vitrail sky-and-shadows.md).
+        String mv = shadowDrawing ? "shadowModelView" : "gbufferModelView";
+        String pr = shadowDrawing ? "shadowProjection" : "gbufferProjection";
+        Matrix4f modelView = values.apply(mv) instanceof Matrix4fc m ? new Matrix4f(m) : new Matrix4f();
+        Matrix4f projection = values.apply(pr) instanceof Matrix4fc m ? new Matrix4f(m) : new Matrix4f();
         Matrix4f mvp = new Matrix4f(projection).mul(modelView);
         Matrix3f normal = new Matrix3f(modelView).invert().transpose();
         Matrix4fc[] textureMatrices = new Matrix4fc[8];

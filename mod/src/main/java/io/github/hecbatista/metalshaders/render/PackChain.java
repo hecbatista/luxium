@@ -809,6 +809,10 @@ public final class PackChain {
 
     /** What a sampler name reads. */
     private static GpuTextureView input(GpuDevice device, CommandEncoder encoder, String name) {
+        GpuTextureView shadow = ShadowTargets.input(name);
+        if (shadow != null) {
+            return shadow;
+        }
         Integer index = targetIndex(name);
         if (index != null && halves.containsKey(index)) {
             return view(index, true);

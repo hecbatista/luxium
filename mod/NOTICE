@@ -196,6 +196,16 @@ GNU Lesser General Public License version 3
   BeaconBeam, Lightning; pipeline.programs.ShaderKey EMISSIVE_ENTITIES, BEACON, LIGHTNING), their
   alpha tests (beacon and lightning off) and SpiderEyes' default blend (SRC_ALPHA ONE ZERO ONE).
 
+  src/main/java/io/github/hecbatista/metalshaders/uniform/ShadowMatrices.java follows
+  net.irisshaders.iris.shadows.ShadowMatrices (createBaselineModelViewMatrix, snapModelViewToGrid,
+  createOrthoMatrix) and ShadowRenderer: the light view's rotations by the sky angle and
+  sunPathRotation, the grid snap with Java's signed remainder, the orthographic box of half size
+  shadowDistance; shadowAngle as uniforms.CelestialUniforms.getShadowAngle; the defaults and const
+  directives of shaderpack.properties.PackShadowDirectives (shadowMapResolution 1024,
+  shadowDistance 160, near/far -100.05/156, shadowIntervalSize 2). The shadow pass's alpha tests
+  follow ShaderKey SHADOW_SODIUM_TERRAIN_SOLID/CUTOUT and its clear colours the shadowcolor
+  defaults (white).
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3
@@ -238,6 +248,10 @@ GNU Lesser General Public License version 3
   RenderTypeFeatureRenderer.executeGroup, the level's solid-feature window) follow designs
   described in Vitrail's render/LevelPass and docs/internals/entities.md ("The door is a group of
   draws"). No Vitrail code was copied.
+
+  The shadow pass (render/TerrainTakeover.drawShadow, render/ShadowTargets.java) follows Vitrail's
+  docs/sky-and-shadows.md: forward depth for the shadow map (cleared to 1, less-or-equal), the
+  shadow pair as the pass's fixed-function matrices, both faces drawn.
 
 JCPP, https://github.com/shevek/jcpp (org.anarres:jcpp 1.4.14)
 Apache License 2.0

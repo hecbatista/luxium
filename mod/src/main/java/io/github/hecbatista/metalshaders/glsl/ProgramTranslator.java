@@ -313,7 +313,10 @@ public final class ProgramTranslator {
      * @param coverage  whether the fragment stage writes the coverage mask as one more output
      *                  (opaque terrain, drawn before the seed; translucents are drawn after it)
      */
-    public record Terrain(float alphaTest, boolean coverage) {
+    public record Terrain(float alphaTest, boolean coverage, boolean shadow) {
+        public Terrain(float alphaTest, boolean coverage) {
+            this(alphaTest, coverage, false);
+        }
     }
 
     /**
@@ -914,7 +917,12 @@ public final class ProgramTranslator {
                     }
                 }
             }
-            main.append("    luxium_pack_main();\n    gl_Position.z = (gl_Position.w - gl_Position.z) * 0.5;\n}\n");
+            // The scene is reversed-Z (see format mode below). The shadow map keeps OpenGL's forward
+            // depth, 0 nearest the light (Vitrail sky-and-shadows.md: "Shadow depth uses the
+            // opposite convention from the scene"), because the pack reads it as written.
+            main.append(terrain.shadow()
+                    ? "    luxium_pack_main();\n    gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;\n}\n"
+                    : "    luxium_pack_main();\n    gl_Position.z = (gl_Position.w - gl_Position.z) * 0.5;\n}\n");
             body += main;
         }
         if (out != null && !vertex) {

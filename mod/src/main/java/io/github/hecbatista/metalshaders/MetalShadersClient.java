@@ -318,6 +318,28 @@ public final class MetalShadersClient implements ClientModInitializer {
             LOGGER.warn("Sky takeover skipped (the pack lacks a sky program, or the chain isn't ready)");
         }
 
+        // Step 6e: the pack's shadow directives (const directives, Iris PackShadowDirectives), read
+        // from the programs that carry them.
+        StringBuilder directiveText = new StringBuilder();
+        for (String program : List.of("shadow", "composite", "composite1", "deferred1", "final", "gbuffers_terrain")) {
+            for (String ext : List.of(".vsh", ".fsh")) {
+                var t = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + program + ext, defines);
+                if (t.ok()) {
+                    directiveText.append(t.result().text()).append('\n');
+                }
+            }
+        }
+        var sd = io.github.hecbatista.metalshaders.uniform.ShadowMatrices.Directives.DEFAULT;
+        var shadowDirectives = new io.github.hecbatista.metalshaders.uniform.ShadowMatrices.Directives(
+                (int) constDirective(directiveText, "shadowMapResolution", sd.resolution()),
+                constDirective(directiveText, "shadowDistance", sd.distance()),
+                constDirective(directiveText, "shadowNearPlane", sd.nearPlane()),
+                constDirective(directiveText, "shadowFarPlane", sd.farPlane()),
+                constDirective(directiveText, "shadowIntervalSize", sd.intervalSize()),
+                constDirective(directiveText, "sunPathRotation", sd.sunPathRotation()));
+        io.github.hecbatista.metalshaders.uniform.ShadowMatrices.setDirectives(shadowDirectives);
+        LOGGER.info("Shadow directives: {}", shadowDirectives);
+
         // Steps 6d-2/6d-3: terrain drawn by the pack's gbuffers_terrain and gbuffers_water through Sodium.
         var terrainV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_terrain.vsh", defines);
         var terrainF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_terrain.fsh", defines);
@@ -330,6 +352,13 @@ public final class MetalShadersClient implements ClientModInitializer {
                     props);
         } else {
             LOGGER.warn("Terrain takeover skipped (the pack lacks gbuffers_terrain, or the chain isn't ready)");
+        }
+        // Step 6e: the shadow map, drawn by the pack's shadow program (Iris: no program, no shadow pass).
+        var shadowV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/shadow.vsh", defines);
+        var shadowF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/shadow.fsh", defines);
+        if (shadowV.ok() && shadowF.ok()) {
+            io.github.hecbatista.metalshaders.render.TerrainTakeover.prepareShadow(
+                    new String[]{shadowV.result().text(), shadowF.result().text()}, props);
         }
 
         // Step 6d-4: the level's solid entities and block entities, drawn by the pack's gbuffers_entities.
@@ -422,6 +451,13 @@ public final class MetalShadersClient implements ClientModInitializer {
                     ownTranslucent ? "gbuffers_particles_translucent" : particleName,
                     ownTranslucent ? new String[]{ptV.result().text(), ptF.result().text()} : particles, props);
         }
+    }
+
+    /** The first {@code const int|float name = value;} in the text (an Iris const directive), or the default. */
+    private static float constDirective(CharSequence text, String name, float fallback) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "const\\s+(?:int|float)\\s+" + name + "\\s*=\\s*(-?[0-9.]+)[fF]?\\s*;").matcher(text);
+        return m.find() ? Float.parseFloat(m.group(1)) : fallback;
     }
 
     /** A short, readable line of the values worth comparing with the F3 screen. */

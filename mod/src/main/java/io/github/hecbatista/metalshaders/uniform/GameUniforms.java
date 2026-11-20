@@ -97,6 +97,22 @@ public final class GameUniforms {
             c -= 360;
         }
         values.put("sunAngle", c / 360.0f);
+        // CelestialUniforms.getShadowAngle: the sun's angle by day, the moon's by night.
+        float moon = cam.attributeProbe().getValue(EnvironmentAttributes.MOON_ANGLE, partialTick) + 90.0f;
+        if (moon < 0) {
+            moon += 360;
+        } else if (moon > 360) {
+            moon -= 360;
+        }
+        float shadowAngle = (c < 180 ? c : moon) / 360.0f;
+        values.put("shadowAngle", shadowAngle);
+        // The shadow pass's matrices (Iris ShadowRenderer), from the real camera position.
+        org.joml.Matrix4f shadowModelView = ShadowMatrices.modelView(shadowAngle, cam.position().x, cam.position().y, cam.position().z);
+        org.joml.Matrix4f shadowProjection = ShadowMatrices.projection();
+        values.put("shadowModelView", shadowModelView);
+        values.put("shadowModelViewInverse", new org.joml.Matrix4f(shadowModelView).invert());
+        values.put("shadowProjection", shadowProjection);
+        values.put("shadowProjectionInverse", new org.joml.Matrix4f(shadowProjection).invert());
 
         // CameraUniforms
         camera.update(cam.position());
