@@ -14,6 +14,7 @@ import io.github.hecbatista.metalshaders.render.PackChain;
 import io.github.hecbatista.metalshaders.uniform.BiomeIds;
 import io.github.hecbatista.metalshaders.uniform.CustomUniforms;
 import io.github.hecbatista.metalshaders.uniform.GameUniforms;
+import io.github.hecbatista.metalshaders.uniform.RenderMatrices;
 import io.github.hecbatista.metalshaders.uniform.UniformWriter;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
@@ -89,7 +90,19 @@ public final class MetalShadersClient implements ClientModInitializer {
     /** Every value a pack can read this frame: its own formulas first, then the game's. */
     public static Object value(String name) {
         Object own = customUniforms == null ? null : customUniforms.get(name);
-        return own != null ? own : GAME_UNIFORMS.get(name);
+        if (own != null) {
+            return own;
+        }
+        Object matrix = RENDER_MATRICES.get(name);
+        return matrix != null ? matrix : GAME_UNIFORMS.get(name);
+    }
+
+    private static final RenderMatrices RENDER_MATRICES = new RenderMatrices();
+
+    /** Called by GameRendererRenderMixin with this frame's camera rotation and projection. */
+    public static void captureMatrices(org.joml.Matrix4fc viewRotation, org.joml.Matrix4fc projection) {
+        RENDER_MATRICES.capture(viewRotation, projection,
+                com.mojang.blaze3d.systems.RenderSystem.getDevice().getDeviceInfo().isZZeroToOne());
     }
 
     /**

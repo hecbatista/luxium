@@ -50,7 +50,7 @@ import java.util.function.Function;
  * contents. final writes to the screen.
  * <p>
  * Stand-ins until the pack's own world shaders run (6d): colortex0 starts each frame as a copy of
- * vanilla's image; depthtex0/1/2 are a copy of vanilla's depth (still in reversed-Z, a known gap);
+ * vanilla's image; depthtex0/1/2 are vanilla's depth converted to the OpenGL convention;
  * shadow textures are placeholders.
  */
 public final class PackChain {
@@ -73,6 +73,9 @@ public final class PackChain {
     private static GpuTextureView noise;
     private static final Map<Integer, GpuTextureView> solid = new HashMap<>();
     private static CompiledRenderPipeline seedPipeline;
+    private static CompiledRenderPipeline depthPipeline;
+    private static GpuTexture depthConverted;
+    private static GpuTextureView depthConvertedView;
     private static boolean failed;
     private static int width;
     private static int height;
@@ -198,6 +201,30 @@ public final class PackChain {
                 .put(shader, ShaderType.VERTEX, vertex).put(shader, ShaderType.FRAGMENT, fragment), Runnable::run).join().finishCompile();
         if (seedPipeline == null) {
             fail("seed pass failed to compile", null);
+            return;
+        }
+        // depthtex0/1/2: the game draws reversed-Z (far = 0); packs expect OpenGL's convention.
+        // Iris rewrites each depth read to 1 - depth (DepthTransformer); converting the image once
+        // instead (Vitrail's way) also covers reads through helper functions. See NOTICE.
+        Identifier depthShader = Identifier.fromNamespaceAndPath("metalshaders", "pack/depth_convert");
+        String depthFragment = """
+                #version 450
+                uniform sampler2D reversedDepth;
+                layout(location = 0) in vec2 uv;
+                layout(location = 0) out vec4 depth;
+                void main() { depth = vec4(1.0 - texture(reversedDepth, uv).r); }
+                """;
+        depthPipeline = device.compilePipeline(RenderPipeline.builder()
+                        .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/depth_convert"))
+                        .withVertexShader(depthShader).withFragmentShader(depthShader)
+                        .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+                        .withBindGroupLayout(BindGroupLayout.builder().withUniform("reversedDepth", UniformType.COMBINED_IMAGE_SAMPLER).build())
+                        .withColorTargetState(new ColorTargetState(Optional.empty(), GpuFormat.R32_FLOAT, ColorTargetState.WRITE_ALL))
+                        .build(),
+                new LuxiumShaderSource().put(depthShader, ShaderType.VERTEX, vertex).put(depthShader, ShaderType.FRAGMENT, depthFragment),
+                Runnable::run).join().finishCompile();
+        if (depthPipeline == null) {
+            fail("depth conversion pass failed to compile", null);
         }
     }
 
@@ -220,6 +247,11 @@ public final class PackChain {
             }
             // 2. Stand-ins: vanilla's depth, and vanilla's image as colortex0.
             encoder.copyTextureToTexture(target.getDepthTexture(), depthCopy, 0, 0, 0, 0, 0, width, height);
+            try (RenderPass convert = encoder.createRenderPass(() -> "Luxium depth to OpenGL convention", depthConvertedView, Optional.empty())) {
+                convert.setPipeline(depthPipeline);
+                convert.setUniform("reversedDepth", depthCopyView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+                convert.draw(3, 1, 0, 0);
+            }
             GpuTexture worldCopy = worldCopy(device, encoder, target);
             try (RenderPass seed = encoder.createRenderPass(() -> "Luxium seed colortex0", view(0, true), Optional.empty())) {
                 seed.setPipeline(seedPipeline);
@@ -361,7 +393,7 @@ public final class PackChain {
             return view(index, true);
         }
         if (name.startsWith("depthtex")) {
-            return depthCopyView;
+            return depthConvertedView;
         }
         if (name.equals("noisetex") && noise != null) {
             return noise;
@@ -448,6 +480,13 @@ public final class PackChain {
         depthCopy = device.createTexture("Luxium depth copy", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING,
                 GpuFormat.D32_FLOAT, w, h, 1, 1);
         depthCopyView = device.createTextureView(depthCopy);
+        if (depthConverted != null) {
+            depthConvertedView.close();
+            depthConverted.close();
+        }
+        depthConverted = device.createTexture("Luxium depthtex (OpenGL convention)",
+                GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT, GpuFormat.R32_FLOAT, w, h, 1, 1);
+        depthConvertedView = device.createTextureView(depthConverted);
         MetalShadersClient.LOGGER.info("Chain buffers allocated at {}x{}: colortex{}", w, h, used);
     }
 

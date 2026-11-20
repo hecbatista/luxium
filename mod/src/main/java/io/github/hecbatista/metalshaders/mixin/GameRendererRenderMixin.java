@@ -1,6 +1,9 @@
 package io.github.hecbatista.metalshaders.mixin;
 
+import com.llamalad7.mixinextras.sugar.Local;
 import io.github.hecbatista.metalshaders.MetalShadersClient;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
+import org.joml.Matrix4f;
 import io.github.hecbatista.metalshaders.render.PackChain;
 import net.minecraft.client.renderer.GameRenderer;
 import org.spongepowered.asm.mixin.Mixin;
@@ -24,5 +27,17 @@ abstract class GameRendererRenderMixin {
             target = "Lnet/minecraft/client/renderer/GameRenderer;renderLevel()V", shift = At.Shift.AFTER))
     private void luxium$afterWorld(final CallbackInfo ci) {
         PackChain.draw(this.mainRenderTarget(), MetalShadersClient::value);
+    }
+
+    /**
+     * Captures the world's camera matrices where renderLevel hands its final projection (with view
+     * bobbing) to RenderSystem (GameRenderer.java:665 in the 26.3 sources).
+     */
+    @Inject(method = "renderLevel", at = @At(value = "INVOKE",
+            target = "Lcom/mojang/blaze3d/systems/RenderSystem;setProjectionMatrix(Lcom/mojang/renderpearl/api/buffers/GpuBufferSlice;Lcom/mojang/blaze3d/ProjectionType;)V"))
+    private void luxium$captureMatrices(final CallbackInfo ci,
+                                         @Local(ordinal = 0) final Matrix4f projectionMatrix,
+                                         @Local final CameraRenderState cameraState) {
+        MetalShadersClient.captureMatrices(cameraState.viewRotationMatrix, projectionMatrix);
     }
 }

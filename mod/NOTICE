@@ -76,6 +76,15 @@ GNU Lesser General Public License version 3
   net.irisshaders.iris.shaderpack.IdMap.parseIdMap and materialmap.NamespacedId for
   item.properties: "minecraft:" by default, block-state entries skipped, -1 for unlisted items.
 
+  src/main/java/io/github/hecbatista/metalshaders/uniform/RenderMatrices.java reproduces how
+  Iris supplies the gbuffer matrices: gbufferModelView is the camera's view rotation and
+  gbufferProjection the game's projection passed through the formula of
+  net.irisshaders.iris.helpers.MatrixUtils.undoRevZ (net.irisshaders.iris.mixin.MixinLevelRenderer),
+  each with an inverse and last frame's value (net.irisshaders.iris.uniforms.MatrixUniforms).
+  render/PackChain.java converts depth with Iris's rule from
+  net.irisshaders.iris.pipeline.transform.transformer.DepthTransformer (depth reads become
+  1 - depth), applied once to the image as Vitrail's docs/translation.md describes.
+
   src/main/java/io/github/hecbatista/metalshaders/uniform/BiomeIds.java and
   mixin/BiomesMixin.java number biomes in vanilla registration order and name them
   BIOME_<PATH>, as net.irisshaders.iris.mixin.MixinBiomes and

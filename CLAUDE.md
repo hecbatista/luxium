@@ -66,7 +66,14 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
 - Per-pass debug: the seed colortex0 is correct, and **deferred1 already writes 100% NaN** to colortex0.
 - Prime suspect: the gbuffer matrices aren't supplied yet (all zero), so position reconstruction divides by zero.
 - depthtex0 looks all black. Minecraft 26.x renders **reversed-Z** (far = 0), and Complementary expects the OpenGL convention.
-- Next: capture gbufferModelView/Projection (+ inverse, previous) the way Iris does (`MatrixUniforms`, `CapturedRenderingState`), and convert depth to the OpenGL convention (Iris `iris_undoRevZ`; Vitrail converts the depth image). Check each in the 26.3 sources.
+- Fixed (2026-11-20):
+  - `uniform/RenderMatrices.java` captures the matrices in `GameRendererRenderMixin`, at `RenderSystem.setProjectionMatrix` inside `GameRenderer.renderLevel`, using MixinExtras `@Local`.
+    - gbufferModelView = `CameraRenderState.viewRotationMatrix`.
+    - gbufferProjection = the final projection with view bobbing, passed through Iris's `MatrixUtils.undoRevZ` (zZeroToOne branch; Metallum's `DeviceInfo.isZZeroToOne` is true).
+    - Each also comes inverted and as last frame's value.
+  - depthtex0/1/2 are converted once per frame to `1 - depth` in an R32_FLOAT texture (Iris's DepthTransformer does `1 - read`; converting the image as Vitrail does also covers reads through helper functions).
+- Result: **0% NaN at every pass** (was 100% from deferred1). The land shot shows the scene with Complementary's fog and sky look, plus a thin white streak near the top-left (unexplained).
+- The underwater shot is almost black. Likely cause: the stand-ins (no gbuffers_water data). Re-check after 6d.
 
 Facts for step 6:
 - **Full-screen passes:** vanilla `PostPass` uses `renderPass.draw(3, 1, 0, 0)` with no vertex buffer. Pack composite vertex shaders expect a quad (`gl_Vertex`, `gl_MultiTexCoord0`), so we need a quad vertex buffer or a special vertex prologue.
