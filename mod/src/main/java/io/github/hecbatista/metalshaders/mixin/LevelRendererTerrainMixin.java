@@ -151,6 +151,23 @@ abstract class LevelRendererTerrainMixin {
         }
     }
 
+    /** The level's "after terrain" features (translucent particles): the pack's translucent window again. */
+    @WrapOperation(method = "executeClassicTransparency", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;executeTranslucentAfterTerrain(Lcom/mojang/renderpearl/api/commands/RenderPass;)V"))
+    private void luxium$afterTerrainFeatures(final FeatureRenderDispatcher.PreparedFrame frame, final RenderPass pass, final Operation<Void> original) {
+        if (!(pass instanceof LevelPass level)) {
+            original.call(frame, pass);
+            return;
+        }
+        level.suspend();
+        EntityTakeover.openTranslucentWindow(MetalShadersClient::value);
+        try {
+            original.call(frame, pass);
+        } finally {
+            EntityTakeover.closeWindow();
+        }
+    }
+
     @WrapOperation(method = "executeClassicTransparency", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/renderer/chunk/ChunkSectionsToRender;renderGroup(Lnet/minecraft/client/renderer/chunk/ChunkSectionLayerGroup;Lcom/mojang/renderpearl/api/commands/RenderPass;Lcom/mojang/renderpearl/api/textures/GpuSampler;Lcom/mojang/renderpearl/api/textures/GpuTextureView;Z)V"))
     private void luxium$skipTranslucentTerrain(final ChunkSectionsToRender sections, final ChunkSectionLayerGroup group, final RenderPass pass,

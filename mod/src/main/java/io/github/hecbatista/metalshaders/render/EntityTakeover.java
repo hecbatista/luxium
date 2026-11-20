@@ -83,8 +83,14 @@ public final class EntityTakeover {
         final Map<String, GpuTextureView> inputs = new HashMap<>();
         String[] glsl;
         Properties properties = new Properties();
+        /** The program whose blend.* directives apply (the one found through the fallbacks). */
+        String blendProgram;
         List<Integer> writes = List.of();
         final int stage;
+        final com.mojang.renderpearl.api.vertex.VertexFormat format;
+        final Set<String> elements;
+        /** Iris's alpha test for the family when it doesn't follow the pipeline (particles: one tenth). */
+        final boolean alwaysTenth;
         boolean prepared;
         /** One uniform buffer per draw this frame (each draw has its own ids). */
         final List<MappableRingBuffer> rings = new java.util.ArrayList<>();
@@ -92,9 +98,17 @@ public final class EntityTakeover {
         int served;
 
         Family(String program, boolean translucent, int stage) {
+            this(program, translucent, stage, DefaultVertexFormat.ENTITY, ELEMENTS, false);
+        }
+
+        Family(String program, boolean translucent, int stage, com.mojang.renderpearl.api.vertex.VertexFormat format,
+               Set<String> elements, boolean alwaysTenth) {
             this.program = program;
             this.translucent = translucent;
             this.stage = stage;
+            this.format = format;
+            this.elements = elements;
+            this.alwaysTenth = alwaysTenth;
         }
 
         boolean coverage() {
@@ -104,7 +118,7 @@ public final class EntityTakeover {
         Program program(float alpha) throws ProgramTranslator.TranslationException {
             Program p = byAlpha.get(alpha);
             if (p == null) {
-                ProgramTranslator.Result r = ProgramTranslator.translateForDraw(glsl[0], glsl[1], ELEMENTS,
+                ProgramTranslator.Result r = ProgramTranslator.translateForDraw(glsl[0], glsl[1], elements,
                         new ProgramTranslator.Format(alpha, coverage(), RENAMES));
                 Map<String, String> defaults = new HashMap<>();
                 r.uniforms().forEach(u -> {
@@ -119,7 +133,7 @@ public final class EntityTakeover {
         }
 
         float alphaFor(RenderPipeline pipeline) {
-            if (translucent) {
+            if (translucent || alwaysTenth) {
                 return 0.1f;   // Iris: translucent entities ONE_TENTH_ALPHA
             }
             return pipeline.getShaderDefines().values().containsKey("ALPHA_CUTOUT") ? 0.1f : Float.NaN;
@@ -130,6 +144,12 @@ public final class EntityTakeover {
     private static final Family SOLID = new Family("gbuffers_entities", false, 11);
     private static final Family BLOCK = new Family("gbuffers_block", false, 12);
     private static final Family TRANSLUCENT = new Family("gbuffers_entities_translucent", true, 11);
+    /** Particles (Iris ShaderKey PARTICLES / PARTICLES_TRANS: the PARTICLE format, one tenth; WorldRenderingPhase.PARTICLES = 19). */
+    private static final Set<String> PARTICLE_ELEMENTS = Set.of("Position", "UV0", "Color", "UV2");
+    private static final Family PARTICLES = new Family("gbuffers_particles", false, 19, DefaultVertexFormat.PARTICLE, PARTICLE_ELEMENTS, true);
+    private static final Family PARTICLES_TRANSLUCENT = new Family("gbuffers_particles_translucent", true, 19,
+            DefaultVertexFormat.PARTICLE, PARTICLE_ELEMENTS, true);
+    private static final List<Family> ALL = List.of(SOLID, BLOCK, TRANSLUCENT, PARTICLES, PARTICLES_TRANSLUCENT);
 
     /** Which part of the level's features is being drawn. */
     private enum Phase { SOLID, TRANSLUCENT }
@@ -169,6 +189,23 @@ public final class EntityTakeover {
         if (block != null) {
             prepareFamily(BLOCK, block, properties);
         }
+    }
+
+    /**
+     * The particle programs, already resolved through Iris's fallbacks (particles -> textured_lit
+     * -> textured -> basic; particles_translucent -> particles). {@code name} is the program found.
+     */
+    public static void prepareParticles(String name, String[] particles, String translucentName, String[] translucent, Properties properties) {
+        prepareFamily(PARTICLES, particles, properties, name);
+        prepareFamily(PARTICLES_TRANSLUCENT, translucent, properties, translucentName);
+    }
+
+    private static void prepareFamily(Family f, String[] glsl, Properties properties, String program) {
+        if (glsl == null) {
+            return;
+        }
+        f.blendProgram = program;
+        prepareFamily(f, glsl, properties);
     }
 
     private static void prepareFamily(Family f, String[] glsl, Properties properties) {
@@ -241,8 +278,8 @@ public final class EntityTakeover {
         List<ColorTargetState> targets = pipeline.getColorTargetStates();
         // The bindings list may hold empty slots (PipelineBuilder skips nulls): only slot 0 may be used.
         if (!pipeline.getVertexFormatBindings().stream().skip(1).allMatch(Objects::isNull)
-                || !DefaultVertexFormat.ENTITY.equals(pipeline.getVertexFormatBinding(0))) {
-            return "not the ENTITY vertex format";
+                || !f.format.equals(pipeline.getVertexFormatBinding(0))) {
+            return "not the vertex format " + f.program + " is drawn with";
         }
         if (targets.size() != 1) {
             return targets.size() + " colour targets";
@@ -285,11 +322,11 @@ public final class EntityTakeover {
                 .withCull(vanilla.isCull())
                 .withPolygonMode(vanilla.getPolygonMode())
                 .withDepthStencilState(vanilla.getDepthStencilState())
-                .withVertexBinding(0, DefaultVertexFormat.ENTITY);
+                .withVertexBinding(0, f.format);
         Optional<BlendFunction> vanillaBlend = vanilla.getColorTargetStates().getFirst().blendFunction();
         for (int i = 0; i < f.writes.size(); i++) {
             int index = f.writes.get(i);
-            Optional<BlendFunction> blend = TerrainTakeover.blend(f.properties, f.program, index, vanillaBlend);
+            Optional<BlendFunction> blend = TerrainTakeover.blend(f.properties, f.blendProgram != null ? f.blendProgram : f.program, index, vanillaBlend);
             b.withColorTargetState(i, new ColorTargetState(blend, PackChain.targetFormat(index),
                     PackChain.promoted(index) ? ColorTargetState.WRITE_COLOR : ColorTargetState.WRITE_ALL));
         }
@@ -324,7 +361,7 @@ public final class EntityTakeover {
 
     /** Frame start (from PackChain.beginFrame, no pass open): last frame's uniform buffers rotate. */
     static void beginFrame() {
-        for (Family f : List.of(SOLID, BLOCK, TRANSLUCENT)) {
+        for (Family f : ALL) {
             for (int i = 0; i < f.slot; i++) {
                 f.rings.get(i).rotate();
             }
@@ -335,12 +372,12 @@ public final class EntityTakeover {
 
     /** Before the level's solid features. */
     public static void openWindow(Function<String, Object> values) {
-        open(Phase.SOLID, values, List.of(SOLID, BLOCK));
+        open(Phase.SOLID, values, List.of(SOLID, BLOCK, PARTICLES));
     }
 
-    /** Before the level's translucent features (after the deferred cut). */
+    /** Before the level's translucent features, and its "after terrain" ones (after the deferred cut). */
     public static void openTranslucentWindow(Function<String, Object> values) {
-        open(Phase.TRANSLUCENT, values, List.of(TRANSLUCENT));
+        open(Phase.TRANSLUCENT, values, List.of(TRANSLUCENT, PARTICLES_TRANSLUCENT));
     }
 
     private static void open(Phase phase, Function<String, Object> values, List<Family> families) {
@@ -371,12 +408,84 @@ public final class EntityTakeover {
     public static void closeWindow() {
         releaseHold();
         window = null;
-        for (Family f : List.of(SOLID, BLOCK, TRANSLUCENT)) {
+        particleFamily = null;
+        for (Family f : ALL) {
             if (f.served > 0 && System.nanoTime() - logged > 5_000_000_000L) {
                 logged = System.nanoTime();
                 MetalShadersClient.LOGGER.info("Entities drawn by the pack this frame ({}): {} draws", f.program, f.served);
             }
         }
+    }
+
+    // ---- Particles (from QuadParticleFeatureRendererMixin, through RoutingPass) ---------------
+
+    private static Family particleFamily;
+
+    /** A routing pass for a particle group in the open window, or null to leave it to the game. */
+    public static RoutingPass routeParticles(RenderPass pass) {
+        Family f = window == Phase.SOLID ? PARTICLES : window == Phase.TRANSLUCENT ? PARTICLES_TRANSLUCENT : null;
+        if (!(pass instanceof LevelPass level) || f == null || !active(f) || !targetsReady(f)) {
+            return null;
+        }
+        particleFamily = f;
+        return new RoutingPass(level);
+    }
+
+    /** Inside a routed particle group: the pack's pipeline for a layer's, if the family serves it. */
+    public static CompiledRenderPipeline particlePipelineFor(RenderPipeline vanilla, CompiledRenderPipeline original) {
+        Family f = particleFamily;
+        if (f == null || f.refused.contains(vanilla)) {
+            return original;
+        }
+        CompiledRenderPipeline c = f.compiled.get(vanilla);
+        if (c == null) {
+            String why = refusal(f, vanilla);
+            if (why != null) {
+                f.refused.add(vanilla);
+                MetalShadersClient.LOGGER.info("Particle takeover ({}): {} stays the game's ({})", f.program, vanilla.getLocation(), why);
+                return original;
+            }
+            try {
+                c = compile(f, vanilla);
+                f.compiled.put(vanilla, c);
+            } catch (Exception e) {
+                f.refused.add(vanilla);
+                MetalShadersClient.LOGGER.warn("Particle takeover ({}): {} stays the game's: {}", f.program, vanilla.getLocation(), e.getMessage());
+                return original;
+            }
+        }
+        return c;
+    }
+
+    /** From RoutingPass.setPipeline: whether this compiled pipeline is one of the particle family's. */
+    public static boolean isPackParticlePipeline(CompiledRenderPipeline pipeline) {
+        Family f = particleFamily;
+        if (f == null || !f.compiled.containsValue(pipeline)) {
+            return false;
+        }
+        drawing = f;
+        drawingIds = null;
+        inHold = true;
+        f.served++;
+        return true;
+    }
+
+    /** The pack's pass for the particle family (the level's pass already suspended). */
+    public static RenderPass particleHold() {
+        return hold();
+    }
+
+    public static void endParticleDraw() {
+        if (particleFamily != null) {
+            inHold = false;
+            drawing = null;
+        }
+    }
+
+    /** End of a routed particle group. */
+    public static void endParticles() {
+        endParticleDraw();
+        particleFamily = null;
     }
 
     // ---- Per draw (from RenderTypeFeatureRendererMixin / PreparedRenderTypeMixin) --------------

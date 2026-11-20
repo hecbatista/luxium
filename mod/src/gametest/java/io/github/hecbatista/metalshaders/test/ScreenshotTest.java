@@ -57,6 +57,10 @@ public class ScreenshotTest implements FabricClientGameTest {
             server.runCommand("tp @a 0 104 -14 0 25");
             context.waitTicks(60);
             singleplayer.getConnection().waitForChunksRender();
+            // Particles, spawned just before the shot so they're still alive.
+            server.runCommand("particle minecraft:flame 0 101 -9 2 0.5 0.5 0 40 force");
+            server.runCommand("particle minecraft:happy_villager 0 101.5 -9 2 0.5 0.5 0 40 force");
+            context.waitTicks(3);
             context.takeScreenshot("luxium-1-land");
 
             // Shot 3: the pig just hurt (the red hit flash is entityColor in the pack).

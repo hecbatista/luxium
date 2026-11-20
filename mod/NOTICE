@@ -172,6 +172,12 @@ GNU Lesser General Public License version 3
   (shaderpack.IdMap.parseEntityIdMap). Block entities are drawn with gbuffers_block
   (pipeline.programs.ShaderKey BLOCK_ENTITY, ProgramId.Block, alpha one tenth).
 
+  Particles (render/EntityTakeover.java, mixin/QuadParticleFeatureRendererMixin.java) follow Iris
+  for the program chain (shaderpack.loading.ProgramId: particles -> textured_lit -> textured ->
+  basic, particles_translucent -> particles), the PARTICLE vertex format and alpha one tenth
+  (pipeline.programs.ShaderKey PARTICLES, PARTICLES_TRANS), and the render stage
+  (WorldRenderingPhase.PARTICLES).
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3

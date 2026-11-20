@@ -348,6 +348,28 @@ public final class MetalShadersClient implements ClientModInitializer {
         } else {
             LOGGER.warn("Entity takeover skipped (the pack lacks gbuffers_entities, or the chain isn't ready)");
         }
+
+        // Particles, through Iris's program fallbacks (ProgramId: particles -> textured_lit -> textured -> basic).
+        String particleName = null;
+        String[] particles = null;
+        for (String candidate : List.of("gbuffers_particles", "gbuffers_textured_lit", "gbuffers_textured", "gbuffers_basic")) {
+            var v = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".vsh", defines);
+            var f = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + candidate + ".fsh", defines);
+            if (v.ok() && f.ok()) {
+                particleName = candidate;
+                particles = new String[]{v.result().text(), f.result().text()};
+                break;
+            }
+        }
+        var ptV = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_particles_translucent.vsh", defines);
+        var ptF = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/gbuffers_particles_translucent.fsh", defines);
+        boolean ownTranslucent = ptV.ok() && ptF.ok();
+        if (PackChain.ready() && particles != null) {
+            LOGGER.info("Particles: {} (translucent: {})", particleName, ownTranslucent ? "gbuffers_particles_translucent" : particleName);
+            io.github.hecbatista.metalshaders.render.EntityTakeover.prepareParticles(particleName, particles,
+                    ownTranslucent ? "gbuffers_particles_translucent" : particleName,
+                    ownTranslucent ? new String[]{ptV.result().text(), ptF.result().text()} : particles, props);
+        }
     }
 
     /** A short, readable line of the values worth comparing with the F3 screen. */

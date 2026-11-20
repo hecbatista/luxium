@@ -13,6 +13,7 @@
     "GameRendererRenderMixin",
     "LevelRendererTerrainMixin",
     "PreparedRenderTypeMixin",
+    "QuadParticleFeatureRendererMixin",
     "RenderTypeFeatureRendererGroupMixin",
     "RenderTypeFeatureRendererMixin",
     "SkyRendererMixin",

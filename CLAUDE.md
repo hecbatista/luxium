@@ -187,14 +187,21 @@ Result in the game test: 8 passes compile and run (deferred1, composite, composi
   - `EntityTakeover`: families are chosen per draw. Block entities' solid draws go to `gbuffers_block` (falls back to gbuffers_entities). Each served draw writes its own uniform ring slot with `entityId`, `blockEntityId` and `renderStage` (ENTITIES 11, BLOCK_ENTITIES 12); the rings rotate at `PackChain.beginFrame`.
   - `entity.properties` is read with `ItemIds.parse(text, "entity.")`. Complementary: 74 types, slime = 50084, pig unlisted = −1.
   - Game test log: pig entityId −1; slime 50084 (both layers); chest → gbuffers_block with blockEntityId 5008. 0 validation messages, 74 unit tests pass, scoreboard 90/90.
+- **6d-4, fourth slice (2026-11-20, ✅): particles.**
+  - `QuadParticleFeatureRenderer.executeGroup` draws all of a group's layers through one pass: it binds its shared uniforms (default ones, DynamicTransforms, Sampler2) once, then each layer sets its pipeline, Sampler0, and draws.
+    - While a window is open, the group is handed a `render/RoutingPass`. On each `setPipeline` it sends the layer to the pack's pass (if the pipeline is the pack's) or to the level's `LevelPass`, replaying the shared uniforms when it switches.
+    - `mixin/QuadParticleFeatureRendererMixin` swaps each layer's pipeline in `drawLayers`.
+  - Families: particles (solid window, with the coverage mask) and particles_translucent (a window around `executeTranslucentAfterTerrain`, where 26.3 draws translucent particles). Both use the PARTICLE format and alpha > 0.1, and the program is found through Iris's fallbacks (Complementary: gbuffers_textured for both, targets 0, 6, 3).
+  - Each `EntityTakeover` family now has its own vertex format.
+  - Game test: flame and happy_villager particles in shot 1 are drawn by the pack (pipeline opaque_particle). 0 validation messages, 74 unit tests pass, scoreboard 90/90.
 - **6d-4 handoff (start here next session): what's left of 6d-4.**
   - `currentRenderedItemId` (items and held items: `submitItem` → `ItemFeatureRenderer`, render types inside `ItemQuads`) is still 0.
   - The `current_player` entity name isn't special-cased yet.
   - Then:
     - the hand (`render3dHud`, after the chain today; Vitrail moves it into the level);
-    - particles (`QuadParticleFeatureRenderer` has its own `executeGroup` → gbuffers_textured_lit);
-    - weather (gbuffers_weather);
-    - glint, beacon beam, lightning, spider eyes (gbuffers_spidereyes).
+    - weather (gbuffers_weather: `WeatherEffectRenderer.render` in `executeClassicTransparency`, its own pipeline and format);
+    - glint, beacon beam, lightning, spider eyes (gbuffers_spidereyes);
+    - translucent particles (a pipeline other than opaque_particle) aren't seen in the test yet.
   - Watch: `LevelPass` covers "Main" and the catch only. The OIT path (improved transparency) is untouched.
 - **6e: shadow pass.**
 - Metallum's only Sodium mixin picks the graphics API (`metallum.sodium.mixins.json`: `SodiumPreferredGraphicsApiMixin`). Sodium already draws through the game's RenderPearl API, so Vitrail's Sodium-level hooks should apply on Metal too.
