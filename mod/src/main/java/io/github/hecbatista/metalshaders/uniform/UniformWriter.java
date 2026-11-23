@@ -38,9 +38,11 @@ public final class UniformWriter {
         }
         Set<String> missing = new TreeSet<>();
         for (Std140Layout.Member m : layout.members()) {
-            Object value = values.apply(m.name());
+            // The pack's own spelling: the translator renames names Metal reserves (NameFixes).
+            String key = io.github.hecbatista.metalshaders.glsl.NameFixes.packName(m.name());
+            Object value = values.apply(key);
             if (value == null) {
-                value = parseDefault(m.type(), defaults.get(m.name()));
+                value = parseDefault(m.type(), defaults.get(key));
             }
             if (value == null) {
                 missing.add(m.name());

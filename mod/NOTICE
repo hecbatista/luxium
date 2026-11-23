@@ -64,6 +64,16 @@ GNU Lesser General Public License version 3
   SodiumCoreTransformer and VanillaCoreTransformer). Changed: those names are only declared
   so the program compiles. Iris's replacement expressions aren't reproduced.
 
+  src/main/java/io/github/hecbatista/metalshaders/glsl/NameFixes.java follows Iris's rule
+  for a sampler named "texture": every use that isn't a function call becomes "gtexture"
+  (net.irisshaders.iris.pipeline.transform.transformer.CommonTransformer,
+  getGtextureRenameTargets). Changed: done on tokens, not a syntax tree; a stage declaring
+  both names is left alone instead of merged; "gcolor" isn't renamed. Its list of C++ and
+  Metal words renamed to luxium_<name> is our own, measured with glslang, spirv-cross and
+  xcrun metal. ProgramTranslator's legacy function renames (texture2DProj, texture2DGrad,
+  texture2DGradARB, texture3DGrad, texelFetch2D/3D, textureSize2D and their replacements)
+  follow the same class's renameFunctionCall list.
+
   src/main/java/io/github/hecbatista/metalshaders/uniform/GameUniforms.java reproduces how
   Iris computes each value it supplies, quirks included, from net.irisshaders.iris.uniforms
   SystemTimeUniforms (frameTime truncated to whole milliseconds, frameTimeCounter wrapping at

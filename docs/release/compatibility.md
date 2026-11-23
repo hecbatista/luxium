@@ -9,7 +9,23 @@ one at a time with the flow in `mod/scripts/PACK-TESTING.md`:
 Earlier results (Complementary Unbound r5.10, Complementary Reimagined r5.9.3, Bliss v2.1.2,
 Solas v3.9) are in `docs/release/alpha.md`, "Fails safe".
 
-## BSL v10.1.8 (2026-11-23): falls back to vanilla
+## BSL v10.1.8, after the translator fixes (2026-11-23): renders, light wrong
+
+- Fixes (`glsl/NameFixes.java`, `ProgramTranslator.FUNCTION_RENAMES`): a sampler named `texture`
+  becomes `gtexture` (Iris's rule); C++/Metal words used as names (`new`, `and`, `fast`,
+  `float2`...) become `luxium_<name>`, with uniform values still looked up by the pack's name;
+  Iris's remaining legacy texture functions (`texture2DGradARB`, `texelFetch2D`, `textureSize2D`...).
+- Offline: **85/85**. Complementary Unbound still 90/90; unit tests 109 pass.
+- In game: loads, 0 validation messages, no crash; shadows, water, clouds, entities, block
+  entities, portals and translucents all draw.
+- Wrong: the whole scene is lit like sunset (orange sky and clouds, dim warm light) where Iris
+  shows midday. Cause: BSL's `timeAngle` chain in shaders.properties uses `frac()`, which
+  `uniform/Formula.java` doesn't have, so 8 formulas are dropped and `timeAngle` and
+  `timeBrightness` stay 0. Also unsupplied: `eyeBrightnessSmooth`, `bedrockLevel`.
+- Unclear: in the beach-sprint shot the sand blocks in front of the player are missing under
+  Luxium; recheck after the light fix.
+
+## BSL v10.1.8, first run (2026-11-23): falls back to vanilla
 
 - Offline: 185/185 programs preprocess; **38/85** vertex+fragment pairs reach Metal.
   - 44 × glslang: `'texture' : can't use function syntax on variable`. Every gbuffers fragment

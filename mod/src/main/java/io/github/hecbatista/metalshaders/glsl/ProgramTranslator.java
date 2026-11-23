@@ -35,15 +35,32 @@ public final class ProgramTranslator {
     public static final String UNIFORM_BLOCK = "LuxiumUniforms";
 
     /** Old function name -> new name. */
-    private static final Map<String, String> FUNCTION_RENAMES = Map.of(
+    private static final Map<String, String> FUNCTION_RENAMES = pairs(
             "texture2D", "texture",
             "texture3D", "texture",
             "textureCube", "texture",
             "texture2DLod", "textureLod",
             "texture3DLod", "textureLod",
+            // Iris CommonTransformer's other legacy names (see NOTICE).
+            "texture2DProj", "textureProj",
+            "texture3DProj", "textureProj",
+            "texture2DGrad", "textureGrad",
+            "texture2DGradARB", "textureGrad",
+            "texture3DGrad", "textureGrad",
+            "texelFetch2D", "texelFetch",
+            "texelFetch3D", "texelFetch",
+            "textureSize2D", "textureSize",
             "shadow2D", "luxium_shadow2D",
             "shadow2DLod", "luxium_shadow2DLod",
             "ftransform", "luxium_ftransform");
+
+    private static Map<String, String> pairs(String... keyValues) {
+        Map<String, String> m = new LinkedHashMap<>();
+        for (int i = 0; i < keyValues.length; i += 2) {
+            m.put(keyValues[i], keyValues[i + 1]);
+        }
+        return Map.copyOf(m);
+    }
 
     /** Old built-in uniforms: name -> (new name, type, array suffix). */
     private record Builtin(String name, String type, String array) {
@@ -187,7 +204,7 @@ public final class ProgramTranslator {
 
         StageScan(Stage stage, String source) {
             this.stage = stage;
-            this.tokens = new ArrayList<>(GlslTokenizer.tokenize(source));
+            this.tokens = new ArrayList<>(NameFixes.apply(GlslTokenizer.tokenize(source)));
             for (Token t : tokens) {
                 if (t.kind() == Kind.IDENT) {
                     identifiers.add(t.text());
