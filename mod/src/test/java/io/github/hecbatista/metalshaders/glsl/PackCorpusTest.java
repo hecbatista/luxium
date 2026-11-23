@@ -4,7 +4,6 @@ import io.github.hecbatista.metalshaders.pack.PackDirectives;
 import io.github.hecbatista.metalshaders.pack.PackInfo;
 import io.github.hecbatista.metalshaders.pack.PackPreprocessor;
 import io.github.hecbatista.metalshaders.pack.PackReader;
-import io.github.hecbatista.metalshaders.pack.PackSelection;
 import io.github.hecbatista.metalshaders.pack.RenderTargetPlan;
 import io.github.hecbatista.metalshaders.pack.StandardDefines;
 import org.junit.jupiter.api.Test;
@@ -24,13 +23,13 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * The multi-pack scoreboard: every pack in run/shaderpacks/ and run/testpacks/ (fetched by
- * scripts/fetch-testpacks.sh) through every stage that runs without the game. The stages are
+ * The multi-pack scoreboard: every pack in run/shaderpacks/ and run/testpacks/&lt;slug&gt;/ (fetched by
+ * scripts/fetch-testpacks.sh), or only the packs in LUXIUM_TEST_PACKS=&lt;dir&gt;, through every stage that runs without the game. The stages are
  * reading the pack, preprocessing, the world0 buffer plan, and translate → glslang → spirv-cross →
  * Apple's compiler, as in {@link TranslateRealPackTest}.
  * <p>
  * It's a measurement and never fails because a pack does badly. Run it with
- * {@code ./gradlew packCorpus} (set LUXIUM_PACK=name for one pack). Results go to
+ * {@code ./gradlew packCorpus} (LUXIUM_TEST_PACKS=run/testpacks/&lt;slug&gt; for one pack). Results go to
  * build/corpus/scoreboard.md, with one detail file per pack beside it. Plain {@code ./gradlew test}
  * skips it, because the whole corpus takes minutes.
  */
@@ -45,13 +44,8 @@ class PackCorpusTest {
 
     @Test
     void scoreboard() throws Exception {
-        List<Path> packs = new ArrayList<>(PackReader.findPacks(Path.of("run/shaderpacks")));
-        packs.addAll(PackReader.findPacks(Path.of("run/testpacks")));
-        String wanted = System.getenv(PackSelection.ENV);
-        if (wanted != null && !wanted.isBlank()) {
-            packs = List.of(PackSelection.choose(packs, wanted).orElseThrow());
-        }
-        assumeFalse(packs.isEmpty(), "No packs in run/shaderpacks/ or run/testpacks/");
+        List<Path> packs = packsToScore();
+        assumeFalse(packs.isEmpty(), "No packs in LUXIUM_TEST_PACKS, run/shaderpacks/ or run/testpacks/");
         assumeTrue(TranslateRealPackTest.toolExists("glslangValidator")
                 && TranslateRealPackTest.toolExists("spirv-cross"), "glslang/spirv-cross not installed");
         Files.createDirectories(OUT);
@@ -66,6 +60,27 @@ class PackCorpusTest {
         }
         Files.writeString(OUT.resolve("scoreboard.md"), table(rows));
         System.out.println(table(rows));
+    }
+
+    /**
+     * LUXIUM_TEST_PACKS=&lt;dir&gt; (the game tests' switch): the packs in that folder. Otherwise
+     * run/shaderpacks/ plus every folder under run/testpacks/ (one per pack, see fetch-testpacks.sh).
+     */
+    private static List<Path> packsToScore() throws Exception {
+        String only = System.getenv("LUXIUM_TEST_PACKS");
+        if (only != null && !only.isBlank()) {
+            return PackReader.findPacks(Path.of(only));
+        }
+        List<Path> packs = new ArrayList<>(PackReader.findPacks(Path.of("run/shaderpacks")));
+        Path testpacks = Path.of("run/testpacks");
+        if (Files.isDirectory(testpacks)) {
+            try (var dirs = Files.list(testpacks)) {
+                for (Path dir : dirs.filter(Files::isDirectory).sorted().toList()) {
+                    packs.addAll(PackReader.findPacks(dir));
+                }
+            }
+        }
+        return packs;
     }
 
     private static Row score(Path pack) throws Exception {

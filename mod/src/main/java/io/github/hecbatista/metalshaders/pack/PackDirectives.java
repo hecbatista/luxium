@@ -72,9 +72,15 @@ public final class PackDirectives {
     /** Every wetness/dryness half-life directive in one world folder, in Iris's reading order. */
     public static List<Map.Entry<String, Float>> wetnessHalfLives(Path pack, String folder, Map<String, String> defines)
             throws IOException {
+        return wetnessHalfLives(pack, folder, defines, null);
+    }
+
+    /** As above, with the user's settings applied (null: the pack's defaults). */
+    public static List<Map.Entry<String, Float>> wetnessHalfLives(Path pack, String folder, Map<String, String> defines,
+                                                                  PackOptions options) throws IOException {
         List<Map.Entry<String, Float>> found = new ArrayList<>();
         for (String program : foldOrder(pack, folder)) {
-            PackPreprocessor.Program p = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + program + ".fsh", defines);
+            PackPreprocessor.Program p = PackPreprocessor.preprocessProgram(pack, "/" + folder + "/" + program + ".fsh", defines, options);
             if (!p.ok()) {
                 continue;
             }

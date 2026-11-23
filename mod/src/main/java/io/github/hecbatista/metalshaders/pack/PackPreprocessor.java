@@ -8,7 +8,8 @@ import java.util.Map;
 
 /**
  * Step 3 end to end: for every program file of a pack, paste in its includes, then run the
- * preprocessor with the game's defines. Uses the pack's default settings.
+ * preprocessor with the game's defines. With {@link PackOptions}, the user's changed settings are
+ * written into each file first (as Iris does); without, the pack's defaults are used.
  */
 public final class PackPreprocessor {
     /**
@@ -28,9 +29,14 @@ public final class PackPreprocessor {
 
     /** Preprocesses every program in every world folder of a pack (and in shaders/ itself). */
     public static List<Program> preprocessAll(Path pack, Map<String, String> defines) throws IOException {
+        return preprocessAll(pack, defines, null);
+    }
+
+    /** As {@link #preprocessAll(Path, Map)}, with the user's settings applied (null: defaults). */
+    public static List<Program> preprocessAll(Path pack, Map<String, String> defines, PackOptions options) throws IOException {
         PackInfo info = PackReader.read(pack);
         return PackReader.open(pack, (name, root, shaders) -> {
-            IncludeExpander.FileSource files = packPath -> PackReader.readText(shaders, packPath);
+            IncludeExpander.FileSource files = source(shaders, options);
             List<Program> out = new ArrayList<>();
             for (Map.Entry<String, List<String>> folder : info.programFiles().entrySet()) {
                 for (String file : folder.getValue()) {
@@ -44,8 +50,18 @@ public final class PackPreprocessor {
 
     /** Preprocesses a single program file, e.g. "/world0/gbuffers_terrain.vsh". */
     public static Program preprocessProgram(Path pack, String path, Map<String, String> defines) throws IOException {
-        return PackReader.open(pack, (name, root, shaders) ->
-                preprocessOne(path, packPath -> PackReader.readText(shaders, packPath), defines));
+        return preprocessProgram(pack, path, defines, null);
+    }
+
+    /** As {@link #preprocessProgram(Path, String, Map)}, with the user's settings applied (null: defaults). */
+    public static Program preprocessProgram(Path pack, String path, Map<String, String> defines, PackOptions options)
+            throws IOException {
+        return PackReader.open(pack, (name, root, shaders) -> preprocessOne(path, source(shaders, options), defines));
+    }
+
+    private static IncludeExpander.FileSource source(Path shaders, PackOptions options) {
+        IncludeExpander.FileSource files = packPath -> PackReader.readText(shaders, packPath);
+        return options == null ? files : options.apply(files);
     }
 
     static Program preprocessOne(String path, IncludeExpander.FileSource files, Map<String, String> defines)

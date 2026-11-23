@@ -18,6 +18,22 @@ GNU Lesser General Public License version 3
   (net.irisshaders.iris.shaderpack.ShaderPack). Changed: the "shaders" folder search is
   depth-limited and sorted, where Iris's has no limit and no fixed order.
 
+  src/main/java/io/github/hecbatista/metalshaders/pack/PackInfo.java (folderFor, worldKey)
+  follows Iris's choice of the folder that draws a world: a world named in the map keeps its
+  id, otherwise the End's or the Overworld's sky makes it the End or the Overworld
+  (net.irisshaders.iris.Iris.getCurrentDimension); the named folder if it holds programs,
+  else the folder of "*", else the shaders/ root (ShaderPack.getProgramSet and its base
+  program set); names without a namespace get "minecraft:" (materialmap.NamespacedId).
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/ProgramSwitches.java follows Iris's
+  program.<folder>/<name>.enabled directives: the key's program part
+  (net.irisshaders.iris.shaderpack.properties.ShaderProperties.handleProgramEnabledDirective),
+  a switched-off program treated as missing (ShaderPack's source provider), and the value as
+  a boolean expression (parsing.BooleanParser: ! && || and brackets, literals true/1 and
+  false/0, AND before OR), with unknown names counting as on
+  (option.values.OptionValues.getBooleanValueOrDefault). Changed: our own recursive-descent
+  parser instead of Iris's two stacks.
+
   src/main/java/io/github/hecbatista/metalshaders/pack/IncludeExpander.java follows Iris's
   #include rules: how an include line is recognized and its path resolved
   (net.irisshaders.iris.shaderpack.include.FileNode and AbsolutePackPath), and that every
@@ -84,6 +100,10 @@ GNU Lesser General Public License version 3
   render/PackChain.java converts depth with Iris's rule from
   net.irisshaders.iris.pipeline.transform.transformer.DepthTransformer (depth reads become
   1 - depth), applied once to the image as Vitrail's docs/translation.md describes.
+  glsl/ProgramTranslator.java follows the same class for the fragment stages of passes drawn
+  onto the game's reversed-Z depth (terrain, game draws, the sky; not the shadow pass): the
+  pack's gl_FragCoord becomes vec4(gl_FragCoord.xy, 1.0 - gl_FragCoord.z, gl_FragCoord.w).
+  Changed: done on our token stream; gl_FragDepth writes aren't inverted (not handled yet).
 
   src/main/java/io/github/hecbatista/metalshaders/uniform/BiomeIds.java and
   mixin/BiomesMixin.java number biomes in vanilla registration order and name them
@@ -93,7 +113,24 @@ GNU Lesser General Public License version 3
   src/main/java/io/github/hecbatista/metalshaders/pack/PropertiesPreprocessor.java adapts the
   technique of net.irisshaders.iris.shaderpack.preprocessor.PropertiesPreprocessor (which
   credits GlShader from Canvas, LGPL): lines trimmed, non-directive '#' lines and '#' chars
-  removed, backslashes hidden from JCPP. Changed: our own marker; pack options not yet defined.
+  removed, backslashes hidden from JCPP. Changed: our own marker. The defines it is given
+  (pack options that are on, then the game's, then every value option) follow
+  PropertiesPreprocessor.preprocessSource's order.
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/PackOptions.java follows Iris's shader
+  pack options: which lines are options and how a line is read
+  (net.irisshaders.iris.shaderpack.option.OptionAnnotatedSource, parsing.ParsedString,
+  StringOption.create, the VALID_CONST_OPTION_NAMES table), on/off options counted only when
+  tested by a bare #ifdef/#ifndef in the same weakly connected include group
+  (ShaderPackOptions), the starting program names of the include graph
+  (include.ShaderPackSourceNames, loading.ProgramId / ProgramArrayId / ProgramGroup), dropping
+  a name with two different defaults (OptionSet.Builder, MergedBooleanOption /
+  MergedStringOption), reading values (values.MutableOptionValues), and editing the lines
+  (OptionAnnotatedSource.edit / editConst / setBooleanDefineValue). The settings file name and
+  format follow net.irisshaders.iris.Iris.loadExternalShaderpack / tryReadConfigProperties.
+  Changed: our own code and records; the settings file is only read, never rewritten; profiles
+  aren't supported; components and files are visited in sorted order where Iris uses hash
+  order; a changed line is marked "Luxium: changed option".
 
   src/main/java/io/github/hecbatista/metalshaders/pack/PackDirectives.java follows the order
   in which net.irisshaders.iris.shaderpack.programs.ProgramSet.locateDirectives reads const
@@ -114,9 +151,194 @@ GNU Lesser General Public License version 3
   gcolor..gaux4, keys <name>Format / Clear / ClearColor, defaults RGBA and cleared, and the
   32-buffer limit of net.irisshaders.iris.gl.IrisLimits.
 
+  src/main/java/io/github/hecbatista/metalshaders/glsl/ProgramTranslator.java, terrain mode
+  (translateForTerrain), follows net.irisshaders.iris.pipeline.transform.transformer.
+  SodiumTransformer: decoding Sodium's compact chunk vertex (the 20-bit interleaved position,
+  the region offset plus the section's place in its region, the texture coordinate with
+  u_TexCoordShrink), gl_MultiTexCoord1/2 as the raw light pair scaled by gl_TextureMatrix[1],
+  mc_Entity as (id + 1) << 1 | fluid with -1 for an unmapped block, and mc_midTexCoord in
+  1/32768 units, each converted to the type the pack declares. The decode helpers themselves
+  are Sodium's (see the Sodium entry). The alpha test per pass (solid OFF, cutout HALF_ALPHA)
+  comes from net.irisshaders.iris.pipeline.programs.ShaderKey and gl.blending.AlphaTests.
+  src/main/java/io/github/hecbatista/metalshaders/render/TerrainTakeover.java uses Iris's
+  lightmap texture matrix (uniforms.builtin.BuiltinReplacementUniforms) and its render stage
+  numbers (pipeline.WorldRenderingPhase).
+
+  src/main/java/io/github/hecbatista/metalshaders/sodium/LuxiumChunkVertex.java follows
+  net.irisshaders.iris.vertices.sodium.terrain.XHFPTerrainVertex and XHFPModelVertexType for
+  what the extra words hold: the mid-texture coordinate encoding, the block id encoding, and
+  separateAo's colour (tint with AO in alpha). Our layout differs: the normal and tangent are
+  plain signed bytes instead of Iris's octahedral word, and the light pair keeps Sodium's +8.
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/BlockIds.java and
+  sodium/BlockStateIds.java follow Iris's block.properties rules (shaderpack.IdMap.parseBlockMap,
+  shaderpack.materialmap.BlockEntry.parse, BlockMaterialMapping.addBlockStates, and the key order
+  of shaderpack.option.OrderBackedProperties): entry shapes with optional namespace and
+  property filters, file order, first match wins. Tag entries aren't supported yet.
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/PropertiesPreprocessor.java uses Iris's
+  exact test for which '#' lines are directives (PropertiesPreprocessor.preprocessSource).
+
+  src/main/java/io/github/hecbatista/metalshaders/render/TerrainTakeover.java (translucent
+  terrain) follows Iris for gbuffers_water: the alpha test (ShaderKey SODIUM_TERRAIN_TRANSLUCENT,
+  ONE_TENTH_ALPHA, unless the pack's alphaTest.<program> says otherwise), the vanilla
+  translucent blend when the pack sets none (ProgramId.Water has no blend override), the
+  OptiFine/Iris blend.<program> and blend.<program>.<buffer> directives, and the render stage
+  number (WorldRenderingPhase.TERRAIN_TRANSLUCENT). mixin/sodium/DefaultFluidRendererMixin.java
+  gives fluid quads the fluid's block id with Iris's fluid bit (SodiumTransformer.replaceMCEntity).
+
+  src/main/java/io/github/hecbatista/metalshaders/glsl/ProgramTranslator.java, draw mode
+  (translateForDraw), follows net.irisshaders.iris.pipeline.transform.transformer.
+  VanillaTransformer for the game's own draws: gl_ModelViewMatrix and gl_TextureMatrix[0] from
+  the DynamicTransforms block (ModelViewMat, TextureMat), gl_Color = Color * ColorModulator,
+  gl_MultiTexCoord1/2 = the UV2 light pair, or full light (240, 240) where the format has none.
+  render/EntityTakeover.java keys the served draws by RenderPipeline and uses Iris's alpha tests
+  for entities (pipeline.programs.ShaderKey ENTITIES_SOLID off, ENTITIES_CUTOUT ONE_TENTH_ALPHA).
+
+  glsl/ProgramTranslator.java turns entityColor into a value the vertex stage reads from the
+  overlay texture, as net.irisshaders.iris.pipeline.transform.transformer.EntityPatcher
+  .patchOverlayColor does: texelFetch(overlay, UV1), vec4(rgb, 1 - alpha), and rgb zeroed when
+  there's no flash. render/EntityTakeover.java falls back from gbuffers_entities_translucent to
+  gbuffers_entities as Iris's ProgramId fallback does, and render/PackChain.java honours
+  clouds=off as net.irisshaders.iris.shaderpack.properties.ShaderProperties reads it.
+
+  src/main/java/io/github/hecbatista/metalshaders/render/DrawIds.java follows Iris for the
+  values of entityId and blockEntityId (0 outside any entity, -1 for one the pack doesn't list;
+  blockEntityId is the block.properties id of the block entity's block state), and
+  pack/ItemIds.java reads entity.properties with the same rules as item.properties
+  (shaderpack.IdMap.parseEntityIdMap). Block entities are drawn with gbuffers_block
+  (pipeline.programs.ShaderKey BLOCK_ENTITY, ProgramId.Block, alpha one tenth).
+  The special entity names minecraft:current_player (the camera's own player) and
+  minecraft:zombie_villager_converting follow
+  mixin.entity_render_context.MixinEntityRenderDispatcher. currentRenderedItemId follows
+  mixin.entity_render_context.ItemStackStateLayerMixin, MixinItemRenderer, ItemStackStateMixin,
+  MixinItemFeatureRenderer and ModelStorage (mixin/ItemLayerRenderStateMixin.java,
+  ItemModelResolverMixin.java, ItemStackRenderStateMixin.java, ItemFeatureRendererMixin.java,
+  ItemFeatureRendererSubmitMixin.java): the item shown is noted in appendItemLayers, its id is
+  current while a layer is submitted (a block item other than a solid bucket uses its block's
+  block.properties id and sets blockEntityId to 1; other items item.properties under the model
+  component's name or their own; 0 when unlisted), and an item submit keeps the ids for when its
+  draws are built. Changed: Iris writes the ids on each vertex; Luxium keeps one value per draw,
+  and model and custom-geometry submits keep their ids the same way, with the game's draw list
+  split wherever the ids change (mixin/ModelSubmitIdsMixin.java and friends, our own design).
+
+  Particles (render/EntityTakeover.java, mixin/QuadParticleFeatureRendererMixin.java) follow Iris
+  for the program chain (shaderpack.loading.ProgramId: particles -> textured_lit -> textured ->
+  basic, particles_translucent -> particles), the PARTICLE vertex format and alpha one tenth
+  (pipeline.programs.ShaderKey PARTICLES, PARTICLES_TRANS), and the render stage
+  (WorldRenderingPhase.PARTICLES).
+
+  Weather (render/EntityTakeover.java, mixin/WeatherEffectRendererMixin.java) follows Iris for
+  the program chain (ProgramId: weather -> textured_lit -> textured -> basic), the alpha test
+  (ShaderKey WEATHER one tenth, unless alphaTest.<program> says otherwise) and the render stage
+  (WorldRenderingPhase.RAIN_SNOW).
+
+  The hand (mixin/GameRendererHandMixin.java, render/EntityTakeover.java, glsl/ProgramTranslator
+  Format.handDepth) follows net.irisshaders.iris.pathways.HandRenderer: the hand's depth squeezed
+  by DEPTH = 0.125 around the middle (0.4375 + 0.125 d), its own projection (the hud field of
+  view), and the program chain (ProgramId: hand -> textured_lit; hand_water -> hand) with alpha
+  one tenth (ShaderKey HAND_CUTOUT, HAND_TRANSLUCENT). Running the composites after the hand,
+  with its depth in depthtex0, follows Vitrail's docs/frame.md ("The hand is the one family the
+  engine has to move rather than intercept").
+
+  The enchantment glint (glsl/ProgramTranslator.java Format.glint, render/EntityTakeover.java
+  Glint, pack/StandardDefines.java) follows Iris: gl_TextureMatrix[0] is mat4(1.0) in glint draws
+  (pipeline.transform.transformer.VanillaTransformer, isGlint() && hasOverlay()), and the inline
+  glint API of pipeline.transform.transformer.GlintTransformer: mc_hasGlint() / mc_sampleGlint()
+  (glintAlpha * the glint texture at TextureMat * UV0, or UV3 in the special-glint format, passed
+  to the fragment stage as a varying), constants where the draw has no glint; IRIS_INLINE_GLINT is
+  defined as gl.shader.StandardMacros does, and glintAlpha is the glint strength option as in
+  uniforms.IrisExclusiveUniforms. Which glinted pipelines are served by the base programs follows
+  pipeline.IrisPipelines / programs.ShaderKey (the *_GLINT keys use the entity and hand programs).
+  Changed: glint draws are told apart by the 26.3 pipeline's GLINT shader define, the texture is
+  the game's own GlintSampler, and the strength is a value in Luxium's uniform block.
+
+  Spider eyes, beacon beams and lightning (render/EntityTakeover.java) follow Iris for which
+  program serves which pipeline and its fallbacks (shaderpack.loading.ProgramId SpiderEyes,
+  BeaconBeam, Lightning; pipeline.programs.ShaderKey EMISSIVE_ENTITIES, BEACON, LIGHTNING), their
+  alpha tests (beacon and lightning off) and SpiderEyes' default blend (SRC_ALPHA ONE ZERO ONE).
+
+  Banner and shield patterns and text in the hand (render/EntityTakeover.java) follow
+  net.irisshaders.iris.pipeline.IrisPipelines: BANNER_PATTERN goes through getTranslucent
+  (ShaderKey BE_TRANSLUCENT, ProgramId.BlockTrans: block_translucent -> block, for a block entity;
+  ENTITIES_TRANSLUCENT otherwise; alpha one tenth), and the text pipelines in the hand (a held
+  map) through getText (ShaderKey HAND_TEXT: ProgramId.Hand, AlphaTests.NON_ZERO_ALPHA).
+  Changed: Luxium draws patterns in the level's solid-feature window, where 26.3 puts them.
+
+  src/main/java/io/github/hecbatista/metalshaders/uniform/ShadowMatrices.java follows
+  net.irisshaders.iris.shadows.ShadowMatrices (createBaselineModelViewMatrix, snapModelViewToGrid,
+  createOrthoMatrix) and ShadowRenderer: the light view's rotations by the sky angle and
+  sunPathRotation, the grid snap with Java's signed remainder, the orthographic box of half size
+  shadowDistance; shadowAngle as uniforms.CelestialUniforms.getShadowAngle; the defaults and const
+  directives of shaderpack.properties.PackShadowDirectives (shadowMapResolution 1024,
+  shadowDistance 160, near/far -100.05/156, shadowIntervalSize 2). The shadow pass's alpha tests
+  follow ShaderKey SHADOW_SODIUM_TERRAIN_SOLID/CUTOUT and its clear colours the shadowcolor
+  defaults (white).
+
+  src/main/java/io/github/hecbatista/metalshaders/render/SkyTakeover.java follows Iris for
+  which program draws each vanilla sky pipeline (net.irisshaders.iris.pipeline.IrisPipelines:
+  SKY, STARS and SUNRISE_SUNSET with gbuffers_skybasic; CELESTIAL and END_SKY with
+  gbuffers_skytextured) and for each piece's render stage (mixin.MixinSkyRenderer and
+  mixin.MixinLevelRenderer: SKY, SUNSET, SUN, MOON, STARS, VOID; CUSTOM_SKY for the End's sky
+  and End flash, where none of those calls run).
+
+  src/main/java/io/github/hecbatista/metalshaders/render/ShadowCulling.java,
+  sodium/ShadowRegion.java and mixin/sodium/RenderRegionMixin.java,
+  RenderRegionManagerMixin.java, RenderSectionManagerAccessor.java and
+  SodiumWorldRendererAccessor.java follow Iris's shadow render lists on Sodium
+  (net.irisshaders.iris.compat.sodium.mixin.MixinRenderRegion, MixinRenderRegionManager,
+  MixinRenderSectionManagerShadow, MixinSodiumWorldRenderer, and shadows.ShadowRenderer): a
+  second render list and batch map per region swapped in for the shadow pass, every batch
+  emptied in all maps wherever Sodium empties one, the light's list filled by Sodium's
+  renderOutOfGraph walk, and the camera's lists, tree and task lists put back afterwards.
+  Changed: our own code; the walk runs inside our shadow pass rather than through
+  SodiumWorldRenderer.setupTerrain, and its frustum is the shadow map's own box (the light's
+  clip space) instead of Iris's advanced shadow frustum.
+
+  src/main/java/io/github/hecbatista/metalshaders/mixin/LevelExtractorMixin.java (with
+  MetalShadersClient.keepImprovedTransparencyOff) follows
+  net.irisshaders.iris.mixin.fabulous.MixinDisableFabulousGraphics: while a pack is in use,
+  Improved Transparency is switched off and the graphics preset set to Custom, checked at the
+  start of LevelExtractor.allChanged and onResourceManagerReload. Changed: also checked once
+  when the pack loads.
+
+  src/main/java/io/github/hecbatista/metalshaders/render/CustomTextures.java follows Iris's
+  texture.<stage>.<sampler> directives: the stage names and what each covers
+  (net.irisshaders.iris.shaderpack.texture.TextureStage: gbuffers includes the shadow
+  passes, composite includes final), the sampler name cut at its first dot
+  (shaderpack.properties.ShaderProperties), an override matching any of a sampler's names
+  (gl.program.ProgramSamplers.CustomTextureSamplerInterceptor), overrides of a render target
+  switched off once an earlier pass of the same stage has written it this frame
+  (pipeline.CompositeRenderer, flippedAtLeastOnce), PNG filtering from the .mcmeta file,
+  nearest and repeat unless "blur" or "clamp" (targets.backed.NativeImageBackedCustomTexture),
+  and noisetex read linear and repeating (targets.backed.NativeImageBackedNoiseTexture).
+  Changed: raw-texture directives, minecraft: resource paths and customTexture.* aren't
+  supported yet and are skipped with a warning.
+
+  src/main/java/io/github/hecbatista/metalshaders/mixin/GameRendererRenderMixin.java (the view
+  bobbing part) follows net.irisshaders.iris.mixin.MixinModelViewBobbing: while a pack is in
+  use, GameRenderer.renderLevel's bobbing matrix and its nausea/portal rotate and scale are kept
+  out of the projection and applied to the camera's view rotation (bob x view) before the level
+  is drawn. Changed: Luxium also captures gbufferModelView with the bob at setProjectionMatrix.
+
+  src/main/java/io/github/hecbatista/metalshaders/mixin/EntityRenderDispatcherMixin.java
+  (luxium$keepVanillaShadow) follows net.irisshaders.iris.mixin.MixinEntityRenderDispatcher
+  and IrisRenderingPipeline.shouldDisableVanillaEntityShadows: the vanilla blob shadow under
+  entities is not submitted while the pack has a shadow pass.
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3
+
+  src/main/java/io/github/hecbatista/metalshaders/render/EntityTakeover.java (prewarm) compiles
+  pipelines while the world loads, following Vitrail's docs/internals/game-graphics-api.md
+  ("precompile every pipeline with its real source before the first pass"); which pipelines
+  is our own measured choice.
+
+  src/main/java/io/github/hecbatista/metalshaders/mixin/sodium/RenderRegionMixin.java keeps a
+  batch map for the light because of Vitrail's finding (docs/sky-and-shadows.md, "Culling for
+  the light"): a batch is kept until its region's list changes, so a shadow draw sharing the
+  camera's batches draws the camera's holes.
 
   src/main/java/io/github/hecbatista/metalshaders/glsl/ProgramTranslator.java translates a
   vertex and fragment stage together, as one program: one uniform block holding the union of
@@ -132,6 +354,49 @@ GNU Lesser General Public License version 3
   promoted to four, old fixed-point formats map to 8-bit RGBA, and RGB9_E5 maps to a float
   format. The mapping table itself is ours.
 
+  The terrain takeover (render/TerrainTakeover.java, mixin/sodium/*, mixin/
+  LevelRendererTerrainMixin.java, sodium/LuxiumChunkVertex.java) follows designs described in
+  Vitrail's docs/internals/terrain.md: hooking Sodium at a few points instead of rewriting its
+  meshing, widening the chunk vertex with extra elements placed after Sodium's own, one pack
+  program per terrain pass, the face normal by Newell's method, the tangent squared up against
+  the normal with a handedness sign, and reading the block atlas NEAREST as under Iris. The
+  "arithmetic road" for sampler2DShadow in glsl/ProgramTranslator.java (SHADOW_COMPARE: a plain
+  sampler2D, four gathered texels compared LEQUAL and blended with the bilinear weights) follows
+  Vitrail's glsl/GlslTranslator (ofShadowCompare) as described in its comments. No Vitrail code
+  was copied; the GLSL and Java are ours.
+
+  render/PackChain.java cuts the chain as Vitrail's docs/frame.md describes ("The chain is cut in
+  three"): the seed and deferred passes run after the opaque world, before translucents, and the
+  composite and final passes after the level; depthtex1/2 are the depth before translucents. The
+  game's own translucent phase is drawn onto a separate image and composed onto colortex0
+  afterwards (frame.md, "Where the seed does not reach"). mixin/sodium/ChunkVertexMixin.java
+  carries the block id on Sodium's vertex object through copyVertexTo, as Vitrail's
+  ChunkVertexMixin does. No Vitrail code was copied.
+
+  render/LevelPass.java (the game's "Main" pass made one that can step aside and reopen) and
+  render/EntityTakeover.java (opening the pack's pass over a run of served draws inside
+  RenderTypeFeatureRenderer.executeGroup, the level's solid-feature window) follow designs
+  described in Vitrail's render/LevelPass and docs/internals/entities.md ("The door is a group of
+  draws"). No Vitrail code was copied.
+
+  The shadow pass (render/TerrainTakeover.drawShadow, render/ShadowTargets.java) follows Vitrail's
+  docs/sky-and-shadows.md: forward depth for the shadow map (cleared to 1, less-or-equal), the
+  shadow pair as the pass's fixed-function matrices, both faces drawn. Replaying the level's entities into
+  the map and dropping what the shadow program doesn't serve follows the same document ("What
+  moves is submitted a second time, for the light"; "inside the light's walk a refusal is a drop").
+
 JCPP, https://github.com/shevek/jcpp (org.anarres:jcpp 1.4.14)
 Apache License 2.0
   Used as a library dependency, unmodified.
+
+Sodium, https://github.com/CaffeineMC/sodium (0.9.2 for Minecraft 26.3)
+Copyright the Sodium contributors
+PolyForm Shield License 1.0.0
+  src/main/java/io/github/hecbatista/metalshaders/sodium/LuxiumChunkVertex.java writes
+  Sodium's compact chunk vertex words the same way as Sodium's CompactChunkVertex (position
+  quantisation and interleaving, texture shrink bit, light + 8, light/material/section word),
+  so Sodium's own shader can still read our mesh. glsl/ProgramTranslator.java's terrain
+  header decodes that vertex as Sodium's shaders/include/chunk_vertex.glsl and
+  blocks/block_layer_opaque.vsh do, and declares Sodium's u_Globals block and push-constant
+  layout so the pack's program binds to what Sodium already sets. These are re-written
+  short formulas needed to interoperate with Sodium's data format; no Sodium file is shipped.

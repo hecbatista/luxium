@@ -42,6 +42,21 @@ import java.util.Map;
  * {@link CustomUniforms}.
  */
 public final class GameUniforms {
+    /**
+     * The game's fog colour this frame (FogRenderer.setupFog's FogData.color, captured by
+     * mixin.FogRendererMixin as Iris's MixinFogRenderer does): the {@code fogColor} uniform and
+     * colortex0's clear colour (Iris ClearPassCreator).
+     */
+    private static volatile float[] fogColor = {0, 0, 0};
+
+    public static void setFogColor(float r, float g, float b) {
+        fogColor = new float[]{r, g, b};
+    }
+
+    public static float[] fogColor() {
+        return fogColor;
+    }
+
     private final Map<String, Object> values = new HashMap<>();
     private final CameraTracker camera = new CameraTracker();
 
@@ -97,12 +112,29 @@ public final class GameUniforms {
             c -= 360;
         }
         values.put("sunAngle", c / 360.0f);
+        // CelestialUniforms.getShadowAngle: the sun's angle by day, the moon's by night.
+        float moon = cam.attributeProbe().getValue(EnvironmentAttributes.MOON_ANGLE, partialTick) + 90.0f;
+        if (moon < 0) {
+            moon += 360;
+        } else if (moon > 360) {
+            moon -= 360;
+        }
+        float shadowAngle = (c < 180 ? c : moon) / 360.0f;
+        values.put("shadowAngle", shadowAngle);
+        // The shadow pass's matrices (Iris ShadowRenderer), from the real camera position.
+        org.joml.Matrix4f shadowModelView = ShadowMatrices.modelView(shadowAngle, cam.position().x, cam.position().y, cam.position().z);
+        org.joml.Matrix4f shadowProjection = ShadowMatrices.projection();
+        values.put("shadowModelView", shadowModelView);
+        values.put("shadowModelViewInverse", new org.joml.Matrix4f(shadowModelView).invert());
+        values.put("shadowProjection", shadowProjection);
+        values.put("shadowProjectionInverse", new org.joml.Matrix4f(shadowProjection).invert());
 
         // CameraUniforms
         camera.update(cam.position());
         values.put("near", 0.05f);
         values.put("far", (float) (mc.options.getEffectiveRenderDistance() * 16));
         values.put("cameraPosition", toFloats(camera.current));
+        values.put("fogColor", fogColor);
         values.put("eyeAltitude", (float) camera.current[1]);
         values.put("previousCameraPosition", toFloats(camera.previous));
         values.put("cameraPositionInt", floorInts(camera.currentUnshifted));

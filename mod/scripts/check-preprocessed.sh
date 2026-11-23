@@ -8,6 +8,9 @@
 #   clrwl_*  needs the Colorwheel mod (it supplies clrwl_computeFragment)
 #   shadowcomp.csh  off on Mac: shaders.properties disables it when COLORED_LIGHTING == 0
 #   gbuffers_line.vsh  uses projectionMatrix/modelViewMatrix/vaPosition, which Iris injects (step 4)
+#   gbuffers_entities*.fsh, gbuffers_hand.fsh  call mc_hasGlint()/mc_sampleGlint() under
+#       IRIS_INLINE_GLINT (defined since 2026-11-21); the translator supplies them, as Iris does
+# (177 pass, 42 fail as of 2026-11-21.)
 cd "${0:A:h}/.."
 setopt null_glob
 pass=0; fail=0

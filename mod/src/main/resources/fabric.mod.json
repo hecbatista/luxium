@@ -1,13 +1,15 @@
 {
   "schemaVersion": 1,
-  "id": "metalshaders",
+  "id": "luxium",
   "version": "${version}",
   "name": "Luxium",
   "description": "Experimental: Iris/OptiFine shader packs on Metallum's Metal backend.",
-  "icon": "assets/metalshaders/icon.png",
+  "icon": "assets/luxium/icon.png",
   "contact": {
-    "sources": "https://github.com/hecbatista/luxium"
+    "sources": "https://github.com/hecbatista/luxium",
+    "issues": "https://github.com/hecbatista/luxium/issues"
   },
+  "license": "LGPL-3.0-only",
   "environment": "client",
   "entrypoints": {
     "client": [
@@ -15,12 +17,13 @@
     ]
   },
   "mixins": [
-    "metalshaders.mixins.json"
+    "luxium.mixins.json"
   ],
   "depends": {
     "fabricloader": ">=0.19.5",
     "minecraft": "~26.3-",
     "java": ">=25",
-    "metallum": "*"
+    "metallum": "0.0.25",
+    "sodium": "~0.9.2"
   }
 }

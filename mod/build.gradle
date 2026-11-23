@@ -11,7 +11,11 @@ repositories {
 }
 
 // The Metallum jar we built and tested locally (see gradle.properties).
-def metallumJar = file("../references/metallum/build/libs/metallum-${project.metallum_version}.jar")
+// LUXIUM_METALLUM_JAR=<path> runs against another one instead, e.g. Modrinth's metallum-mc
+// release, which is what players install (docs/release/alpha.md).
+def metallumJar = System.getenv("LUXIUM_METALLUM_JAR") != null
+		? file(System.getenv("LUXIUM_METALLUM_JAR"))
+		: file("../references/metallum/build/libs/metallum-${project.metallum_version}.jar")
 
 dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
@@ -19,6 +23,9 @@ dependencies {
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	implementation "maven.modrinth:sodium:${project.sodium_version}"
 	implementation files(metallumJar)
+	// Metallum's Metal bindings (nested in its jar, so present at run time). Step 7g calls
+	// MTLDevice.newLibraryWithSource on the compile pool to warm Metal's shader cache.
+	compileOnly "io.github.kokodio:metal-jvm:${project.metal_jvm_version}"
 
 	// JCPP evaluates #if/#define. Its own dependencies (Ant, jopt-simple, annotations) are only
 	// for its command-line tool; slf4j, which it does need, already comes with Minecraft.
@@ -42,9 +49,9 @@ test {
 	inputs.dir("run/shaderpacks").optional().withPropertyName("shaderpacks")
 }
 
-// The multi-pack scoreboard (PackCorpusTest): every pack in run/shaderpacks/ and run/testpacks/
+// The multi-pack scoreboard (PackCorpusTest): every pack in run/shaderpacks/ and run/testpacks/*/
 // through every stage that runs without the game, written to build/corpus/scoreboard.md. Fetch the
-// test packs first with scripts/fetch-testpacks.sh. LUXIUM_PACK=<name> limits it to one pack.
+// test packs first with scripts/fetch-testpacks.sh. LUXIUM_TEST_PACKS=<dir> limits it to that folder.
 tasks.register("packCorpus", Test) {
 	description = "Scores every shader pack in run/shaderpacks/ and run/testpacks/."
 	group = "verification"
@@ -66,7 +73,7 @@ tasks.register("packCorpus", Test) {
 fabricApi {
 	configureTests {
 		createSourceSet = true
-		modId = "metalshaders-test"
+		modId = "luxium-test"
 		enableGameTests = false        // server-side game tests: not needed
 		enableClientGameTests = true
 		eula = true                    // the user agreed to the Minecraft EULA on 2026-11-20
@@ -94,9 +101,10 @@ processResources {
 	}
 }
 
-// Ship the third-party credits inside the mod jar.
+// Ship Luxium's license (LGPL-3.0-only, repo root) and the third-party credits inside the mod jar.
 jar {
 	from("NOTICE")
+	from("../LICENSE")
 }
 
 tasks.withType(JavaCompile).configureEach {

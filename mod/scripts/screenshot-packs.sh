@@ -1,68 +1,45 @@
 #!/usr/bin/env bash
-# Runs the client game test (ScreenshotTest) once per pack, with Metal API and GPU validation on,
-# and keeps each pack's screenshots and log, because the test's game folder is cleared every run.
+# Runs the game test once per test pack, each pack alone (LUXIUM_TEST_PACKS=run/testpacks/<slug>),
+# through scripts/gametest.sh, so validation is always on and every run keeps its shots, sheets and
+# log under build/gametest/pack-<slug>/.
 #
-#   mod/scripts/screenshot-packs.sh              # every pack in run/shaderpacks/ and run/testpacks/
-#   mod/scripts/screenshot-packs.sh bsl photon   # only these (any unique part of the name)
+#   mod/scripts/screenshot-packs.sh bsl-shaders photon-shader   # these slugs (folders in run/testpacks/)
+#   mod/scripts/screenshot-packs.sh                             # every fetched pack
 #
-# Results: build/pack-screenshots/<pack>/ (the .png files, game.log, gradle.log), plus
-# build/pack-screenshots/summary.md. One run takes about 30 s.
+# The default stops are "build zoo,zoo,beach"; set TOUR_STOPS to change them. The regression scene
+# is avoided on purpose: a pack that falls back renders vanilla, and vanilla's rain draw trips
+# validation. Waits while any other game runs, so it never shares the GPU with another test.
+# Results table: build/gametest/packs-summary.md.
 set -uo pipefail
 mod="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$mod"
-export JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 25)}"
-out="$mod/build/pack-screenshots"
-mkdir -p "$out"
-
+stops="${TOUR_STOPS:-build zoo,zoo,beach}"
 if [ $# -gt 0 ]; then
-    packs=("$@")
+    slugs=("$@")
 else
-    packs=()
-    for f in run/shaderpacks/*.zip run/testpacks/*.zip; do
-        [ -e "$f" ] && packs+=("$(basename "$f" .zip)")
-    done
+    slugs=()
+    for d in "$mod"/run/testpacks/*/; do [ -d "$d" ] && slugs+=("$(basename "$d")"); done
 fi
-
-summary="$out/summary.md"
+summary="$mod/build/gametest/packs-summary.md"
+mkdir -p "$(dirname "$summary")"
 {
-    echo "# In-game screenshots per pack"
-    echo
-    echo "| Pack | Result | Loaded | Validation messages | Luxium/Metallum errors (first) | Shots |"
-    echo "|---|---|---|---|---|---|"
+    echo "| Pack | Exit | Validation messages | Pack result |"
+    echo "|---|---|---|---|"
 } > "$summary"
 
-for pack in "${packs[@]}"; do
-    # Never run next to another game (another checkout's runClient or game test): they'd share
-    # the GPU, which skews frame timing and readback measurements in both.
+for slug in "${slugs[@]}"; do
+    dir="$mod/run/testpacks/$slug"
+    if [ ! -d "$dir" ]; then echo "no $dir (run scripts/fetch-testpacks.sh $slug)" >&2; continue; fi
     while pgrep -f 'java.*devlaunchinjector' > /dev/null; do
         echo "    another game is running; waiting..."
         sleep 15
     done
-    dir="$out/$pack"
-    rm -rf "$dir"
-    mkdir -p "$dir"
-    echo "=== $pack"
-    MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 LUXIUM_PACK="$pack" \
-        ./gradlew runClientGameTest > "$dir/gradle.log" 2>&1
+    echo "=== $slug"
+    "$mod/scripts/gametest.sh" "pack-$slug" LUXIUM_TOUR=1 "LUXIUM_TOUR_ONLY=$stops" "LUXIUM_TEST_PACKS=$dir"
     status=$?
-    cp build/run/clientGameTest/screenshots/*.png "$dir/" 2>/dev/null
-    cp build/run/clientGameTest/logs/latest.log "$dir/game.log" 2>/dev/null
-
-    result=$([ $status -eq 0 ] && echo pass || echo "FAIL ($status)")
-    loaded=$(grep -m1 -o 'Loading pack .*' "$dir/game.log" 2>/dev/null | sed 's/Loading pack //')
-    validation=$(grep -c -iE 'validation.*(error|failed)|-\[MTL.*assert|failed assertion' "$dir/gradle.log")
-    # Only Luxium's and Metallum's errors: the rest is offline-player network noise (Realms etc.).
-    ours='/ERROR\] \((metalshaders|metallum)\)'
-    errors=$(grep -cE "$ours" "$dir/game.log" 2>/dev/null || true)
-    first=$(grep -m1 -E "$ours" "$dir/game.log" 2>/dev/null | sed -E 's/^.*\((metalshaders|metallum)\) //' | cut -c1-120 | tr '|' '/')
-    [ -n "$first" ] && errors="$errors: $first"
-    shots=$(ls "$dir"/*.png 2>/dev/null | wc -l | tr -d ' ')
-    if ! grep -q 'Metal API Validation Enabled' "$dir/gradle.log"; then
-        validation="validation was off"
-    fi
-    echo "| $pack | $result | ${loaded:-?} | $validation | $errors | $shots |" >> "$summary"
-    echo "    $result, loaded ${loaded:-?}, validation messages: $validation, log errors: $errors, shots: $shots"
+    log="$mod/build/gametest/pack-$slug/run.log"
+    mtl=$(grep -c "failed assertion\|^-\[MTL" "$log" 2>/dev/null)
+    result=$(grep -m1 -o "Shader pack .* can't be used: [^.]*" "$log" 2>/dev/null | tr '|' '/')
+    [ -z "$result" ] && result="loaded"
+    echo "| $slug | $status | $mtl | $result |" >> "$summary"
 done
-
-echo
-cat "$summary"
+echo; cat "$summary"

@@ -42,11 +42,23 @@ public final class UniformWriter {
             if (value == null) {
                 value = parseDefault(m.type(), defaults.get(m.name()));
             }
-            if (value == null || m.arrayLength() > 0) {
-                // Arrays and structs (luxium_TextureMatrix, luxium_Fog) are per-draw values: step 6.
-                if (value == null) {
+            if (value == null) {
+                missing.add(m.name());
+                continue;
+            }
+            if (m.arrayLength() > 0) {
+                // Arrays: mat4[] for luxium_TextureMatrix, one element per stride.
+                if (value instanceof Matrix4fc[] array && m.type().equals("mat4")) {
+                    for (int i = 0; i < Math.min(array.length, m.arrayLength()); i++) {
+                        writeOne(b, m.offset() + i * m.stride(), "mat4", array[i], m.name());
+                    }
+                } else {
                     missing.add(m.name());
                 }
+                continue;
+            }
+            if (m.type().equals("LuxiumFog")) {
+                missing.add(m.name());   // the fog struct: not supplied yet
                 continue;
             }
             writeOne(b, m.offset(), m.type(), value, m.name());

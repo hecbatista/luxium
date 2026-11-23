@@ -2,7 +2,7 @@
 
 Pure Python (zlib only), so it runs without Pillow. Writes icon.png (128x128),
 icon-512.png and icon.svg next to this script, and copies icon.png into the mod
-(mod/src/main/resources/assets/metalshaders/icon.png).
+(mod/src/main/resources/assets/luxium/icon.png).
 
     python3 branding/make_icon.py
 """
@@ -178,5 +178,5 @@ def write_svg(path):
 write_png(os.path.join(OUT, "icon.png"), 4)
 write_png(os.path.join(OUT, "icon-512.png"), 16)
 write_svg(os.path.join(OUT, "icon.svg"))
-write_png(os.path.join(OUT, "..", "mod", "src", "main", "resources", "assets", "metalshaders", "icon.png"), 4)
+write_png(os.path.join(OUT, "..", "mod", "src", "main", "resources", "assets", "luxium", "icon.png"), 4)
 print("wrote icon.png, icon-512.png, icon.svg and the mod icon")

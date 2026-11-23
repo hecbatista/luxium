@@ -1,17 +1,18 @@
 {
   "schemaVersion": 1,
-  "id": "metalshaders-test",
+  "id": "luxium-test",
   "version": "${version}",
   "name": "Luxium client game tests",
   "description": "Automated in-game checks for Luxium (dev only, never shipped).",
   "environment": "*",
   "entrypoints": {
     "fabric-client-gametest": [
-      "io.github.hecbatista.metalshaders.test.ScreenshotTest"
+      "io.github.hecbatista.metalshaders.test.ScreenshotTest",
+      "io.github.hecbatista.metalshaders.test.PlaytestTour"
     ]
   },
   "depends": {
-    "metalshaders": "*",
+    "luxium": "*",
     "fabric-api": "*"
   }
 }

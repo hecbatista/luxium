@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "iris-compare-test",
+  "version": "1.0.0",
+  "name": "Iris comparison tour",
+  "description": "Runs Luxium's PlaytestTour under Iris, for side-by-side screenshots (dev only).",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-client-gametest": [
+      "iriscompare.IrisSetup",
+      "io.github.hecbatista.metalshaders.test.PlaytestTour"
+    ]
+  },
+  "depends": {
+    "iris": "*",
+    "fabric-api": "*"
+  }
+}
