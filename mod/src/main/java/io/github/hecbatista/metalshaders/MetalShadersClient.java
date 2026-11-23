@@ -82,6 +82,15 @@ public final class MetalShadersClient implements ClientModInitializer {
     /** config/luxium.properties (LuxiumConfig). */
     private static Path configFile;
 
+    public static Path configFile() {
+        return configFile != null ? configFile : FabricLoader.getInstance().getConfigDir().resolve("luxium.properties");
+    }
+
+    /** The game's shaderpacks/ folder, where Iris and OptiFine look too. */
+    public static Path shaderpacksDir() {
+        return FabricLoader.getInstance().getGameDir().resolve("shaderpacks");
+    }
+
     /**
      * Whether Sodium meshes chunks in Luxium's wider vertex (ChunkMeshFormatsMixin): true while a
      * pack is chosen. Sodium reads the format only when it builds a section manager (its renderer,

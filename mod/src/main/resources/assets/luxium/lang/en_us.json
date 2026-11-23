@@ -1,0 +1,11 @@
+{
+  "luxium.shaderPacks.button": "Shader Packs...",
+  "luxium.shaderPacks.title": "Shader Packs",
+  "luxium.shaderPacks.enabled": "Shaders: Enabled",
+  "luxium.shaderPacks.disabled": "Shaders: Disabled",
+  "luxium.shaderPacks.nonePresent": "Shaders: No Packs Present",
+  "luxium.shaderPacks.apply": "Apply",
+  "luxium.shaderPacks.openFolder": "Open Shader Pack Folder...",
+  "key.category.luxium.luxium": "Luxium",
+  "key.luxium.shaderPacks": "Shader Packs"
+}

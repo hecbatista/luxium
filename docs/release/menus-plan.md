@@ -11,7 +11,7 @@ Agreed with the user on 2026-11-23: Iris-style menus (option 3), shipped as thei
   - Mod Menu 21.0.1 (2026-11-12) supports 26.3. Add an optional `"modmenu"` entrypoint implementing `ModMenuApi.getModConfigScreenFactory`, with `compileOnly` from Terraformers' Maven.
   - Luxium must still work without Mod Menu, and without Fabric API (Mod Menu requires Fabric API; Luxium doesn't).
   - Prism Mod Menu uses the same API (to verify).
-- **Key `O` by default**, as Iris, rebindable in Controls.
+- **Key `I` by default**, as Iris 26.3 (`Iris.java:813`, `KEY_I`), rebindable in Controls. (The plan said O, from older Iris; vanilla 26.3 binds O to its new friends list, `key.friends`.)
 
 ## Screens (Iris behaviour, our own code, credited in NOTICE)
 Research summary: an agent's report on Iris 26.3, `gui/` and `shaderpack/option/menu/`.
@@ -80,3 +80,12 @@ Research summary: an agent's report on Iris 26.3, `gui/` and `shaderpack/option/
   - shaders on after a reload vs at start: 38% of pixels differ, 4.4% by more than 8; two frames 12 ticks apart of the same still clip: 27% and 3.2%. Spread evenly, brightest on the waving leaves: Complementary's temporal noise, not the reload.
   - 0 validation messages in every run; still clip after all the toggles 0.010% (limit 0.1%); regression scene unchanged (walk clip 0.16%, the known shimmer).
 - A reload takes about 2 s on a warm Metal cache (the frame stalls, as in Iris).
+
+### Slice B: the Shader Packs screen and its three ways in (2026-11-23, ✅)
+- **Screen** `gui/ShaderPackScreen` (vanilla `ObjectSelectionList`, buttons and `HeaderAndFooterLayout`; behaviour from Iris, credited in NOTICE): an on/off row (inactive with no packs, never the selected row), one row per pack (applied pack yellow, all grey while off; clicking a pack turns shaders on), "Open Shader Pack Folder..." (`Blaze3D.openPath`), Cancel / Apply / Done (Done, Esc and double-click apply). Apply writes `config/luxium.properties` (`LuxiumConfig.write`) and calls `requestReload` only when something changed. Labels in `assets/luxium/lang/en_us.json` (loaded without Fabric API: Sodium bundles Fabric's resource loader).
+- **Ways in:**
+  - Video Settings: `VideoSettingsScreenMixin` adds a "Shader Packs..." button right under the graphics preset (after the second `OptionsList.addBig(OptionInstance)` in `addOptions`).
+  - Key **I** (`gui/LuxiumKeys`, category "Luxium"): `OptionsKeysMixin` appends it to `Options.keyMappings` at the head of `load` (so it's saved and shown in Controls, no Fabric API), `MinecraftKeysMixin` reads it at the head of `Minecraft.handleKeybinds`. O was the plan, but vanilla 26.3 already binds O to its friends list; the first test run pressed O and got `FriendsListConfirmScreen`. Iris 26.3 uses I too.
+  - Mod Menu: `compat/ModMenuEntry` (`"modmenu"` entrypoint in fabric.mod.json, `getModConfigScreenFactory` → `ShaderPackScreen::new`); `compileOnly com.terraformersmc:modmenu:21.0.1` (non-transitive) from maven.terraformersmc.com. Not yet run with Mod Menu installed: that's slice D.
+- `src/main` uses no Fabric API class (checked with grep); the game tests run with Fabric API, so "without Fabric API" isn't run-tested yet.
+- **Test:** `LUXIUM_TEST_MENUS=1` (`ScreenshotTest.menuTest`), with real input where Fabric's test API allows: opens Video Settings and presses the button (Fabric's `clickScreenButton` doesn't search inside option lists, so the test finds it in the widget tree), turns shaders off and applies (checks the pack is unloaded and the file says `enableShaders=false`), Done back to Video Settings, then the I key in the world, picks the pack (turns shaders on), Done (screen closes, pack active, file says true), then I, off, Cancel (nothing changes). 7 shots, 0 validation messages. The toggle test still gives 0 differing pixels for live off.

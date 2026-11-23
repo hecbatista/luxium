@@ -326,6 +326,29 @@ GNU Lesser General Public License version 3
   and IrisRenderingPipeline.shouldDisableVanillaEntityShadows: the vanilla blob shadow under
   entities is not submitted while the pack has a shadow pass.
 
+  src/main/java/io/github/hecbatista/metalshaders/gui/ShaderPackScreen.java follows the
+  behaviour of net.irisshaders.iris.gui.screen.ShaderPackScreen and
+  gui.element.ShaderPackSelectionList: a first row that turns shaders on and off and is inactive
+  with no packs; clicking a pack selects it and also turns shaders on; the applied pack drawn in
+  yellow (0xFFFFF263) and every pack grey (0xFFA2A2A2) while shaders are off; Cancel, Apply and
+  Done, with Done and Esc applying; "Open Shader Pack Folder...". The English labels follow
+  Iris's en_us.json (assets/luxium/lang/en_us.json). Changed: vanilla's list and buttons instead
+  of Iris's own widgets and textures, no transitions, a single footer layout, and no Download,
+  drag-and-drop or settings button yet.
+
+  src/main/java/io/github/hecbatista/metalshaders/gui/LuxiumKeys.java takes Iris 26.3's default
+  key for the screen, I (net.irisshaders.iris.Iris, shaderpackScreenKeybind).
+
+  src/main/java/io/github/hecbatista/metalshaders/mixin/VideoSettingsScreenMixin.java puts a
+  "Shader Packs..." button in Video Settings, where Iris puts its own
+  (net.irisshaders.iris.mixin.gui.MixinVideoSettingsScreen). Changed: added with
+  OptionsList.addBig(AbstractWidget) after the graphics preset, not as a fake OptionInstance.
+
+  src/main/java/io/github/hecbatista/metalshaders/sodium/SodiumPrograms.java solves the problem
+  net.irisshaders.iris.compat.sodium.mixin.MixinShaderChunkRenderer solves (Sodium's terrain
+  pipelines are built once, with the first chunk vertex format). Changed: one set kept per
+  format and swapped with it, where Iris always builds them with Sodium's own format.
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3

@@ -14,6 +14,9 @@
   "entrypoints": {
     "client": [
       "io.github.hecbatista.metalshaders.MetalShadersClient"
+    ],
+    "modmenu": [
+      "io.github.hecbatista.metalshaders.compat.ModMenuEntry"
     ]
   },
   "mixins": [

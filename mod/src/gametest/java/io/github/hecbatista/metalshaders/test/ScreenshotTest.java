@@ -129,6 +129,10 @@ public class ScreenshotTest implements FabricClientGameTest {
                 toggleTest(context, singleplayer, server);
                 return;
             }
+            if (System.getenv("LUXIUM_TEST_MENUS") != null) {
+                menuTest(context, singleplayer, server);
+                return;
+            }
             server.runCommand("fill -12 99 -12 12 99 12 minecraft:stone");
             server.runCommand("fill -6 100 -6 6 106 6 minecraft:glass hollow");
             server.runCommand("fill -5 101 -5 5 105 5 minecraft:water");
@@ -396,25 +400,7 @@ public class ScreenshotTest implements FabricClientGameTest {
      * toggle-5-grey (T_SATURATION=0.00), toggle-6-defaults; clip frames-toggle-still after it all.
      */
     private static void toggleTest(ClientGameTestContext context, TestSingleplayerContext singleplayer, TestServerContext server) {
-        server.runCommand("gamerule advance_time false");
-        server.runCommand("fill -12 99 -12 12 99 12 minecraft:stone");
-        server.runCommand("fill -12 100 9 -8 102 12 minecraft:oak_log");
-        server.runCommand("fill 8 100 9 12 101 12 minecraft:gold_block");
-        server.runCommand("fill -3 100 4 3 102 6 minecraft:glass");
-        server.runCommand("fill 8 100 -6 11 101 -3 minecraft:oak_leaves[persistent=true]");
-        server.runCommand("setblock 0 100 0 minecraft:chest[facing=north]");
-        // LUXIUM_TEST_NO_OIT=1: start with the game's Improved Transparency off (a pack in use turns it off).
-        if (System.getenv("LUXIUM_TEST_NO_OIT") != null) {
-            context.runOnClient(mc -> {
-                mc.options.improvedTransparency().set(false);
-                mc.levelExtractor.allChanged();
-            });
-        }
-        // Looking down at the floor: no sky or clouds in the picture.
-        server.runCommand("tp @a 0 106 -10 0 40");
-        context.waitTicks(40);
-        singleplayer.getConnection().waitForChunksRender();
-        context.waitTicks(40);
+        stillScene(context, singleplayer, server);
         context.takeScreenshot("toggle-1-start");
 
         setShaders(context, singleplayer, false);
@@ -455,6 +441,153 @@ public class ScreenshotTest implements FabricClientGameTest {
         setShaders(context, singleplayer, false);
         assertActive(context, false);
         context.takeScreenshot("toggle-7-off-again");
+    }
+
+    /** Time frozen, no entities or water, looking down at the floor (no sky or clouds in view). */
+    private static void stillScene(ClientGameTestContext context, TestSingleplayerContext singleplayer, TestServerContext server) {
+        server.runCommand("gamerule advance_time false");
+        server.runCommand("fill -12 99 -12 12 99 12 minecraft:stone");
+        server.runCommand("fill -12 100 9 -8 102 12 minecraft:oak_log");
+        server.runCommand("fill 8 100 9 12 101 12 minecraft:gold_block");
+        server.runCommand("fill -3 100 4 3 102 6 minecraft:glass");
+        server.runCommand("fill 8 100 -6 11 101 -3 minecraft:oak_leaves[persistent=true]");
+        server.runCommand("setblock 0 100 0 minecraft:chest[facing=north]");
+        // LUXIUM_TEST_NO_OIT=1: start with the game's Improved Transparency off (a pack in use turns it off).
+        if (System.getenv("LUXIUM_TEST_NO_OIT") != null) {
+            context.runOnClient(mc -> {
+                mc.options.improvedTransparency().set(false);
+                mc.levelExtractor.allChanged();
+            });
+        }
+        // Looking down at the floor: no sky or clouds in the picture.
+        server.runCommand("tp @a 0 106 -10 0 40");
+        context.waitTicks(40);
+        singleplayer.getConnection().waitForChunksRender();
+        context.waitTicks(40);
+    }
+
+    /**
+     * LUXIUM_TEST_MENUS=1 (menus slice B): the Shader Packs screen through its entry points, with
+     * real input: the Video Settings button, the I key, the on/off row, Apply, Done and Cancel.
+     * Shots menu-1 to menu-7; every step checks what the screen wrote and what is drawn.
+     */
+    private static void menuTest(ClientGameTestContext context, TestSingleplayerContext singleplayer, TestServerContext server) {
+        stillScene(context, singleplayer, server);
+        context.runOnClient(mc -> {
+            if (mc.gui.hud.isHidden()) {
+                mc.gui.hud.toggle();
+            }
+        });
+        assertActive(context, true);
+        context.setScreen(() -> {
+            var mc = net.minecraft.client.Minecraft.getInstance();
+            return new net.minecraft.client.gui.screens.options.VideoSettingsScreen(null, mc, mc.options);
+        });
+        context.waitTicks(5);
+        // Fabric's clickScreenButton doesn't look inside option lists: find the button ourselves,
+        // scroll it into view for the shot, then press it.
+        context.runOnClient(mc -> {
+            net.minecraft.client.gui.components.Button b = findButton(mc.gui.screen(), "luxium.shaderPacks.button");
+            if (b == null) {
+                throw new AssertionError("No Shader Packs button in Video Settings");
+            }
+            // The entry's place (its widgets are only placed when drawn, and this one is off screen).
+            var list = (net.minecraft.client.gui.components.OptionsList) mc.gui.screen().children().stream()
+                    .filter(c -> c instanceof net.minecraft.client.gui.components.OptionsList).findFirst().orElseThrow();
+            java.util.List<? extends net.minecraft.client.gui.components.events.GuiEventListener> rows = list.children();
+            var entry = (net.minecraft.client.gui.layouts.LayoutElement) rows.stream()
+                    .filter(e -> ((net.minecraft.client.gui.components.events.ContainerEventHandler) e).children().contains(b))
+                    .findFirst().orElseThrow();
+            list.setScrollAmount(list.scrollAmount() + entry.getY() - list.getY() - 40);
+        });
+        context.waitTicks(5);
+        context.takeScreenshot("menu-1-video-settings");
+        context.runOnClient(mc -> findButton(mc.gui.screen(), "luxium.shaderPacks.button").onPress(
+                new net.minecraft.client.input.KeyEvent(com.mojang.blaze3d.platform.InputConstants.KEY_RETURN, 0, 0)));
+        context.waitForScreen(io.github.hecbatista.metalshaders.gui.ShaderPackScreen.class);
+        context.waitTicks(5);
+        java.util.List<String> names = context.computeOnClient(mc -> ((io.github.hecbatista.metalshaders.gui.ShaderPackScreen) mc.gui.screen()).packNames());
+        System.out.println("[Luxium menus] packs listed: " + names);
+        if (names.isEmpty()) {
+            throw new AssertionError("The Shader Packs screen lists no packs");
+        }
+        context.takeScreenshot("menu-2-pack-list");
+
+        // Off, then Apply: the world behind the screen is drawn without the pack.
+        context.runOnClient(mc -> ((io.github.hecbatista.metalshaders.gui.ShaderPackScreen) mc.gui.screen()).clickToggle());
+        context.waitTicks(2);
+        context.takeScreenshot("menu-3-toggled-off");
+        context.clickScreenButton("luxium.shaderPacks.apply");
+        context.waitTicks(5);
+        singleplayer.getConnection().waitForChunksRender();
+        context.waitTicks(20);
+        assertActive(context, false);
+        assertConfig(context, false);
+        context.takeScreenshot("menu-4-applied-off");
+
+        // Done goes back to Video Settings; then to the world.
+        context.clickScreenButton("gui.done");
+        context.waitForScreen(net.minecraft.client.gui.screens.options.VideoSettingsScreen.class);
+        context.setScreen(() -> null);
+        context.waitTicks(20);
+        context.takeScreenshot("menu-5-world-off");
+
+        // The I key, in the world: pick the pack (which turns shaders on, as in Iris), then Done.
+        context.getInput().pressKey(com.mojang.blaze3d.platform.InputConstants.KEY_I);
+        context.waitForScreen(io.github.hecbatista.metalshaders.gui.ShaderPackScreen.class);
+        context.waitTicks(2);
+        context.runOnClient(mc -> ((io.github.hecbatista.metalshaders.gui.ShaderPackScreen) mc.gui.screen()).clickPack(names.getFirst()));
+        context.waitTicks(2);
+        context.takeScreenshot("menu-6-from-key-pack-picked");
+        context.clickScreenButton("gui.done");
+        context.waitTicks(5);
+        singleplayer.getConnection().waitForChunksRender();
+        context.waitTicks(40);
+        if (context.computeOnClient(mc -> mc.gui.screen() != null)) {
+            throw new AssertionError("Done should close the screen opened in the world");
+        }
+        assertActive(context, true);
+        assertConfig(context, true);
+        context.takeScreenshot("menu-7-world-on");
+
+        // Cancel drops a change.
+        context.getInput().pressKey(com.mojang.blaze3d.platform.InputConstants.KEY_I);
+        context.waitForScreen(io.github.hecbatista.metalshaders.gui.ShaderPackScreen.class);
+        context.runOnClient(mc -> ((io.github.hecbatista.metalshaders.gui.ShaderPackScreen) mc.gui.screen()).clickToggle());
+        context.clickScreenButton("gui.cancel");
+        context.waitTicks(20);
+        assertActive(context, true);
+        assertConfig(context, true);
+        System.out.println("[Luxium menus] all steps passed");
+    }
+
+    /** The button showing {@code key}'s text anywhere in the screen's widget tree. */
+    private static net.minecraft.client.gui.components.Button findButton(net.minecraft.client.gui.components.events.GuiEventListener node, String key) {
+        if (node instanceof net.minecraft.client.gui.components.Button b
+                && b.getMessage().getString().equals(net.minecraft.network.chat.Component.translatable(key).getString())) {
+            return b;
+        }
+        if (node instanceof net.minecraft.client.gui.components.events.ContainerEventHandler c) {
+            for (var child : c.children()) {
+                var found = findButton(child, key);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static void assertConfig(ClientGameTestContext context, boolean on) {
+        boolean written;
+        try {
+            written = io.github.hecbatista.metalshaders.pack.LuxiumConfig.enabled(io.github.hecbatista.metalshaders.MetalShadersClient.configFile());
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        if (written != on) {
+            throw new AssertionError("config/luxium.properties should say enableShaders=" + on);
+        }
     }
 
     /** Writes the choice as the Shader Packs screen does, reloads, and waits for the chunks. */

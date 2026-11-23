@@ -40,6 +40,11 @@ public final class LuxiumConfig {
         return isOn(read(configFile));
     }
 
+    /** The {@code shaderPack} value in the file ("" when missing: the first pack found). */
+    public static String packName(Path configFile) throws IOException {
+        return read(configFile).getProperty(PACK, "").strip();
+    }
+
     /** Resolves the pack and rewrites the file when what it should say changed. */
     public static Choice choose(Path shaderpacks, Path configFile) throws IOException {
         Properties props = read(configFile);
@@ -101,7 +106,7 @@ public final class LuxiumConfig {
     }
 
     static String render(boolean enabled, String pack, String found) {
-        return "# Luxium settings. The Shader Packs screen (Video Settings, or the O key) changes them\n"
+        return "# Luxium settings. The Shader Packs screen (Video Settings, or the I key) changes them\n"
                 + "# while playing; edits made here by hand apply the next time the game starts.\n"
                 + "# Shaders on (true) or off (false). Off: the game renders as without Luxium.\n"
                 + ENABLE + "=" + enabled + "\n"

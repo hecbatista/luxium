@@ -33,7 +33,7 @@ When a slice is finished, append its result to the right `docs/history/` file, a
   - **`axiom-graphics`**: Metal and GLSL→MSL reference tables.
 - Finding code: `graphify query "<question>" --budget 1500` answers from a free AST graph of `mod/src` and the Minecraft sources. Use it before reading big files; refresh it with `mod/scripts/graph-update.sh`.
 - Known gaps:
-  - No in-game screen yet: settings, pack choice and on/off reload live (`MetalShadersClient.requestReload`, menus slice A) but are changed only by editing files.
+  - Shader Packs screen (pack choice, on/off: Video Settings, key I, Mod Menu) done (menus slice B); the pack's own option screens are not (slice C), so settings are still changed by editing `shaderpacks/<pack>.txt`.
   - `dimension.properties` isn't preprocessed.
 
 ## Layout
