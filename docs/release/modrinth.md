@@ -45,10 +45,11 @@ Upload in this order. The first one marked *featured* is the card image in searc
 
 All shots: 1920×1080, render distance 12, HUD hidden, not edited. They come from the tour's `promo` stop (`PlaytestTour.promo`), taken with `mod/scripts/promo.sh <label>` (validation off), so they can be retaken after any change.
 
-## Description (paste everything below the line)
+## Description
 
----
+Copy the whole code block below (the copy button at its top right, or select inside it) and paste it into Modrinth's description editor. It's raw Markdown, so the headings, tables and links stay intact; don't copy from a rendered preview of this file.
 
+````markdown
 **Shader packs, on Metal.**
 
 On a Mac, [Metallum](https://modrinth.com/mod/metallum-mc) replaces Minecraft's renderer with Apple's Metal API. That makes the game fast on Apple Silicon, but shader-pack mods like Iris need OpenGL, so they stop working.
@@ -108,4 +109,5 @@ Built on [Metallum](https://modrinth.com/mod/metallum-mc) by kokodio. [Iris](htt
 
 Screenshots use [Complementary Shaders](https://www.complementary.dev/) by EminGT. The pack isn't included; get it from its official page.
 
-<sub>Not affiliated with Mojang, Microsoft, Apple, Iris or OptiFine. Not an official Minecraft product.</sub>
+*Not affiliated with Mojang, Microsoft, Apple, Iris or OptiFine. Not an official Minecraft product.*
+````
