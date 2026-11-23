@@ -27,7 +27,7 @@ Shader packs are written for OpenGL. On a Mac, the [Metallum](https://github.com
 - 🌅 **runs the pack's render passes** on Metallum's Metal device: sky, terrain, water, entities, shadows, deferred and composite passes
 
 > [!NOTE]
-> Luxium is in **alpha** (0.1.0-alpha.1, not released yet). It's tested on one Mac (M1 Max, macOS 27). Expect bugs, and back up your worlds.
+> Luxium is in **alpha** (0.1.0-alpha.1). It's tested on one Mac (M1 Max, macOS 27). Expect bugs, and back up your worlds.
 
 ## 🎨 Shader pack compatibility
 
@@ -69,6 +69,22 @@ Frame pacing is steadier too: Luxium's worst frame was 20 ms, against 85 ms for 
 | **Required mods** | [Metallum](https://modrinth.com/mod/metallum-mc) 0.0.25 and [Sodium](https://modrinth.com/mod/sodium) 0.9.2 |
 | **A shader pack** | An Iris / OptiFine-format pack, placed in `.minecraft/shaderpacks/` |
 
+## 📥 Install
+
+1. **Install Fabric** for Minecraft 26.3, with the [Fabric installer](https://fabricmc.net/use/installer/) or in a launcher like Prism or Modrinth (create a new 26.3 Fabric instance).
+2. **Put three mods in your `mods` folder:**
+   - [Sodium](https://modrinth.com/mod/sodium) 0.9.2 for 26.3;
+   - [Metallum](https://modrinth.com/mod/metallum-mc) **0.0.25**, exactly that version: Luxium checks it at startup;
+   - Luxium, `luxium-0.1.0-alpha.1.jar` from [Releases](https://github.com/hecbatista/luxium/releases).
+
+   Fabric API isn't needed.
+3. **Put a shader pack** (the `.zip`, unopened) in the `shaderpacks` folder next to `mods`. Complementary Unbound is the best-tested pack.
+4. **Start the game.** Metallum switches the game to Metal by itself; there's nothing to select. Luxium uses the first pack it finds, or the one named in `config/luxium.properties` (below).
+
+Don't install Iris or OptiFine next to Luxium: they need OpenGL, and Metallum replaces it.
+
+The first time you enter each world (Overworld, Nether, End) after installing or updating, loading takes a few extra seconds while macOS compiles the shaders. Later loads are quick.
+
 ## ⚙️ Choosing a pack and turning shaders off
 
 At its first start, Luxium writes `config/luxium.properties`:
@@ -84,6 +100,43 @@ shaderPack=ComplementaryUnbound_r5.10.zip
 - Restart the game after changing either.
 
 Pack settings go in `shaderpacks/<pack>.txt`, the same file Iris uses, so settings carry over from Iris. Luxium lists every setting and its allowed values in `shaderpacks/<pack>.luxium-options.txt`. In-game shader menus are planned for the release after the alpha.
+
+## 🐞 Known issues
+
+- **Pack support:** Complementary Unbound is the only pack checked closely against Iris; see the compatibility table above. Packs that need features Luxium doesn't have yet fall back to vanilla rendering with a notice.
+- **No in-game shader menu yet.** Settings are changed in files and need a restart (see above). Menus are planned for the next release.
+- **Not supported yet:**
+  - chunk fade-in (new chunks pop in instead of fading through the fog);
+  - packs' `customTexture.*` and raw custom textures;
+  - Distant Horizons.
+- **Performance at long render distances:** Luxium slows down more than Iris as render distance grows. It's still ahead at 12 chunks, but the gap narrows ([details](docs/release/benchmarks.md)).
+- **Brightness:** Complementary can look very slightly darker than under Iris in some scenes; the cause is being looked into.
+- **First load** of each world after an install or update takes a few seconds longer (macOS compiles the shaders once).
+- **Apple Silicon only.** Metal isn't available on Intel Macs through Metallum.
+
+## 📝 Reporting a bug
+
+Open an issue at [github.com/hecbatista/luxium/issues](https://github.com/hecbatista/luxium/issues) with:
+
+- `logs/latest.log` from your game folder (start the game, reproduce the problem, quit, then attach the file);
+- the shader pack's name and version, and your `shaderpacks/<pack>.txt` if you changed settings;
+- a screenshot (F2 saves to `screenshots/`). For flickering or flashing, a short screen recording helps a lot;
+- your Mac model and macOS version, and how to reproduce the problem.
+
+If a pack falls back to vanilla, the log has a line starting `Shader pack ... can't be used:` that says why.
+
+## 🛠️ Building from source
+
+You need JDK 25. Luxium builds against a local Metallum jar:
+
+```bash
+git clone https://github.com/hecbatista/luxium.git && cd luxium
+git clone https://github.com/kokodio/metallum.git references/metallum
+(cd references/metallum && git checkout 467d312 && ./gradlew build)
+cd mod && ./gradlew build        # the jar lands in mod/build/libs/
+```
+
+To build against another Metallum jar instead, such as Modrinth's, set `LUXIUM_METALLUM_JAR=/path/to/metallum.jar`.
 
 ## 💜 Credits
 

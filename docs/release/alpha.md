@@ -47,13 +47,12 @@ Facts as of 2026-11-23:
   - A working pack never triggers it: regression run, 0 lines.
   - Bliss and Solas need only missing Iris macros and an OptiFine function alias: a cheap compatibility follow-up.
 - [x] **Version and metadata**: `0.1.0-alpha.1`; mod id renamed `metalshaders` → `luxium` before any release (user's decision; the Java package stays `io.github.hecbatista.metalshaders`). The log tag is now `(luxium)`, and `fabric.mod.json` has license and issues links.
-- [ ] **README for players:**
-  - requirements: Apple Silicon, macOS version, Minecraft 26.3, Fabric Loader ≥ 0.19.5, Sodium 0.9.2, Metallum;
-  - install steps;
-  - where pack settings go (`shaderpacks/<pack>.txt`; restart to apply);
-  - tested packs;
-  - known issues (below);
-  - how to report: `logs/latest.log`, F2 screenshots, pack and settings.
+- [x] **README for players** (2026-11-23), merged into the existing styled README:
+  - what it is; pack compatibility; performance (`docs/release/benchmarks.md`); requirements;
+  - install (Fabric, Sodium 0.9.2, Metallum exactly 0.0.25, Luxium; no Fabric API; no Iris or OptiFine alongside; first-load note);
+  - choosing a pack and turning shaders off; pack settings;
+  - known issues; how to report a bug (log, pack and settings, F2 screenshots or a recording, Mac model);
+  - building from source; credits; license.
 - [ ] **Push and pre-release** (needs the user's go): push `main`, tag `v0.1.0-alpha.1`, GitHub pre-release with the jar and the README's install notes. Channel: GitHub pre-release first (user's decision); Modrinth later.
 
 ## Benchmarking (first results 2026-11-23: `docs/release/benchmarks.md`; more scenes and machines still to come)
