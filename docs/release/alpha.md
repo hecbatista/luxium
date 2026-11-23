@@ -1,0 +1,54 @@
+# First public alpha: checklist
+
+Started 2026-11-23, after 7i. Goal: a jar that other Apple Silicon players can install to run
+Complementary Unbound on Metal, with honest notes on what works and what doesn't.
+**Status: preparing; benchmarking in progress.**
+
+Facts as of 2026-11-23:
+- `hecbatista/luxium` is already **public** and has **no LICENSE**. Without one, nobody may legally use, copy or modify the code.
+- `main` is 35+ commits ahead of `origin/main`; nothing is pushed.
+- `./gradlew build` gives `mod/build/libs/metalshaders-0.0.1.jar`, 459 KB, with NOTICE and JCPP (jar-in-jar).
+- Tested only on an M1 Max, macOS 27.2, with Complementary Unbound r5.10 at its default settings.
+- We build against Metallum `467d312` (0.0.25 plus `5bee03e`, the getOrCompileFunction lock). Players get Modrinth's `metallum-mc` 0.0.25 (2026-10-10, without that commit).
+
+## Must, before anyone else gets the jar
+- [ ] **License** (the user's decision). The NOTICE credits LGPL-3.0 material from Iris and Vitrail (tables, rules, behaviour), so LGPL-3.0 (or GPL-3.0) is the low-risk fit. Add `LICENSE`, set `"license"` in `fabric.mod.json`, and put a header line in README.
+- [ ] **Runs on the Metallum players can download.** Test with Modrinth's `metallum-mc` 0.0.25 jar, not our local build. Our mixins into Metallum (`MetalCrossShaderCompilerMixin`, `MetallumCompiledAccessor`) are `require`d, so a mismatch crashes at startup. Then pin `"metallum"` in `depends` to what was tested.
+- [ ] **Choosing the pack and switching it off.** Today Luxium takes the first pack in `shaderpacks/`, and the only off switch is removing it. Minimum: a config line (`config/luxium.properties`: `shaderPack=`, `enabled=`), or read Iris's `config/iris.properties` `shaderPack=`.
+- [ ] **Fails safe.** No pack, a broken pack, or an untested pack must give vanilla rendering and a clear log line, never a crash. Check with no pack, a zip with garbage, and two or three popular packs (the `multi-pack-testing` worktree has a start on this).
+- [ ] **Version and metadata.** `mod_version` 0.0.1 becomes e.g. `0.1.0-alpha.1`. Decide whether the mod id stays `metalshaders` or becomes `luxium`: a later change orphans players' config, so decide now.
+- [ ] **README for players:**
+  - requirements: Apple Silicon, macOS version, Minecraft 26.3, Fabric Loader ≥ 0.19.5, Sodium 0.9.2, Metallum;
+  - install steps;
+  - where pack settings go (`shaderpacks/<pack>.txt`; restart to apply);
+  - tested packs;
+  - known issues (below);
+  - how to report: `logs/latest.log`, F2 screenshots, pack and settings.
+- [ ] **Push and pre-release** (needs the user's go): push `main`, tag `v0.1.0-alpha.1`, GitHub pre-release with the jar and the README's install notes.
+
+## Benchmarking (in progress)
+What we can say honestly, measured the same way each time:
+- **FPS and frame time, Luxium vs Iris** on the same Mac, scene, resolution and pack settings: average, 1% low, worst frame.
+  - Validation off, window in front, vsync and frame cap off (7f: the tests otherwise sit at the 120 Hz cap).
+  - Each run alone on the machine, with ABBA ordering (from gaelquinta-metal `bench/HARNESS.md`: background work moves results by 0.5–0.8 ms).
+  - Scenes: the tour's beach, zoo, cave and fast flight, plus a fixed 360° spin.
+- **World load time**, warm and cold Metal cache (7g has the method and the first numbers).
+- **Known limit:** GPU time per pass isn't measurable through the game's API (7f). Real GPU timing needs `MTLCommandBuffer` GPUStartTime/GPUEndTime (a Metallum hook), which is a follow-up, not a blocker.
+- Results go in `docs/history/step-7.md` (or a `docs/release/benchmarks.md`) and a short table in the README.
+
+## Known issues to list in the README
+- Only Complementary Unbound r5.10 is tested. Other packs may fall back or look wrong.
+- Pack settings are read only at load: no in-game settings screen or profiles. Edit `shaderpacks/<pack>.txt` and restart.
+- Not supported yet:
+  - chunk fade-in (`IRIS_FEATURE_FADE_VARIABLE`);
+  - `customTexture.*` and raw custom textures (Complementary needs them only with world-space reflections, off by default);
+  - `dimension.properties` preprocessing;
+  - Distant Horizons.
+- Iris renders Complementary about 2–6/255 brighter in the zoo shots (cause open; likely Iris's HIGH profile vs default settings).
+- The first world load after installing (cold Metal shader cache) takes 5–7 s per world; later loads about 1.7 s.
+- Apple Silicon only (Metal). Colored lighting stays off, as Complementary does on macOS (`MC_OS_MAC`).
+
+## Should, soon after
+- [ ] Real GPU timing (the Metallum hook above) for the benchmark table.
+- [ ] Modrinth listing (needs the license, icon (`branding/`), screenshots and description).
+- [ ] Crash and bug report template (GitHub issue form).
