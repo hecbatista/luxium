@@ -68,8 +68,8 @@ day cycle, biomes (slow: about 2 min of biome searches), cave, fast flight, port
 - **At most 2 game-running agents at a time.** Each game is CPU, GPU and RAM heavy, and other
   sessions may be running one too.
 - **One worktree per writing agent**, so builds and the game folder don't collide.
-  `bash .claude/worktrees/setup-fix-worktree.sh <name>` makes `fix-<name>` (check the base patch it
-  applies is current). Two agents must never edit the same functions.
+  `bash .claude/worktrees/setup-fix-worktree.sh <name>` makes `fix-<name>` from main's latest
+  commit (commit first if the agent needs uncommitted work). Two agents must never edit the same functions.
 - **Briefs stay short and point; don't paste:**
   - name the files and functions, and the CLAUDE.md section or `docs/history/` file to read.
     Never "read CLAUDE.md fully".
