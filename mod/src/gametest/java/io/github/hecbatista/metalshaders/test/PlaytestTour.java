@@ -96,6 +96,10 @@ public class PlaytestTour implements FabricClientGameTest {
             if (System.getenv("LUXIUM_BENCH") != null) {
                 stop("benchmark", this::benchmark);
             }
+            // LUXIUM_PROMO=1: screenshots for the README and Modrinth. Not part of the normal tour.
+            if (System.getenv("LUXIUM_PROMO") != null) {
+                stop("promo", this::promo);
+            }
         }
     }
 
@@ -644,6 +648,61 @@ public class PlaytestTour implements FabricClientGameTest {
             yaw[0] += 1.8f;   // 360 degrees over the 10 s measured
             cmd("tp @a 8.5 " + (spawn.getY() + 30) + " 8.5 " + yaw[0] + " 10");
         });
+    }
+
+    /**
+     * Promo screenshots for the README and Modrinth: HUD off, spectator (so no hand), a 1920x1080
+     * window, clear weather, scenic biomes at chosen times of day. Each scene is shot facing
+     * several directions, since the terrain around a found biome is unknown; the best framing is
+     * picked by hand. Run it with mod/scripts/promo.sh (render distance 12, validation off: these
+     * shots are for promotion, not for checking changes). iris-compare runs the same stop,
+     * for honest side-by-sides. LUXIUM_PROMO_SCENES=<name,...> shoots only those scenes.
+     * Shots: promo-<scene>-<yaw>.png.
+     */
+    private void promo() {
+        spectator();
+        hud(false);
+        cmd("weather clear");
+        context.getInput().resizeWindow(1920, 1080);
+        context.waitTicks(10);
+        float[] around = {0f, 45f, 90f, 135f, 180f, -135f, -90f, -45f};
+        // Yaw 90 faces west, where the sun sets; -90 faces east, where the sun and moon rise.
+        promoScene("beach-sunset", 11800, 3, around, -2f, Biomes.BEACH);
+        promoScene("cherry-golden", 11000, 10, around, 10f, Biomes.CHERRY_GROVE);
+        promoScene("forest-morning", 1000, 4, around, 2f, Biomes.FLOWER_FOREST, Biomes.FOREST);
+        promoScene("peaks-noon", 6000, 16, around, 12f, Biomes.JAGGED_PEAKS, Biomes.STONY_PEAKS, Biomes.MEADOW);
+        promoScene("ocean-sunrise", 23300, 2, new float[]{-90f, -60f, -120f}, -3f,
+                Biomes.WARM_OCEAN, Biomes.LUKEWARM_OCEAN, Biomes.OCEAN);
+        promoScene("jungle-noon", 5000, 6, around, 6f, Biomes.JUNGLE);
+        promoScene("savanna-sunset", 11900, 5, new float[]{60f, 90f, 120f}, -2f, Biomes.SAVANNA);
+        promoScene("moonrise", 14500, 4, new float[]{-120f, -90f, -60f}, -15f, Biomes.PLAINS, Biomes.SUNFLOWER_PLAINS);
+        cmd("time set noon");
+    }
+
+    @SafeVarargs
+    private void promoScene(String name, int time, int up, float[] yaws, float pitch, ResourceKey<Biome>... biomes) {
+        String only = System.getenv("LUXIUM_PROMO_SCENES");   // e.g. "beach-sunset,moonrise"
+        if (only != null && !java.util.Arrays.asList(only.split(",")).contains(name)) {
+            return;
+        }
+        BlockPos at = findBiome(biomes);
+        if (at == null) {
+            log("promo " + name + ": biome not found nearby; skipped");
+            return;
+        }
+        // Load the chunk first: the heightmap of an ungenerated chunk reads the world's bottom.
+        cmd("tp @a " + at.getX() + " 200 " + at.getZ());
+        settle(10);
+        BlockPos ground = surface(at.getX(), at.getZ());
+        String pos = (at.getX() + 0.5) + " " + (ground.getY() + up) + " " + (at.getZ() + 0.5);
+        cmd("time set " + time);
+        cmd("tp @a " + pos + " " + yaws[0] + " " + pitch);
+        settle(60);
+        for (float yaw : yaws) {
+            cmd("tp @a " + pos + " " + yaw + " " + pitch);
+            context.waitTicks(30);   // the pack's eye-brightness and exposure smoothing
+            context.takeScreenshot("promo-" + name + "-" + (int) yaw);
+        }
     }
 
     private void measure(String scene, Runnable perTick) {

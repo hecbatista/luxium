@@ -29,6 +29,7 @@ Common runs:
 | Vanilla for comparison | add `LUXIUM_TEST_NO_PACK=1` (never with rain: vanilla's zero-index snow draw aborts validation) |
 | Pack settings | add `LUXIUM_TEST_SETTINGS="NAME=value;NAME2=value"` |
 | Frame timing | add `LUXIUM_PERF=1` (best with validation off: run gradle directly) |
+| Promo shots for README/Modrinth | `mod/scripts/promo.sh <label>` (validation off, render distance 12; never for checking changes) |
 
 Tour stop names, in order (see `runTest` in PlaytestTour.java):
 survival walk, build zoo, zoo, effects, survival actions, menus, lightning and fireworks, night,

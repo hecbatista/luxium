@@ -67,6 +67,7 @@ metal-shaders/
 
 ## Running and testing
 - Always run the game with Metal's API and GPU validation on (`MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1`; `gametest.sh` sets both). Startup must print `Metal API Validation Enabled` and `Metal GPU Validation Enabled`. The 2026-11-20 baseline (plain Metallum) had zero validation messages, so any message is ours.
+- The one exception: `mod/scripts/promo.sh` takes the README/Modrinth promo shots with validation off (user request 2026-11-23). Never use it to check a change.
 - `mod/` builds against the local Metallum jar: run `cd references/metallum && ./gradlew build` once.
 - Is the game running? Use `pgrep -f 'java.*devlaunchinjector'`. A bare `devlaunchinjector` also matches scripts.
 - `eula = true` in `mod/build.gradle`: the user agreed to the Minecraft EULA for the tests on 2026-11-20.

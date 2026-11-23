@@ -10,6 +10,10 @@ Run Iris / OptiFine shader packs on Minecraft's Metal backend, on Apple Silicon 
 
 ![Minecraft 26.3](https://img.shields.io/badge/Minecraft-26.3-8a2a6e?style=flat-square) ![Fabric](https://img.shields.io/badge/loader-Fabric-3a1660?style=flat-square) ![Metal](https://img.shields.io/badge/backend-Metal-e0604a?style=flat-square&logo=apple&logoColor=white) ![Status: alpha](https://img.shields.io/badge/status-alpha-ffb35c?style=flat-square)
 
+<img src="docs/release/promo/beach-sunset.jpg" alt="Sunset over the sea, with the sun reflecting on the water, in Complementary Unbound under Luxium" width="100%">
+
+<sub>Complementary Unbound r5.10 under Luxium, on an M1 Max. HUD hidden; nothing edited.</sub>
+
 </div>
 
 ---
@@ -28,6 +32,16 @@ Shader packs are written for OpenGL. On a Mac, the [Metallum](https://github.com
 
 > [!NOTE]
 > Luxium is in **alpha** (0.1.0-alpha.1). It's tested on one Mac (M1 Max, macOS 27). Expect bugs, and back up your worlds.
+
+## 📸 Screenshots
+
+| | |
+|---|---|
+| <img src="docs/release/promo/jungle-shore.jpg" alt="A jungle shore at noon, with clear water"> | <img src="docs/release/promo/cherry-grove.jpg" alt="A cherry grove on a hillside in the late afternoon"> |
+| <img src="docs/release/promo/savanna-sunset.jpg" alt="Savanna grass with long shadows at sunset"> | <img src="docs/release/promo/forest-morning.jpg" alt="Morning sun over a forest canopy"> |
+| <img src="docs/release/promo/moonrise.jpg" alt="The moon and stars rising over the plains"> | |
+
+All taken with [Complementary Shaders](https://www.complementary.dev/) by EminGT at its default settings, 1920×1080, render distance 12, by the scripted `promo` stop of the test tour (`mod/scripts/promo.sh <label>`).
 
 ## 🎨 Shader pack compatibility
 
