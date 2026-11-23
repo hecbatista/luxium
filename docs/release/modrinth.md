@@ -41,7 +41,7 @@ Upload in this order. The first one marked *featured* is the card image in searc
 | 4 | `docs/release/promo/savanna-sunset.jpg` | Savanna sunset | Long shadows through the grass |
 | 5 | `docs/release/promo/forest-morning.jpg` | Forest morning | Morning sun over the canopy |
 | 6 | `docs/release/promo/moonrise.jpg` | Moonrise | Stars and the moon over the plains |
-| 7 | `docs/release/promo/vs-iris-beach-sunset.jpg` | Luxium (Metal) vs Iris (OpenGL) | Same world, seed, time and camera. Iris applies the pack's HIGH profile, Luxium its plain defaults. |
+| 7 | `docs/release/promo/vs-iris-beach-sunset.jpg` | Luxium (Metal) vs Iris (OpenGL) | Same world, seed, time, camera and pack settings (Luxium's defaults are the pack's HIGH profile, which Iris applies). Hold this one back until light shafts match: Iris shows them here and Luxium doesn't yet. |
 
 All shots: 1920×1080, render distance 12, HUD hidden, not edited. They come from the tour's `promo` stop (`PlaytestTour.promo`), taken with `mod/scripts/promo.sh <label>` (validation off), so they can be retaken after any change.
 
