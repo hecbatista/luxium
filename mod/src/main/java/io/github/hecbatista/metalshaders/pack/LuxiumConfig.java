@@ -14,8 +14,9 @@ import java.util.stream.Collectors;
 /**
  * {@code config/luxium.properties}: whether shaders are on and which pack is used. The key names
  * are Iris's ({@code config/iris.properties}: {@code enableShaders}, {@code shaderPack}), so they
- * look familiar. Read when Luxium looks for a pack; changes apply at the next start (the chunk
- * vertex format is chosen once per session; see MetalShadersClient.shadersEnabledAtStartup).
+ * look familiar. Read whenever Luxium (re)loads the pack: at startup, at world load, and when the
+ * Shader Packs screen applies a change ({@link #write}, then MetalShadersClient.requestReload).
+ * Edits made by hand while the game runs apply at the next reload or start.
  * <p>
  * As Iris: shaders are on unless {@code enableShaders=false}; a named pack that isn't in
  * shaderpacks/ means no pack (vanilla rendering), never another pack in its place. With no name,
@@ -87,8 +88,21 @@ public final class LuxiumConfig {
                 StandardCharsets.UTF_8);
     }
 
+    /**
+     * Writes the player's choice (from the Shader Packs screen). An empty {@code pack} means the
+     * first pack found, as for a missing key.
+     */
+    public static void write(Path shaderpacks, Path configFile, boolean enabled, String pack) throws IOException {
+        List<Path> packs = PackReader.findPacks(shaderpacks);
+        String found = packs.isEmpty() ? "(none)"
+                : packs.stream().map(p -> p.getFileName().toString()).collect(Collectors.joining(", "));
+        Files.createDirectories(configFile.getParent());
+        Files.writeString(configFile, render(enabled, pack.strip(), found), StandardCharsets.UTF_8);
+    }
+
     static String render(boolean enabled, String pack, String found) {
-        return "# Luxium settings. Restart the game after changing them.\n"
+        return "# Luxium settings. The Shader Packs screen (Video Settings, or the O key) changes them\n"
+                + "# while playing; edits made here by hand apply the next time the game starts.\n"
                 + "# Shaders on (true) or off (false). Off: the game renders as without Luxium.\n"
                 + ENABLE + "=" + enabled + "\n"
                 + "# The pack to use: a file or folder name in shaderpacks/, exactly as listed below.\n"

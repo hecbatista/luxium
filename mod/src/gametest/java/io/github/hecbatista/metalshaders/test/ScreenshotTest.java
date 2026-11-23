@@ -125,6 +125,10 @@ public class ScreenshotTest implements FabricClientGameTest {
                 context.takeScreenshot("luxium-walk-underwater");
                 return;
             }
+            if (System.getenv("LUXIUM_TEST_TOGGLE") != null) {
+                toggleTest(context, singleplayer, server);
+                return;
+            }
             server.runCommand("fill -12 99 -12 12 99 12 minecraft:stone");
             server.runCommand("fill -6 100 -6 6 106 6 minecraft:glass hollow");
             server.runCommand("fill -5 101 -5 5 105 5 minecraft:water");
@@ -379,6 +383,118 @@ public class ScreenshotTest implements FabricClientGameTest {
             context.waitTick();
             context.takeScreenshot(TestScreenshotOptions.of(String.format("%03d", i))
                     .disableCounterPrefix().withDestinationDir(dir));
+        }
+    }
+
+    /**
+     * LUXIUM_TEST_TOGGLE=1 (menus slice A): shaders off and on while playing, through the same
+     * calls the Shader Packs screen makes (LuxiumConfig.write, then MetalShadersClient.requestReload),
+     * and a pack setting changed live. A still scene with nothing moving (time frozen, no entities,
+     * no water, no sky in view), so a shot taken with shaders turned off live can be compared pixel
+     * for pixel with the same shot from a run started with enableShaders=false
+     * (scripts/ImageDiff.java). Shots: toggle-1-start, toggle-2-off, toggle-3-on, toggle-4-rapid,
+     * toggle-5-grey (T_SATURATION=0.00), toggle-6-defaults; clip frames-toggle-still after it all.
+     */
+    private static void toggleTest(ClientGameTestContext context, TestSingleplayerContext singleplayer, TestServerContext server) {
+        server.runCommand("gamerule advance_time false");
+        server.runCommand("fill -12 99 -12 12 99 12 minecraft:stone");
+        server.runCommand("fill -12 100 9 -8 102 12 minecraft:oak_log");
+        server.runCommand("fill 8 100 9 12 101 12 minecraft:gold_block");
+        server.runCommand("fill -3 100 4 3 102 6 minecraft:glass");
+        server.runCommand("fill 8 100 -6 11 101 -3 minecraft:oak_leaves[persistent=true]");
+        server.runCommand("setblock 0 100 0 minecraft:chest[facing=north]");
+        // LUXIUM_TEST_NO_OIT=1: start with the game's Improved Transparency off (a pack in use turns it off).
+        if (System.getenv("LUXIUM_TEST_NO_OIT") != null) {
+            context.runOnClient(mc -> {
+                mc.options.improvedTransparency().set(false);
+                mc.levelExtractor.allChanged();
+            });
+        }
+        // Looking down at the floor: no sky or clouds in the picture.
+        server.runCommand("tp @a 0 106 -10 0 40");
+        context.waitTicks(40);
+        singleplayer.getConnection().waitForChunksRender();
+        context.waitTicks(40);
+        context.takeScreenshot("toggle-1-start");
+
+        setShaders(context, singleplayer, false);
+        assertActive(context, false);
+        context.takeScreenshot("toggle-2-off");
+        context.waitTicks(200);
+        assertActive(context, false);
+        context.takeScreenshot("toggle-2b-off-later");
+
+        setShaders(context, singleplayer, true);
+        assertActive(context, true);
+        context.takeScreenshot("toggle-3-on");
+
+        // Off and on again on consecutive frames, ending on.
+        for (int i = 0; i < 3; i++) {
+            final boolean on = i % 2 == 1;
+            context.runOnClient(mc -> write(on));
+            context.waitTick();
+        }
+        setShaders(context, singleplayer, true);
+        assertActive(context, true);
+        context.takeScreenshot("toggle-4-rapid");
+
+        // A pack setting changed live: the picture turns grey, then back.
+        Path settings = context.computeOnClient(mc -> io.github.hecbatista.metalshaders.pack.PackOptions.settingsFile(firstPack()));
+        try {
+            Files.writeString(settings, "T_SATURATION=0.00\n");
+            setShaders(context, singleplayer, true);
+            context.takeScreenshot("toggle-5-grey");
+            Files.deleteIfExists(settings);
+            setShaders(context, singleplayer, true);
+            context.takeScreenshot("toggle-6-defaults");
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        context.waitTicks(20);
+        captureFrames(context, "toggle-still", 24);
+        setShaders(context, singleplayer, false);
+        assertActive(context, false);
+        context.takeScreenshot("toggle-7-off-again");
+    }
+
+    /** Writes the choice as the Shader Packs screen does, reloads, and waits for the chunks. */
+    private static void setShaders(ClientGameTestContext context, TestSingleplayerContext singleplayer, boolean on) {
+        context.runOnClient(mc -> write(on));
+        context.waitTicks(5);
+        singleplayer.getConnection().waitForChunksRender();
+        context.waitTicks(40);
+    }
+
+    private static void write(boolean on) {
+        FabricLoader loader = FabricLoader.getInstance();
+        try {
+            io.github.hecbatista.metalshaders.pack.LuxiumConfig.write(loader.getGameDir().resolve("shaderpacks"),
+                    loader.getConfigDir().resolve("luxium.properties"), on, "");
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        io.github.hecbatista.metalshaders.MetalShadersClient.requestReload();
+    }
+
+    private static Path firstPack() {
+        try {
+            return io.github.hecbatista.metalshaders.pack.PackReader.findPacks(
+                    FabricLoader.getInstance().getGameDir().resolve("shaderpacks")).getFirst();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private static void assertActive(ClientGameTestContext context, boolean on) {
+        String chunks = context.computeOnClient(mc -> {
+            var r = net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer.instanceNullable();
+            return r == null ? "no Sodium renderer" : r.getChunksDebugString() + " | " + String.join(" | ", r.getDebugStrings(false));
+        });
+        System.out.println("[Luxium toggle] shaders " + (on ? "on" : "off") + ": " + chunks);
+        boolean active = context.computeOnClient(mc -> io.github.hecbatista.metalshaders.MetalShadersClient.packActive());
+        boolean format = context.computeOnClient(mc -> io.github.hecbatista.metalshaders.MetalShadersClient.luxiumMeshFormat());
+        if (active != on || format != on) {
+            throw new AssertionError("Shaders should be " + (on ? "on" : "off") + ": pack active " + active + ", Luxium chunk format " + format);
         }
     }
 

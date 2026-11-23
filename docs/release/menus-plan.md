@@ -64,3 +64,19 @@ Research summary: an agent's report on Iris 26.3, `gui/` and `shaderpack/option/
 - **D. Tests and docs:**
   - game tests that open and screenshot each screen, apply a change, toggle off and on, and run with Mod Menu installed, all under validation;
   - a README section.
+
+## Results
+
+### Slice A: live reload and live on/off (2026-11-23, ✅)
+- **One resolver.** `MetalShadersClient.choosePack` reads `config/luxium.properties` at every pack load (startup, first world, each reload); the startup-only `shadersEnabledAtStartup` is gone. `LuxiumConfig.write(shaderpacks, config, enabled, pack)` is what the screens will call (off keeps the pack's name).
+- **Live reload.** `MetalShadersClient.requestReload()` (any thread) is acted on at the next frame's `onFrameExtracted`: `unloadPack` closes everything (`PackChain.unload`) and forgets the options, formulas, layout and folder; then the normal load path runs (`readMeshDirectives`, `loadPackValues`, `loadWorld`). `packActive()` and `activePackName()` are for the screens.
+- **Chunk format follows the pack.** Luxium's 36-byte vertex is used only while a pack is chosen; with none, Sodium keeps its own 20-byte format (so `LUXIUM_TEST_NO_PACK` runs are now Sodium's own format too). Chunks are rebuilt when the format, `separateAo`, block ids or settings change (`meshKey`), as before.
+- **Two traps found (Sodium 0.9.2, decompiled):**
+  - `LevelExtractor.allChanged` only marks the geometry stale. Sodium builds its new section manager on the *next* frame (`LevelExtractor.extract` → `LevelRenderer.invalidateCompiledGeometry`, which Sodium's `LevelRendererMixin` replaces with `SodiumWorldRenderer.reload` → `initRenderer`). So the format switch is applied in `SodiumWorldRendererMixin` (HEAD of `initRenderer`, `MetalShadersClient.applyMeshFormat`), not when asking for the rebuild.
+  - `ShaderChunkRenderer` keeps Sodium's terrain pipelines in two static maps (`programs`, `oitPrograms`), built once with the vertex format of whichever renderer asked first. After on → off, Sodium drew 20-byte meshes with a 36-byte pipeline: the terrain vanished (only block entities showed). `SodiumPrograms` keeps one set per format and swaps them with the format (`ShaderChunkRendererAccessor`); Iris instead always builds them with Sodium's format (`MixinShaderChunkRenderer`).
+- **Improved Transparency** stays off after shaders are turned off live, as in Iris (user's choice, 2026-11-23).
+- **Test:** `ScreenshotTest` `LUXIUM_TEST_TOGGLE=1`, a still scene (time frozen, no entities or water, no sky in view) turned off, on, off/on on consecutive frames, a setting changed live (`T_SATURATION=0.00` turns it grey, then the file is deleted), and off again. Pixels compared with `mod/scripts/ImageDiff.java`:
+  - live off (right after, 10 s later, and after the setting changes) vs a run started with `enableShaders=false` and Improved Transparency off (`LUXIUM_TEST_NO_OIT=1`): **0 of 409,920 pixels differ** in all three;
+  - shaders on after a reload vs at start: 38% of pixels differ, 4.4% by more than 8; two frames 12 ticks apart of the same still clip: 27% and 3.2%. Spread evenly, brightest on the waving leaves: Complementary's temporal noise, not the reload.
+  - 0 validation messages in every run; still clip after all the toggles 0.010% (limit 0.1%); regression scene unchanged (walk clip 0.16%, the known shimmer).
+- A reload takes about 2 s on a warm Metal cache (the frame stalls, as in Iris).

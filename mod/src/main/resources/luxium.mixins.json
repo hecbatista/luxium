@@ -40,7 +40,9 @@
     "sodium.RenderRegionManagerMixin",
     "sodium.RenderRegionMixin",
     "sodium.RenderSectionManagerAccessor",
-    "sodium.SodiumWorldRendererAccessor"
+    "sodium.ShaderChunkRendererAccessor",
+    "sodium.SodiumWorldRendererAccessor",
+    "sodium.SodiumWorldRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1
