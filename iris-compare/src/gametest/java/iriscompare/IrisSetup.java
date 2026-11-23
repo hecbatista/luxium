@@ -36,6 +36,11 @@ public class IrisSetup implements FabricClientGameTest {
             try {
                 Iris.getIrisConfig().setShaderPackName(pack);
                 Iris.getIrisConfig().setShadersEnabled(true);
+                // IRIS_DUMP=1: Iris's debug options, which make it write every patched program to
+                // <game dir>/patched_shaders/ (Iris ShaderPrinter), for tools/pipecheck comparisons.
+                if (System.getenv("IRIS_DUMP") != null) {
+                    Iris.getIrisConfig().setDebugEnabled(true);
+                }
                 Iris.getIrisConfig().save();
                 Iris.reload();
             } catch (IOException e) {

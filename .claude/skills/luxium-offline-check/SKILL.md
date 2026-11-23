@@ -84,6 +84,27 @@ mod/scripts/gametest.sh dump LUXIUM_DUMP_SHADERS=$PWD/mod/build/shader-dump
 - Diff a dumped `.metal` against the scoreboard's for the same program to see what a variant
   changes. Compile it alone with the `xcrun metal` line above.
 
+## Compare with Iris on the real Metal driver (pipecheck)
+`mod/scripts/pipecheck/` holds `pipecheck.m`, which builds a real MTLRenderPipelineState for each
+vertex+fragment MSL pair. It reports whether the pair links, its colour outputs, and the textures
+and buffers each stage actually uses (Metal's reflection data). `compare.py` runs it on both
+runtimes' versions of each program:
+```bash
+mod/scripts/gametest.sh dump LUXIUM_DUMP_SHADERS=$PWD/mod/build/shader-dump
+iris-compare/run.sh dump LUXIUM_TOUR_ONLY="survival walk" IRIS_DUMP=1        # Iris writes patched_shaders/
+python3 -I mod/scripts/pipecheck/compare.py mod/build/shader-dump/world0 \
+  iris-compare/build/run/clientGameTest/patched_shaders mod/build/pipecheck
+```
+- Iris's patched GLSL is OpenGL GLSL. `compare.py` takes it to MSL the way the game's Metal path
+  would: `glslangValidator -V -R --amb --aml` (relaxed Vulkan rules accept loose uniforms), then
+  spirv-cross with Metallum's options.
+- Read `mod/build/pipecheck/report.txt`: grep `DIFF`. Expected, not a bug: Luxium has one extra
+  colour output (the coverage mask), and the vertex inputs differ by design (Iris feeds its
+  extended formats, Luxium derives them from vanilla's).
+- The Iris→Luxium program mapping is `PAIRS` in `compare.py` (Iris ShaderKey ↔ Luxium pipeline,
+  same program and alpha test). Add pairs as Luxium takes over more programs.
+- Results and findings: `docs/history/step-7.md` (after 7g).
+
 ## Compile cost
 Every compile logs its halves. At world load:
 `World <id>: chain compiles, N pipelines: cross X ms (summed over 8 workers, of which Metal warm-up W ms), metal Y ms`.
