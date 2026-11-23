@@ -23,6 +23,7 @@ import io.github.hecbatista.metalshaders.glsl.Std140Layout;
 import io.github.hecbatista.metalshaders.uniform.UniformWriter;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MappableRingBuffer;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.Identifier;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
@@ -421,6 +422,61 @@ public final class EntityTakeover {
         return true;
     }
 
+    /**
+     * Step 7f: which game pipelines to compile while the world loads, per family, instead of the
+     * first time each is drawn (a first-use compile froze the game for 10-100 ms). Measured on
+     * Complementary: compiling everything a family could serve is 136 pipelines and 7-15 s per
+     * world, so only the ones every session meets in its first seconds are listed: the player's
+     * arm and held item, common mobs, chests, armour, dropped items, particles, rain. The rest
+     * still compile when first drawn. Iris compiles all of its programs when the pack loads;
+     * Vitrail's notes ask for precompiling (docs/internals/game-graphics-api.md).
+     */
+    private static final Map<Family, List<RenderPipeline>> PREWARM = new java.util.IdentityHashMap<>();
+
+    static {
+        // By constant, not by name: names aren't unique (26.3 has three "pipeline/item_cutout",
+        // and RenderPipelines.requiredPipelines keeps only the last of them).
+        List<RenderPipeline> solid = List.of(RenderPipelines.ENTITY_SOLID, RenderPipelines.ENTITY_CUTOUT,
+                RenderPipelines.ENTITY_CUTOUT_CULL, RenderPipelines.ARMOR_CUTOUT_NO_CULL, RenderPipelines.ITEM_CUTOUT);
+        PREWARM.put(SOLID, solid);
+        PREWARM.put(SHADOW_ENTITIES, solid);
+        PREWARM.put(BLOCK, List.of(RenderPipelines.ENTITY_CUTOUT_CULL, RenderPipelines.ENTITY_SOLID));
+        PREWARM.put(TRANSLUCENT, List.of(RenderPipelines.ENTITY_TRANSLUCENT, RenderPipelines.ITEM_TRANSLUCENT, RenderPipelines.ENTITY_SHADOW));
+        PREWARM.put(HAND, List.of(RenderPipelines.ITEM_CUTOUT, RenderPipelines.ENTITY_CUTOUT, RenderPipelines.ENTITY_SOLID));
+        PREWARM.put(HAND_TRANSLUCENT, List.of(RenderPipelines.ENTITY_TRANSLUCENT, RenderPipelines.ITEM_TRANSLUCENT));
+        PREWARM.put(PARTICLES, List.of(RenderPipelines.OPAQUE_PARTICLE));
+        PREWARM.put(PARTICLES_TRANSLUCENT, List.of(RenderPipelines.TRANSLUCENT_PARTICLE));
+        PREWARM.put(WEATHER, List.of(RenderPipelines.WEATHER));
+    }
+
+    /** Compiles the {@link #PREWARM} pipelines of every ready family; returns how many. */
+    public static int prewarm() {
+        int compiled = 0;
+        for (Map.Entry<Family, List<RenderPipeline>> e : PREWARM.entrySet()) {
+            Family f = e.getKey();
+            if (!active(f)) {
+                continue;
+            }
+            for (RenderPipeline p : e.getValue()) {
+                if (f.compiled.containsKey(p) || f.refused.contains(p)) {
+                    continue;
+                }
+                if (refusal(f, p) != null) {
+                    f.refused.add(p);
+                    continue;
+                }
+                try {
+                    f.compiled.put(p, compile(f, p));
+                    compiled++;
+                } catch (Exception ex) {
+                    f.refused.add(p);
+                    MetalShadersClient.LOGGER.warn("Entity takeover ({}): {} stays the game's: {}", f.program, p.getLocation(), ex.getMessage());
+                }
+            }
+        }
+        return compiled;
+    }
+
     /** Why a pipeline isn't served by this family, or null if it is. */
     private static String refusal(Family f, RenderPipeline pipeline) throws RuntimeException {
         List<ColorTargetState> targets = pipeline.getColorTargetStates();
@@ -458,6 +514,16 @@ public final class EntityTakeover {
 
     /** The pack's program with the vanilla pipeline's state (topology, cull, depth, polygon mode, blend). */
     private static CompiledRenderPipeline compile(Family f, RenderPipeline vanilla) throws Exception {
+        long t0 = PerfStats.start();
+        try {
+            return compileTimed(f, vanilla);
+        } finally {
+            PerfStats.end(PerfStats.Section.COMPILE, t0);
+        }
+    }
+
+    private static CompiledRenderPipeline compileTimed(Family f, RenderPipeline vanilla) throws Exception {
+        long started = System.nanoTime();
         float alpha = f.alphaFor(vanilla);
         Set<String> declared = new HashSet<>();
         BindGroupLayout.flattenUniforms(vanilla.getBindGroupLayouts()).forEach(u -> declared.add(u.name()));
@@ -507,8 +573,8 @@ public final class EntityTakeover {
         }
         programOf.put(c, p);
         compiledCount++;
-        MetalShadersClient.LOGGER.info("Entity takeover: {} -> {} ({}), {} pipelines so far", vanilla.getLocation(), f.program,
-                Float.isNaN(alpha) ? "no alpha test" : "alpha > " + alpha, compiledCount);
+        MetalShadersClient.LOGGER.info("Entity takeover: {} -> {} ({}), {} pipelines so far, compiled in {} ms", vanilla.getLocation(), f.program,
+                Float.isNaN(alpha) ? "no alpha test" : "alpha > " + alpha, compiledCount, (System.nanoTime() - started) / 1_000_000);
         return c;
     }
 

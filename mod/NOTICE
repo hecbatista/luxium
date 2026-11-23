@@ -281,6 +281,11 @@ Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3
 
+  src/main/java/io/github/hecbatista/metalshaders/render/EntityTakeover.java (prewarm) compiles
+  pipelines while the world loads, following Vitrail's docs/internals/game-graphics-api.md
+  ("precompile every pipeline with its real source before the first pass"); which pipelines
+  is our own measured choice.
+
   src/main/java/io/github/hecbatista/metalshaders/mixin/sodium/RenderRegionMixin.java keeps a
   batch map for the light because of Vitrail's finding (docs/sky-and-shadows.md, "Culling for
   the light"): a batch is kept until its region's list changes, so a shadow draw sharing the

@@ -179,6 +179,8 @@ public final class MetalShadersClient implements ClientModInitializer {
     public static void onFrameExtracted(DeltaTracker deltaTracker) {
         Minecraft mc = Minecraft.getInstance();
         long now = System.nanoTime();
+        io.github.hecbatista.metalshaders.render.PerfStats.frame();
+        long valuesStart = io.github.hecbatista.metalshaders.render.PerfStats.start();
         GAME_UNIFORMS.update(mc, deltaTracker.getGameTimeDeltaPartialTick(false), now);
         if (mc.level == null) {
             return;
@@ -206,6 +208,7 @@ public final class MetalShadersClient implements ClientModInitializer {
         if (customUniforms != null) {
             customUniforms.update(GAME_UNIFORMS::get, (Float) GAME_UNIFORMS.get("frameTime"));
         }
+        io.github.hecbatista.metalshaders.render.PerfStats.end(io.github.hecbatista.metalshaders.render.PerfStats.Section.VALUES, valuesStart);
         if (now - lastLogNanos > 5_000_000_000L) {
             lastLogNanos = now;
             LOGGER.info("Values: {}", describe());
@@ -302,8 +305,11 @@ public final class MetalShadersClient implements ClientModInitializer {
             List<Map.Entry<String, Float>> halfLives = PackDirectives.wetnessHalfLives(packPath, folder, defines, packOptions);
             GAME_UNIFORMS.setWetnessDirectives(halfLives);
             prepareChain(packPath, folder, defines, packProperties);
-            LOGGER.info("World {}: {}/ loaded in {} ms (wetness half-lives from pack: {})", worldId, folder,
-                    (System.nanoTime() - start) / 1_000_000, halfLives);
+            long prewarmStart = System.nanoTime();
+            int prewarmed = io.github.hecbatista.metalshaders.render.EntityTakeover.prewarm();
+            LOGGER.info("World {}: {}/ loaded in {} ms, of which {} ms compiling {} entity/particle pipelines ahead "
+                            + "(wetness half-lives from pack: {})", worldId, folder, (System.nanoTime() - start) / 1_000_000,
+                    (System.nanoTime() - prewarmStart) / 1_000_000, prewarmed, halfLives);
 
             var vsh = PackPreprocessor.preprocessProgram(packPath, path(folder, "gbuffers_terrain.vsh"), defines, packOptions);
             var fsh = PackPreprocessor.preprocessProgram(packPath, path(folder, "gbuffers_terrain.fsh"), defines, packOptions);

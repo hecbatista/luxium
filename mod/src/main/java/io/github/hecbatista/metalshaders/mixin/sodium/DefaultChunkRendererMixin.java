@@ -40,16 +40,16 @@ abstract class DefaultChunkRendererMixin {
     }
 
     /**
-     * While the pack draws a shadow map, Sodium's draw batches keep every face (Sodium 0.9.2's
-     * prepare culls faces that point away from the camera, and those faces still stand between the
-     * sun and the ground). Vitrail and Iris turn the same option off for their shadow passes. The
-     * camera's own pipelines cull back faces anyway, so the picture is unchanged.
+     * The light's draw batches keep every face (Sodium 0.9.2's prepare culls faces that point away
+     * from the camera, and those faces still stand between the sun and the ground). Vitrail and
+     * Iris turn the same option off for their shadow passes. Since step 7f only the light's batches
+     * (step 7c) do: the camera's go back to Sodium's setting, so it draws fewer faces.
      */
     @WrapOperation(method = "prepare", at = @At(value = "FIELD",
             target = "Lnet/caffeinemc/mods/sodium/client/gui/SodiumOptions$PerformanceSettings;useBlockFaceCulling:Z"))
     private boolean luxium$keepAllFacesForShadows(net.caffeinemc.mods.sodium.client.gui.SodiumOptions.PerformanceSettings settings,
                                                   Operation<Boolean> original) {
-        return original.call(settings) && !TerrainTakeover.shadowActive();
+        return original.call(settings) && !io.github.hecbatista.metalshaders.render.ShadowCulling.keepAllFaces();
     }
 
     @WrapOperation(method = "render", at = @At(value = "INVOKE",

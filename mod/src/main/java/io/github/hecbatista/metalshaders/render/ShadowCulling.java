@@ -42,6 +42,8 @@ import org.joml.Vector3d;
 public final class ShadowCulling {
     private static final boolean CAMERA_LIST = System.getenv("LUXIUM_SHADOW_CAMERA_LIST") != null;
     private static long lastLog;
+    /** True while the light's batches are being filled (DefaultChunkRendererMixin keeps every face then). */
+    private static boolean fillingLightBatches;
 
     private ShadowCulling() {
     }
@@ -73,7 +75,12 @@ public final class ShadowCulling {
             Matrix4f lightClip = new Matrix4f(projection).mul(modelView);
             Viewport viewport = new Viewport(new LightBox(lightClip), new Vector3d(camera.x, camera.y, camera.z));
             access.luxium$renderOutOfGraph(viewport, worldAccess.luxium$lastFogParameters());
-            world.prepareChunkRendering(null, camera.x, camera.y, camera.z);
+            fillingLightBatches = true;
+            try {
+                world.prepareChunkRendering(null, camera.x, camera.y, camera.z);
+            } finally {
+                fillingLightBatches = false;
+            }
             long now = System.nanoTime();
             if (now - lastLog > 5_000_000_000L) {
                 lastLog = now;
@@ -90,6 +97,15 @@ public final class ShadowCulling {
             }
             world.prepareChunkRendering(null, camera.x, camera.y, camera.z);
         }
+    }
+
+    /**
+     * Whether a batch being filled now must keep faces turned away from the camera: the light's
+     * batches always (those faces stand between the sun and the ground), and, when the shadow
+     * pass shares the camera's batches (LUXIUM_SHADOW_CAMERA_LIST), the camera's too.
+     */
+    public static boolean keepAllFaces() {
+        return fillingLightBatches || (CAMERA_LIST && TerrainTakeover.shadowActive());
     }
 
     private static int count(SortedRenderLists lists) {

@@ -42,6 +42,21 @@ import java.util.Map;
  * {@link CustomUniforms}.
  */
 public final class GameUniforms {
+    /**
+     * The game's fog colour this frame (FogRenderer.setupFog's FogData.color, captured by
+     * mixin.FogRendererMixin as Iris's MixinFogRenderer does): the {@code fogColor} uniform and
+     * colortex0's clear colour (Iris ClearPassCreator).
+     */
+    private static volatile float[] fogColor = {0, 0, 0};
+
+    public static void setFogColor(float r, float g, float b) {
+        fogColor = new float[]{r, g, b};
+    }
+
+    public static float[] fogColor() {
+        return fogColor;
+    }
+
     private final Map<String, Object> values = new HashMap<>();
     private final CameraTracker camera = new CameraTracker();
 
@@ -119,6 +134,7 @@ public final class GameUniforms {
         values.put("near", 0.05f);
         values.put("far", (float) (mc.options.getEffectiveRenderDistance() * 16));
         values.put("cameraPosition", toFloats(camera.current));
+        values.put("fogColor", fogColor);
         values.put("eyeAltitude", (float) camera.current[1]);
         values.put("previousCameraPosition", toFloats(camera.previous));
         values.put("cameraPositionInt", floorInts(camera.currentUnshifted));

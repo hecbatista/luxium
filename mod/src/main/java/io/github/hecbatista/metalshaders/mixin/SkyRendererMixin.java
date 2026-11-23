@@ -43,6 +43,23 @@ abstract class SkyRendererMixin {
         SkyTakeover.setSkybox(state.skybox);
     }
 
+    /**
+     * Step 7g: the pack's sunPathRotation tilts the sun, moon and stars as Iris does
+     * (MixinSkyRenderer.iris$renderSky$tiltSun: a Z rotation right after the first rotateDegrees
+     * in renderSunMoonAndStars). Without it the sun disc ran on vanilla's path while the pack's
+     * light and shadows came from the tilted one.
+     */
+    @Inject(method = "renderSunMoonAndStars", at = @At(value = "INVOKE",
+            target = "Lcom/mojang/blaze3d/vertex/PoseStack;rotateDegrees(Lcom/mojang/math/Axis;F)V", ordinal = 0, shift = At.Shift.AFTER))
+    private void luxium$tiltSun(final RenderPass renderPass, final com.mojang.blaze3d.vertex.PoseStack poseStack, final float sunAngle,
+                                final float moonAngle, final float starAngle, final net.minecraft.world.level.MoonPhase moonPhase,
+                                final float rainBrightness, final float starBrightness, final CallbackInfo ci) {
+        if (SkyTakeover.inPass()) {
+            poseStack.rotateDegrees(com.mojang.math.Axis.ZP,
+                    io.github.hecbatista.metalshaders.uniform.ShadowMatrices.directives().sunPathRotation());
+        }
+    }
+
     @Inject(method = "render", at = @At("RETURN"))
     private void luxium$skyEnd(final GpuBufferSlice skyFog, final SkyRenderState state, final CallbackInfo ci) {
         SkyTakeover.leavePass();
@@ -60,7 +77,9 @@ abstract class SkyRendererMixin {
             return original.call(encoder, label, color, clear, depth, clearDepth);
         }
         PackChain.skyDrawn(encoder);
-        return original.call(encoder, (Supplier<String>) () -> "Luxium sky (pack)", colortex0, Optional.<Vector4fc>empty(), depth, OptionalDouble.empty());
+        RenderPass pass = original.call(encoder, (Supplier<String>) () -> "Luxium sky (pack)", colortex0, Optional.<Vector4fc>empty(), depth, OptionalDouble.empty());
+        SkyTakeover.drawHorizon(pass, MetalShadersClient::value);
+        return pass;
     }
 
     @WrapOperation(method = "*", at = @At(value = "INVOKE",

@@ -29,7 +29,13 @@ public class ScreenshotTest implements FabricClientGameTest {
     public void runTest(ClientGameTestContext context) {
         copyShaderPacks();
 
-        try (TestSingleplayerContext singleplayer = context.worldBuilder().create()) {
+        boolean walkOnly = System.getenv("LUXIUM_TEST_WALK_ONLY") != null;
+        // The usual test world is flat (Fabric's consistent settings); the walk-only run uses a
+        // normally generated world with a fixed seed, like a player's.
+        var builder = walkOnly
+                ? context.worldBuilder().setUseConsistentSettings(false).adjustSettings(state -> state.setSeed("20261121"))
+                : context.worldBuilder();
+        try (TestSingleplayerContext singleplayer = builder.create()) {
             singleplayer.getConnection().waitForChunksRender();
             TestServerContext server = singleplayer.getServer();
             // Spectator: no falling between teleports, and no hand or hotbar in the shot.
@@ -38,12 +44,96 @@ public class ScreenshotTest implements FabricClientGameTest {
                 if (!mc.gui.hud.isHidden()) {
                     mc.gui.hud.toggle();   // like pressing F1 (Hud.java:213)
                 }
+                if (io.github.hecbatista.metalshaders.render.PerfStats.ON) {
+                    mc.options.framerateLimit().set(net.minecraft.client.Options.UNLIMITED_FRAMERATE_CUTOFF);
+                    mc.options.enableVsync().set(false);
+                    // Otherwise the game drops to 30 fps after a minute without input (AFK).
+                    mc.options.inactivityFpsLimit().set(net.minecraft.client.InactivityFpsLimit.MINIMIZED);
+                }
             });
             server.runCommand("time set noon");
             server.runCommand("weather clear");
+            // LUXIUM_TEST_WALK_ONLY=1: only the walking clip (for chasing flashes quickly).
+            if (walkOnly) {
+                // As a player plays: Creative, the HUD on, a sword in hand, over land near spawn.
+                server.runCommand("gamemode creative @a");
+                server.runCommand("item replace entity @a weapon.mainhand with minecraft:iron_sword");
+                context.runOnClient(mc -> {
+                    if (mc.gui.hud.isHidden()) {
+                        mc.gui.hud.toggle();
+                    }
+                    mc.player.getAbilities().flying = true;
+                });
+                look(context, singleplayer, server, "look-land", 240, 0, 0);
+                // A fast turn with the sun low (the user saw the sun "moving crazy" while turning).
+                if (System.getenv("LUXIUM_TEST_FREEZE_TIME") != null) {
+                    server.runCommand("gamerule advance_time false");   // the sun stays put: only the turn changes
+                }
+                server.runCommand("time set " + System.getenv().getOrDefault("LUXIUM_TEST_TURN_TIME", "1000"));
+                context.waitTicks(10);
+                final float turnPitch = Float.parseFloat(System.getenv().getOrDefault("LUXIUM_TEST_TURN_PITCH", "-5"));
+                Path turnDir = FabricLoader.getInstance().getGameDir().resolve("screenshots/frames-turn");
+                for (int i = 0; i < 60; i++) {
+                    final int step = i;
+                    context.runOnClient(mc -> {
+                        mc.player.setYRot(-90f + step * 12f);
+                        mc.player.setXRot(turnPitch);
+                    });
+                    context.waitTick();
+                    context.takeScreenshot(TestScreenshotOptions.of(String.format("%03d", i))
+                            .disableCounterPrefix().withDestinationDir(turnDir));
+                }
+                server.runCommand("time set 5500");
+                // Creep: the camera moves 0.02 blocks a tick, looking down at sunlit ground near
+                // trees. The picture hardly changes, so shadows that flicker because the camera
+                // moved show up in the pixel check (the user saw grey streaks flicker on sand).
+                server.runCommand("gamemode spectator @a");
+                context.runOnClient(mc -> {
+                    double x = 6.5;
+                    double z = 6.5;
+                    int ground = mc.level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING, 6, 6);
+                    mc.player.setPos(x, ground + 2.0, z);
+                    mc.player.setYRot(45f);
+                    mc.player.setXRot(35f);
+                });
+                context.waitTicks(40);
+                Path creepDir = FabricLoader.getInstance().getGameDir().resolve("screenshots/frames-creep");
+                for (int i = 0; i < 48; i++) {
+                    final int step = i;
+                    context.runOnClient(mc -> mc.player.setPos(6.5 + step * 0.02, mc.player.getY(), 6.5));
+                    context.waitTick();
+                    context.takeScreenshot(TestScreenshotOptions.of(String.format("%03d", i))
+                            .disableCounterPrefix().withDestinationDir(creepDir));
+                }
+                server.runCommand("gamemode creative @a");
+                server.runCommand("time set noon");
+                walk(context, singleplayer, server, "walk", 120);
+                // Then hold still 4 blocks under the ocean's surface (underwater is where the flash
+                // probe found flashes, 2026-11-21).
+                context.runOnClient(mc -> {
+                    double x = mc.player.getX();
+                    double z = mc.player.getZ();
+                    int surface = mc.level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING, (int) Math.floor(x), (int) Math.floor(z));
+                    mc.player.setPos(x, surface - 4.0, z);
+                    mc.player.setXRot(10f);
+                });
+                context.waitTicks(100);
+                context.takeScreenshot("luxium-walk-underwater");
+                return;
+            }
             server.runCommand("fill -12 99 -12 12 99 12 minecraft:stone");
             server.runCommand("fill -6 100 -6 6 106 6 minecraft:glass hollow");
             server.runCommand("fill -5 101 -5 5 105 5 minecraft:water");
+            // LUXIUM_TEST_BOX_ONLY=1: just 5 s inside the water-filled glass box, still (where the
+            // flash probe found flashes in the full run, 2026-11-21).
+            if (System.getenv("LUXIUM_TEST_BOX_ONLY") != null) {
+                server.runCommand("tp @a 0 102 0 0 0");
+                context.waitTicks(20);
+                singleplayer.getConnection().waitForChunksRender();
+                context.waitTicks(100);
+                context.takeScreenshot("luxium-box-underwater");
+                return;
+            }
             server.runCommand("fill -12 100 9 -8 102 12 minecraft:oak_log");
             server.runCommand("fill 8 100 9 12 101 12 minecraft:gold_block");
             // Cutout terrain (leaves are drawn in Sodium's cutout pass, not the solid one).
@@ -73,9 +163,11 @@ public class ScreenshotTest implements FabricClientGameTest {
             // (water, leaves, clouds) is left.
             context.waitTicks(60);
             captureFrames(context, "land", 24);
+            measure(context, "land");
             server.runCommand("tp @a 0 102 0 0 0");
             context.waitTicks(40);
             captureFrames(context, "underwater", 24);
+            measure(context, "underwater");
 
             // Shot 3: the pig just hurt (the red hit flash is entityColor in the pack).
             server.runCommand("tp @a -4 101.5 -10.5 0 30");
@@ -143,6 +235,7 @@ public class ScreenshotTest implements FabricClientGameTest {
             singleplayer.getConnection().waitForChunksRender();
             context.takeScreenshot("luxium-6-nether");
             captureFrames(context, "nether", 24);
+            measure(context, "nether");
 
             // Shot 7: the End, from beside the main island, looking back at it and the sky. Far
             // enough from the centre (more than 192 blocks: EndDragonFight's arena) that the
@@ -160,6 +253,7 @@ public class ScreenshotTest implements FabricClientGameTest {
             singleplayer.getConnection().waitForChunksRender();
             context.takeScreenshot("luxium-7-end");
             captureFrames(context, "end", 24);
+            measure(context, "end");
 
             // Shot 8: back in the Overworld, from shot 1's spot (world0 is loaded again).
             server.runCommand("execute in minecraft:overworld run tp @a 0 104 -14 0 25");
@@ -189,6 +283,11 @@ public class ScreenshotTest implements FabricClientGameTest {
             context.takeScreenshot("luxium-9-offscreen-caster");
             captureFrames(context, "offscreen", 24);
 
+            // A normal run: walking over generated terrain while looking around, one frame per
+            // tick (flashes there need FlickerCheck --tiles, since everything moves).
+            server.runCommand("time set noon");
+            walk(context, singleplayer, server, "walk", 120);
+
             // Shot 10 (step 7d): a player turns on Improved Transparency. With a pack in use it's
             // switched straight back off (as under Iris), and shot 1's view looks as before.
             server.runCommand("time set noon");
@@ -197,10 +296,85 @@ public class ScreenshotTest implements FabricClientGameTest {
             context.waitTicks(40);
             singleplayer.getConnection().waitForChunksRender();
             boolean stillOn = context.computeOnClient(mc -> mc.options.improvedTransparency().get());
-            if (stillOn) {
+            if (stillOn && System.getenv("LUXIUM_TEST_NO_PACK") == null) {
                 throw new AssertionError("Improved Transparency should be switched off while a pack is in use");
             }
             context.takeScreenshot("luxium-10-no-oit");
+        }
+    }
+
+    /**
+     * LUXIUM_PERF=1 (step 7f): 5 seconds holding still, then the frame-time summary in the log
+     * ("Perf [label]: ..."). Frame cap and vsync are off for these runs (see runTest).
+     */
+    private static void measure(ClientGameTestContext context, String label) {
+        if (!io.github.hecbatista.metalshaders.render.PerfStats.ON) {
+            return;
+        }
+        context.runOnClient(mc -> io.github.hecbatista.metalshaders.render.PerfStats.reset());
+        context.waitTicks(100);
+        context.runOnClient(mc -> io.github.hecbatista.metalshaders.render.PerfStats.report(label));
+    }
+
+    /**
+     * Walks over the world's own terrain at x/z 300 (a few blocks above the ground, so the camera
+     * never ends up inside it), turning slowly, and saves one frame per tick into
+     * screenshots/frames-<name>/. The position is set on the client each tick, so the game blends
+     * smoothly between ticks as it does for real movement.
+     */
+    private static void walk(ClientGameTestContext context, TestSingleplayerContext singleplayer, TestServerContext server,
+                             String name, int ticks) {
+        walk(context, singleplayer, server, name, ticks, 300, 300);
+    }
+
+    private static void walk(ClientGameTestContext context, TestSingleplayerContext singleplayer, TestServerContext server,
+                             String name, int ticks, int startX, int startZ) {
+        server.runCommand("tp @a " + startX + " 140 " + startZ + " 0 20");
+        context.waitTicks(20);
+        singleplayer.getConnection().waitForChunksRender();
+        Path dir = FabricLoader.getInstance().getGameDir().resolve("screenshots/frames-" + name);
+        for (int i = 0; i < ticks; i++) {
+            final int step = i;
+            double x = startX + step * 0.35;
+            double z = startZ + step * 0.15;
+            // The ground under the camera, from the client's copy of the world; then a server-side
+            // teleport, so the server and the client agree on where the player is (moving the
+            // player on the client alone gets it pulled back by the server: false flashes).
+            int ground = context.computeOnClient(mc -> mc.level.getHeight(
+                    net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING, (int) Math.floor(x), (int) Math.floor(z)));
+            float yaw = -60f + step * 1.2f;
+            float pitch = 15f + 10f * (float) Math.sin(step * 0.08);
+            server.runCommand(String.format(java.util.Locale.ROOT, "tp @a %.3f %.3f %.3f %.2f %.2f", x, ground + 3.0, z, yaw, pitch));
+            context.waitTick();
+            context.takeScreenshot(TestScreenshotOptions.of(String.format("%03d", i))
+                    .disableCounterPrefix().withDestinationDir(dir));
+        }
+    }
+
+    /**
+     * Stands still on the ground near (x, z) and only turns the head (rotation is the client's
+     * own, so the server never pulls the camera back), one frame per tick.
+     */
+    private static void look(ClientGameTestContext context, TestSingleplayerContext singleplayer, TestServerContext server,
+                             String name, int ticks, int x, int z) {
+        server.runCommand("tp @a " + x + " 140 " + z + " 0 20");
+        context.waitTicks(20);
+        singleplayer.getConnection().waitForChunksRender();
+        int ground = context.computeOnClient(mc -> mc.level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING, x, z));
+        server.runCommand("tp @a " + x + ".5 " + (ground + 1) + " " + z + ".5 0 10");
+        context.runOnClient(mc -> mc.player.getAbilities().flying = false);
+        context.waitTicks(40);
+        singleplayer.getConnection().waitForChunksRender();
+        Path dir = FabricLoader.getInstance().getGameDir().resolve("screenshots/frames-" + name);
+        for (int i = 0; i < ticks; i++) {
+            final int step = i;
+            context.runOnClient(mc -> {
+                mc.player.setYRot(step * 1.5f);
+                mc.player.setXRot(10f + 8f * (float) Math.sin(step * 0.05));
+            });
+            context.waitTick();
+            context.takeScreenshot(TestScreenshotOptions.of(String.format("%03d", i))
+                    .disableCounterPrefix().withDestinationDir(dir));
         }
     }
 
@@ -222,7 +396,8 @@ public class ScreenshotTest implements FabricClientGameTest {
         Path gameDir = FabricLoader.getInstance().getGameDir();
         Path source = gameDir.resolve("../../../run/shaderpacks").normalize();
         Path target = gameDir.resolve("shaderpacks");
-        if (!Files.isDirectory(source)) {
+        // LUXIUM_TEST_NO_PACK=1: no pack, for a baseline of the game on Metallum alone.
+        if (!Files.isDirectory(source) || System.getenv("LUXIUM_TEST_NO_PACK") != null) {
             return;
         }
         try (Stream<Path> packs = Files.list(source)) {

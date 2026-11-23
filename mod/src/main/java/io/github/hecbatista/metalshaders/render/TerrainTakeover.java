@@ -167,11 +167,20 @@ public final class TerrainTakeover {
     }
 
     /**
-     * The shadow map, drawn just before the opaque terrain from Sodium's sections for this frame
-     * (the camera's visible ones: v1 has no culling walk of its own for the light). Cleared every
-     * frame: depth to 1, colours to white (Iris's shadowcolor defaults).
+     * The shadow map, drawn just before the opaque terrain from the light's own Sodium render list
+     * (ShadowCulling, step 7c). Cleared every frame: depth to 1, colours to white (Iris's
+     * shadowcolor defaults).
      */
     public static void drawShadow(GpuSampler sampler, GpuTextureView atlas, boolean wireframe) {
+        long luxium$t0 = PerfStats.start();
+        try {
+            drawShadowTimed(sampler, atlas, wireframe);
+        } finally {
+            PerfStats.end(PerfStats.Section.SHADOW, luxium$t0);
+        }
+    }
+
+    private static void drawShadowTimed(GpuSampler sampler, GpuTextureView atlas, boolean wireframe) {
         Program p = shadowPrograms.get(DefaultTerrainRenderPasses.SOLID);
         if (!shadowActive() || p == null || !(sections instanceof SodiumChunkSection) || wireframe) {
             return;
@@ -408,6 +417,15 @@ public final class TerrainTakeover {
      * cutout) into a pass on the pack's targets plus the coverage mask, sharing the game's depth.
      */
     public static void drawOpaque(GpuTextureView depth, GpuSampler sampler, GpuTextureView atlas, boolean wireframe) {
+        long luxium$t0 = PerfStats.start();
+        try {
+            drawOpaqueTimed(depth, sampler, atlas, wireframe);
+        } finally {
+            PerfStats.end(PerfStats.Section.TERRAIN, luxium$t0);
+        }
+    }
+
+    private static void drawOpaqueTimed(GpuTextureView depth, GpuSampler sampler, GpuTextureView atlas, boolean wireframe) {
         drawShadow(sampler, atlas, wireframe);
         drewOpaque = drawGroup(ChunkSectionLayerGroup.OPAQUE, DefaultTerrainRenderPasses.SOLID, depth, sampler, atlas, wireframe);
     }
@@ -417,6 +435,15 @@ public final class TerrainTakeover {
      * terrain with the pack's water program onto the halves the deferred passes wrote.
      */
     public static void drawTranslucent(GpuTextureView depth, GpuSampler sampler, GpuTextureView atlas, boolean wireframe) {
+        long luxium$t0 = PerfStats.start();
+        try {
+            drawTranslucentTimed(depth, sampler, atlas, wireframe);
+        } finally {
+            PerfStats.end(PerfStats.Section.TRANSLUCENT, luxium$t0);
+        }
+    }
+
+    private static void drawTranslucentTimed(GpuTextureView depth, GpuSampler sampler, GpuTextureView atlas, boolean wireframe) {
         drewTranslucent = drawGroup(ChunkSectionLayerGroup.TRANSLUCENT, DefaultTerrainRenderPasses.TRANSLUCENT, depth, sampler, atlas, wireframe);
     }
 

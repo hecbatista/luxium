@@ -375,6 +375,15 @@ public final class PackChain {
      * passes, so the pack's water is drawn onto the halves they wrote.
      */
     public static void drawDeferred(RenderTarget target, Function<String, Object> values) {
+        long luxium$t0 = PerfStats.start();
+        try {
+            drawDeferredTimed(target, values);
+        } finally {
+            PerfStats.end(PerfStats.Section.DEFERRED, luxium$t0);
+        }
+    }
+
+    private static void drawDeferredTimed(RenderTarget target, Function<String, Object> values) {
         if (!ready() || deferredRan) {
             return;
         }
@@ -402,6 +411,15 @@ public final class PackChain {
      * composites wait for {@link #afterHand}, so the pack's hand is in the picture they read.
      */
     public static void afterLevel(RenderTarget target, Function<String, Object> values) {
+        long luxium$t0 = PerfStats.start();
+        try {
+            afterLevelTimed(target, values);
+        } finally {
+            PerfStats.end(PerfStats.Section.COMPOSITES, luxium$t0);
+        }
+    }
+
+    private static void afterLevelTimed(RenderTarget target, Function<String, Object> values) {
         if (!ready()) {
             return;
         }
@@ -429,6 +447,15 @@ public final class PackChain {
      * the composite passes and final run. Screen effects and the crosshair are drawn after this.
      */
     public static void afterHand(RenderTarget target, GpuTexture handDepth, Function<String, Object> values) {
+        long luxium$t0 = PerfStats.start();
+        try {
+            afterHandTimed(target, handDepth, values);
+        } finally {
+            PerfStats.end(PerfStats.Section.COMPOSITES, luxium$t0);
+        }
+    }
+
+    private static void afterHandTimed(RenderTarget target, GpuTexture handDepth, Function<String, Object> values) {
         if (!ready() || !compositesPending) {
             return;
         }
@@ -442,6 +469,7 @@ public final class PackChain {
                 mergeHand(device, encoder, depthPre, depthPreView);
             }
             runPasses(device, encoder, target, values, false);
+            FlashProbe.capture(device, encoder, target.getColorTexture());
         } catch (RuntimeException e) {
             fail("drawing the composites threw", e);
         }
@@ -935,6 +963,12 @@ public final class PackChain {
         }
         float alpha = t.promoted() ? 1f : 0f;
         return switch (t.index()) {
+            // Iris ClearPassCreator: colortex0 is cleared to the fog colour with alpha 1, so where
+            // nothing is drawn (below the horizon, past the world's edge) the pack sees the fog.
+            case 0 -> {
+                float[] fog = io.github.hecbatista.metalshaders.uniform.GameUniforms.fogColor();
+                yield new Vector4f(fog[0], fog[1], fog[2], 1f);
+            }
             case 1 -> new Vector4f(1, 1, 1, 1);
             default -> new Vector4f(0, 0, 0, alpha);
         };

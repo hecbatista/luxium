@@ -242,6 +242,57 @@ public final class SkyTakeover {
         usedRings.add(ring);
     }
 
+    // ---- The horizon (Iris HorizonRenderer) -----------------------------------------------
+
+    /** Iris HorizonRenderer: the cone lies between the sky box's bottom and top planes. */
+    private static final float HORIZON_TOP = 16.0f;
+    private static final float HORIZON_BOTTOM = -16.0f;
+    private static GpuBuffer horizon;
+    private static int horizonRadius = -1;
+    /** A triangle fan of the centre and nine rim points (the ninth closes the ring). */
+    private static final int HORIZON_VERTICES = 10;
+
+    /**
+     * Step 7g: the horizon, drawn first in the pack's sky pass. Vanilla only draws a plane above
+     * the player and leaves the rest to the clear colour; Iris draws an inverted octagonal cone
+     * around the player with the sky pipeline (so the pack's gbuffers_skybasic, stage SKY), the
+     * camera's rotation and the fog colour, so the pack shades the sky below the horizon too
+     * (IrisRenderingPipeline.onBeginClear; see NOTICE). Without it that area stayed black and
+     * showed as a dark band where the world meets the sky.
+     */
+    public static void drawHorizon(RenderPass pass, Function<String, Object> values) {
+        Piece p = pieces.get(RenderPipelines.SKY);
+        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+        if (!inSkyPass || p == null || mc.level == null
+                || !(skybox == DimensionType.Skybox.OVERWORLD || mc.level.dimensionType().hasSkyLight())
+                || !(values.apply("gbufferModelView") instanceof Matrix4fc modelView)) {
+            return;
+        }
+        int radius = Math.min(mc.options.getEffectiveRenderDistance() * 16, 256);
+        if (horizon == null || radius != horizonRadius) {
+            if (horizon != null) {
+                horizon.close();
+            }
+            java.nio.ByteBuffer data = java.nio.ByteBuffer.allocateDirect(HORIZON_VERTICES * 12).order(java.nio.ByteOrder.nativeOrder());
+            data.putFloat(0f).putFloat(HORIZON_BOTTOM).putFloat(0f);
+            for (int i = 0; i <= 8; i++) {
+                double angle = -i * Math.PI / 4.0;
+                data.putFloat((float) (radius * Math.cos(angle))).putFloat(HORIZON_TOP).putFloat((float) (radius * Math.sin(angle)));
+            }
+            data.flip();
+            horizon = RenderSystem.getDevice().createBuffer(() -> "Luxium horizon", GpuBuffer.USAGE_VERTEX | GpuBuffer.USAGE_COPY_DST, data);
+            horizonRadius = radius;
+        }
+        float[] fog = io.github.hecbatista.metalshaders.uniform.GameUniforms.fogColor();
+        noteLabel("Sky disc");   // stage SKY, as Iris sets for the horizon
+        noteTransform(modelView, new Vector4f(fog[0], fog[1], fog[2], 1f));
+        pass.setPipeline(p.compiled());
+        bindFor(pass, p.compiled(), values);
+        // A triangle fan drawn without indices, as vanilla draws its own sky disc (SkyRenderer.renderSkyDisc).
+        pass.setVertexBuffer(0, horizon.slice());
+        pass.draw(HORIZON_VERTICES, 1, 0, 0);
+    }
+
     /** Vanilla binds the sun/moon texture as Sampler0; the pack reads it under its own name. */
     public static void bindAlbedo(RenderPass pass, String name, GpuTextureView view, GpuSampler sampler) {
         if (!inSkyPass || !name.equals("Sampler0")) {

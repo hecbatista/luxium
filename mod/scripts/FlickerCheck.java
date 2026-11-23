@@ -17,6 +17,11 @@ import java.util.Locale;
  * and writes the sequence as a looping GIF so a person can watch it.
  * <p>
  * Run without building anything: {@code java scripts/FlickerCheck.java <frames dir> [more dirs]}.
+ * For a moving camera, where every pixel changes, add {@code --tiles} before the dirs: the frame is
+ * cut into 16x16-pixel patches, and a patch flashes when its average brightness jumps by more than
+ * {@link #TILE_JUMP} for one frame, the same way up or down against both neighbours, while the
+ * neighbours agree within {@link #TILE_BACK}. Steady motion changes patches gradually and doesn't
+ * do that. Exit code 1 if any frame has more than {@link #TILE_LIMIT} of its patches flashing.
  * <p>
  * Flicker here is a pixel that jumps for one frame and comes back: frame i differs from both
  * neighbours by more than {@link #JUMP}, while the neighbours agree with each other within
@@ -31,11 +36,20 @@ public final class FlickerCheck {
     static final int JUMP = 40;      // of 255, largest channel difference
     static final int BACK = 12;
     static final double LIMIT = 0.001; // 0.1% of the pixels in one frame
+    static final int TILE = 16;
+    static final double TILE_JUMP = 20;   // average brightness, of 255
+    static final double TILE_BACK = 8;
+    static final double TILE_LIMIT = 0.005; // 0.5% of the patches in one frame
 
     public static void main(String[] args) throws Exception {
         boolean bad = false;
+        boolean tiles = false;
         for (String arg : args) {
-            bad |= check(new File(arg));
+            if (arg.equals("--tiles")) {
+                tiles = true;
+                continue;
+            }
+            bad |= tiles ? checkTiles(new File(arg)) : check(new File(arg));
         }
         System.exit(bad ? 1 : 0);
     }
@@ -105,6 +119,87 @@ public final class FlickerCheck {
         boolean bad = worst > LIMIT;
         System.out.printf(Locale.ROOT, "%s: %d frames %dx%d, steady motion %.2f/255 per frame, flicker pixels per frame:%s; worst %.4f%% (frame %d) -> %s%n",
                 dir.getName(), px.length, w, h, motion, perFrame, worst * 100, worstFrame, bad ? "FLICKER" : "ok");
+        return bad;
+    }
+
+    /** The moving-camera check: patches whose average brightness flashes for one frame. */
+    static boolean checkTiles(File dir) throws Exception {
+        File[] files = dir.listFiles((d, n) -> n.endsWith(".png"));
+        if (files == null || files.length < 3) {
+            System.out.println(dir + ": fewer than 3 frames, skipped");
+            return false;
+        }
+        Arrays.sort(files);
+        List<BufferedImage> frames = new ArrayList<>();
+        for (File f : files) {
+            frames.add(ImageIO.read(f));
+        }
+        int w = frames.get(0).getWidth();
+        int h = frames.get(0).getHeight();
+        int tw = w / TILE;
+        int th = h / TILE;
+        double[][] mean = new double[frames.size()][tw * th];
+        double[] frameMean = new double[frames.size()];
+        for (int i = 0; i < frames.size(); i++) {
+            int[] px = frames.get(i).getRGB(0, 0, w, h, null, 0, w);
+            double total = 0;
+            for (int ty = 0; ty < th; ty++) {
+                for (int tx = 0; tx < tw; tx++) {
+                    double sum = 0;
+                    for (int y = ty * TILE; y < (ty + 1) * TILE; y++) {
+                        for (int x = tx * TILE; x < (tx + 1) * TILE; x++) {
+                            int c = px[y * w + x];
+                            sum += (0.2126 * ((c >> 16) & 255) + 0.7152 * ((c >> 8) & 255) + 0.0722 * (c & 255));
+                        }
+                    }
+                    mean[i][ty * tw + tx] = sum / (TILE * TILE);
+                    total += mean[i][ty * tw + tx];
+                }
+            }
+            frameMean[i] = total / (tw * th);
+        }
+        int[] heat = new int[tw * th];
+        double worst = 0;
+        int worstFrame = -1;
+        StringBuilder perFrame = new StringBuilder();
+        for (int i = 1; i + 1 < frames.size(); i++) {
+            int count = 0;
+            for (int t = 0; t < tw * th; t++) {
+                double a = mean[i - 1][t], b = mean[i][t], c = mean[i + 1][t];
+                boolean up = b - a > TILE_JUMP && b - c > TILE_JUMP;
+                boolean down = a - b > TILE_JUMP && c - b > TILE_JUMP;
+                if ((up || down) && Math.abs(a - c) <= TILE_BACK) {
+                    count++;
+                    heat[t]++;
+                }
+            }
+            double fraction = (double) count / (tw * th);
+            if (count > 0) {
+                perFrame.append(' ').append(i).append(':').append(count);
+            }
+            if (fraction > worst) {
+                worst = fraction;
+                worstFrame = i;
+            }
+        }
+        // The worst frame, side by side with its neighbours, to look at.
+        File parent = dir.getAbsoluteFile().getParentFile();
+        if (worstFrame > 0) {
+            BufferedImage strip = new BufferedImage(w * 3, h, BufferedImage.TYPE_INT_RGB);
+            for (int k = 0; k < 3; k++) {
+                strip.getGraphics().drawImage(frames.get(worstFrame - 1 + k), k * w, 0, null);
+            }
+            ImageIO.write(strip, "png", new File(parent, dir.getName() + "-worst.png"));
+        }
+        writeGif(frames, new File(parent, dir.getName() + ".gif"));
+        StringBuilder trace = new StringBuilder();
+        for (double m : frameMean) {
+            trace.append(String.format(Locale.ROOT, " %.0f", m));
+        }
+        boolean bad = worst > TILE_LIMIT;
+        System.out.printf(Locale.ROOT, "%s (patches): %d frames, %dx%d patches; flashing patches (frame:count):%s; worst %.2f%% (frame %d) -> %s%n  brightness per frame:%s%n",
+                dir.getName(), frames.size(), tw, th, perFrame.length() == 0 ? " none" : perFrame, worst * 100, worstFrame,
+                bad ? "FLASH" : "ok", trace);
         return bad;
     }
 
