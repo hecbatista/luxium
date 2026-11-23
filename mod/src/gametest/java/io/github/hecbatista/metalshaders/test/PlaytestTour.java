@@ -807,6 +807,19 @@ public class PlaytestTour implements FabricClientGameTest {
         System.out.println("[Luxium tour] " + message);
     }
 
+    private static void copyTree(Path from, Path to) throws IOException {
+        try (Stream<Path> all = Files.walk(from)) {
+            for (Path p : all.toList()) {
+                Path dest = to.resolve(from.relativize(p).toString());
+                if (Files.isDirectory(p)) {
+                    Files.createDirectories(dest);
+                } else {
+                    Files.copy(p, dest, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+        }
+    }
+
     /**
      * The test run's game folder (build/run/clientGameTest) is cleared before each run, so copy
      * the developer's packs from mod/run/shaderpacks/ into it. Shared by ScreenshotTest (mod/)
@@ -820,6 +833,11 @@ public class PlaytestTour implements FabricClientGameTest {
         if (!Files.isDirectory(source)) {
             source = gameDir.resolve("../../../../mod/run/shaderpacks").normalize();
         }
+        // LUXIUM_TEST_PACKS=<dir>: test with the packs in that folder instead (fail-safe tests:
+        // broken zips, untested packs), never touching the developer's own shaderpacks/.
+        if (System.getenv("LUXIUM_TEST_PACKS") != null) {
+            source = Path.of(System.getenv("LUXIUM_TEST_PACKS"));
+        }
         Path target = gameDir.resolve("shaderpacks");
         // LUXIUM_TEST_NO_PACK=1: no pack, for a baseline of the game on Metallum alone.
         if (!Files.isDirectory(source) || System.getenv("LUXIUM_TEST_NO_PACK") != null) {
@@ -827,7 +845,11 @@ public class PlaytestTour implements FabricClientGameTest {
         }
         try (Stream<Path> packs = Files.list(source)) {
             Files.createDirectories(target);
-            for (Path pack : packs.filter(Files::isRegularFile).toList()) {
+            for (Path pack : packs.toList()) {
+                if (Files.isDirectory(pack)) {
+                    copyTree(pack, target.resolve(pack.getFileName().toString()));
+                    continue;
+                }
                 Files.copy(pack, target.resolve(pack.getFileName()), StandardCopyOption.REPLACE_EXISTING);
                 // LUXIUM_TEST_SETTINGS="NAME=value;NAME2=value2" writes the pack's settings file
                 // (shaderpacks/<pack>.txt, as Iris names it), to check that changed settings apply.

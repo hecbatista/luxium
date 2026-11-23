@@ -1118,5 +1118,6 @@ public final class PackChain {
         } else {
             MetalShadersClient.LOGGER.error("Pack chain disabled: {}", why, e);
         }
+        MetalShadersClient.packUnusable("its program " + why);
     }
 }

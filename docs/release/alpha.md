@@ -30,7 +30,22 @@ Facts as of 2026-11-23:
     - `LuxiumConfigTest` (5 tests);
     - game tests with `LUXIUM_TEST_CONFIG` on the zoo and beach stops: off and missing-pack shots match a no-pack run (mean |Δ| 0.0–1.0, the sky identical), the named pack is used, 0 validation messages.
     - Vanilla's own rain/snow draw still aborts validation without a pack (known, 6d-4), so the regression scene isn't used for these.
-- [ ] **Fails safe.** No pack, a broken pack, or an untested pack must give vanilla rendering and a clear log line, never a crash. Check with no pack, a zip with garbage, and two or three popular packs (the `multi-pack-testing` worktree has a start on this).
+- [x] **Fails safe** (2026-11-23). Seven packs on the zoo and beach tour stops (`LUXIUM_TEST_PACKS=<dir>` points the test at a pack folder of its own), all with 0 validation messages and no crash:
+
+  | Pack | Result |
+  |---|---|
+  | `Broken.zip` (random bytes) | vanilla; one error line and a notice |
+  | `NotAPack.zip` (no `shaders/`) | vanilla; one error line and a notice |
+  | `BadProgram` (folder pack, programs don't compile) | vanilla; one error line and a notice |
+  | `Minimal` (folder pack, only a grayscale `final`) | **works**: vanilla gbuffers, the pack's final pass |
+  | Complementary Reimagined r5.9.3 | **works** fully, no errors |
+  | Bliss v2.1.2 (Chocapic13 edit) | vanilla: `deferred1` doesn't compile (`MC_HAND_DEPTH` undefined, `texelFetch2D` unknown) |
+  | Solas v3.9 | vanilla: `final` doesn't compile (`MC_RENDER_QUALITY` undefined; `customTexture.milkyWayTex` unsupported) |
+
+  - A pack that can't be used now gives one plain error line: "Shader pack X can't be used: <why>. The game renders without shaders. If this pack should work, please report it with logs/latest.log (issues link)."
+  - It also shows an on-screen notice, "Luxium: shaders off — X couldn't be loaded" (`MetalShadersClient.packUnusable`, once per pack; called from pack reading, mesh directives and `PackChain.fail`).
+  - A working pack never triggers it: regression run, 0 lines.
+  - Bliss and Solas need only missing Iris macros and an OptiFine function alias: a cheap compatibility follow-up.
 - [x] **Version and metadata**: `0.1.0-alpha.1`; mod id renamed `metalshaders` → `luxium` before any release (user's decision; the Java package stays `io.github.hecbatista.metalshaders`). The log tag is now `(luxium)`, and `fabric.mod.json` has license and issues links.
 - [ ] **README for players:**
   - requirements: Apple Silicon, macOS version, Minecraft 26.3, Fabric Loader ≥ 0.19.5, Sodium 0.9.2, Metallum;
@@ -52,7 +67,7 @@ What we can say honestly, measured the same way each time:
 - Results go in `docs/history/step-7.md` (or a `docs/release/benchmarks.md`) and a short table in the README.
 
 ## Known issues to list in the README
-- Only Complementary Unbound r5.10 is tested. Other packs may fall back or look wrong.
+- Tested: Complementary Unbound r5.10 (fully compared with Iris) and Complementary Reimagined r5.9.3 (loads and renders; not compared). Bliss and Solas currently fall back to vanilla with a notice. Other packs may fall back or look wrong.
 - Pack settings are read only at load: no in-game settings screen or profiles. Edit `shaderpacks/<pack>.txt` and restart.
 - Not supported yet:
   - chunk fade-in (`IRIS_FEATURE_FADE_VARIABLE`);

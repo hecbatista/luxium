@@ -87,6 +87,37 @@ public final class MetalShadersClient implements ClientModInitializer {
     public static volatile boolean shadersEnabledAtStartup = true;
 
     private static String lastChoice;
+    /** The pack choosePack picked last, for messages. */
+    private static String chosenName;
+    private static String reportedFailure;
+    private static final net.minecraft.client.gui.components.toasts.SystemToast.SystemToastId PACK_TOAST =
+            new net.minecraft.client.gui.components.toasts.SystemToast.SystemToastId(10000L);
+
+    /**
+     * The chosen pack can't be used: one plain log line saying what that means for the player, and
+     * a notice on screen (Iris also tells the player when a pack fails). The game goes on without
+     * shaders: every takeover checks that the chain is ready. Once per pack.
+     */
+    public static void packUnusable(String why) {
+        String pack = chosenName != null ? chosenName : "The shader pack";
+        String key = pack;   // once per pack: a broken file fails in several places
+        if (key.equals(reportedFailure)) {
+            return;
+        }
+        reportedFailure = key;
+        LOGGER.error("Shader pack {} can't be used: {}. The game renders without shaders. If this pack should work, "
+                + "please report it with logs/latest.log (https://github.com/hecbatista/luxium/issues).", pack, why);
+        Minecraft mc = Minecraft.getInstance();
+        if (mc != null) {
+            mc.execute(() -> {
+                if (mc.gui != null) {
+                    net.minecraft.client.gui.components.toasts.SystemToast.addOrUpdate(mc.gui.toastManager(), PACK_TOAST,
+                            net.minecraft.network.chat.Component.literal("Luxium: shaders off"),
+                            net.minecraft.network.chat.Component.literal(pack + " couldn't be loaded. See logs/latest.log"));
+                }
+            });
+        }
+    }
 
     /** The pack to use now, or null (shaders off, none in shaderpacks/, or the named one missing). */
     private static Path choosePack(Path shaderpacks) {
@@ -96,6 +127,9 @@ public final class MetalShadersClient implements ClientModInitializer {
         try {
             var choice = io.github.hecbatista.metalshaders.pack.LuxiumConfig.choose(shaderpacks, configFile);
             Path pack = shadersEnabledAtStartup ? choice.pack() : null;
+            if (pack != null) {
+                chosenName = pack.getFileName().toString();
+            }
             String reason = shadersEnabledAtStartup || !choice.enabled() ? choice.reason()
                     : "shaders were off at startup: restart to turn them on";
             if (!reason.equals(lastChoice)) {
@@ -186,6 +220,7 @@ public final class MetalShadersClient implements ClientModInitializer {
             return changed;
         } catch (Exception e) {
             LOGGER.error("Couldn't read the pack's mesh directives", e);
+            packUnusable("its files couldn't be read (" + e + ")");
             return false;
         }
     }
@@ -332,6 +367,7 @@ public final class MetalShadersClient implements ClientModInitializer {
             packPath = pack;
         } catch (Exception e) {
             LOGGER.error("Loading the pack failed", e);
+            packUnusable("loading it failed (" + e + ")");
         }
     }
 
