@@ -31,6 +31,24 @@ Same as above, with the title **[Fabric 26.3] Luxium: Iris/OptiFine shader packs
 
 > Under the hood: it reads the pack the way Iris does (per-world programs, `shaders.properties`, settings), preprocesses with JCPP, rewrites the GLSL so it survives glslang → SPIR-V → SPIRV-Cross → MSL, lays out the uniforms as std140 blocks, and drives the pack's gbuffer, shadow, deferred and composite passes through Metallum's device. Packs that need something it doesn't support yet fall back to vanilla with a notice instead of crashing.
 
-## Message to Metallum's author (GitHub discussion or Discord, your call)
+## Message to Metallum's author
 
-> Hi kokodio, thanks for Metallum! I built Luxium, a Fabric mod that runs Iris/OptiFine shader packs on top of Metallum's Metal backend: https://github.com/hecbatista/luxium. It's an alpha (0.1.0-alpha.1, built against 0.0.25 and checked against your Modrinth jar). If you think it's useful for your users, a link from Metallum's README or Modrinth page would mean a lot. Happy to hear about anything I'm doing that gets in the way of your plans for Metallum's internals, too: Luxium mixes into `MetalCrossShaderCompiler` and its `Compiled` record.
+**Where:** Metallum's Discord server, https://discord.gg/bXeC9N9Kqw (linked from its Modrinth page). The GitHub repo has issues but no Discussions, so Discord is the friendlier place for a "hi, I built something on your mod" message. Join, read the rules, and post in a showcase or addons channel if there is one, otherwise the general channel. A DM to the author is fine after that, but not as the first contact. Attach `docs/release/promo/beach-sunset.jpg`.
+
+**Discord message** (copy the block):
+
+```markdown
+Hi kokodio and everyone! I built **Luxium**, a Fabric mod that runs Iris/OptiFine shader packs on top of Metallum on Apple Silicon Macs. Packs run unmodified: it translates their GLSL to Metal at load and drives their passes through Metallum's device.
+
+It runs Complementary Unbound r5.10 in all three worlds, and on my M1 Max it's about 10% faster than Iris on OpenGL, with much steadier frame times (worst frame 20 ms vs 85 ms).
+
+It's an alpha (0.1.0-alpha.1), built against Metallum 0.0.25: https://github.com/hecbatista/luxium (the Modrinth page is in review).
+
+Thanks for Metallum, none of this would exist without it. Two things:
+1. If you think it's useful, a link from Metallum's README or Modrinth page would help Mac players find it.
+2. Luxium mixes into `MetalCrossShaderCompiler.compile` and reads the MSL from its package-private `Compiled` record, to warm Metal's shader cache on a background thread (it saved 7–8 s of render-thread compiling per world with Complementary). It doesn't change what Metallum compiles or draws. If you plan to change those classes, a heads-up would be great, or I'm happy to send a PR for a small public hook (say, a callback with the compiled MSL) so Luxium doesn't need mixins there.
+
+Testers on other Macs (M2/M3/M4) are very welcome too!
+```
+
+**If you'd rather use GitHub:** open an issue at https://github.com/kokodio/metallum/issues titled *Luxium: shader packs on top of Metallum (and a question about MetalCrossShaderCompiler)*, with the same text minus the last line.
