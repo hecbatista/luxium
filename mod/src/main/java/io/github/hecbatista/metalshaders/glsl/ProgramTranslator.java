@@ -709,6 +709,13 @@ public final class ProgramTranslator {
         }
 
         // b) Rename identifiers and old built-ins everywhere.
+        // Fragment stages of passes drawn onto the game's reversed-Z depth (the vertex epilogue
+        // below writes z' = (w - z) / 2) see gl_FragCoord.z reversed too, far = 0. Packs feed it
+        // to gbufferProjectionInverse, which is OpenGL's (undoRevZ), so their reads get it back
+        // as 1 - z, as Iris's DepthTransformer does (see NOTICE). The epilogue's coverage mask is
+        // appended after this rewrite and keeps the raw value the seed compares with the depth.
+        boolean reversedFragDepth = !vertex && ((terrain != null && !terrain.shadow())
+                || (elements != null && !(dynamic && format.shadow())));
         Set<Integer> outputsUsed = new java.util.TreeSet<>();
         for (int i = 0; i < t.size(); i++) {
             Token tok = t.get(i);
@@ -720,6 +727,10 @@ public final class ProgramTranslator {
                 continue;
             }
             String name = tok.text();
+            if (reversedFragDepth && name.equals("gl_FragCoord")) {
+                t.set(i, new Token(Kind.IDENT, "vec4(gl_FragCoord.xy, 1.0 - gl_FragCoord.z, gl_FragCoord.w)"));
+                continue;
+            }
             if (name.equals("sampler2DShadow")) {
                 t.set(i, new Token(Kind.IDENT, "sampler2D"));
                 continue;

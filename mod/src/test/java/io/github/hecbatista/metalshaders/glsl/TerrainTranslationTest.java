@@ -71,6 +71,30 @@ class TerrainTranslationTest {
         assertFalse(r.fragment().contains("discard"), r.fragment());
     }
 
+    /**
+     * The scene's depth is reversed-Z, so the pack's gl_FragCoord.z reads come back as 1 - z
+     * (Iris DepthTransformer); the shadow map is forward, and the coverage mask keeps the raw value.
+     */
+    @Test
+    void fragDepthReadsAreForwardOutsideTheShadowPass() throws Exception {
+        String fragment = """
+                uniform sampler2D tex;
+                in vec2 texCoord;
+                void main() {
+                    vec3 screenPos = vec3(gl_FragCoord.xy, gl_FragCoord.z);
+                    /* DRAWBUFFERS:0 */
+                    gl_FragData[0] = texture2D(tex, texCoord) * screenPos.z;
+                }
+                """;
+        String forward = "vec4(gl_FragCoord.xy, 1.0 - gl_FragCoord.z, gl_FragCoord.w)";
+        ProgramTranslator.Result scene = ProgramTranslator.translateForTerrain(VERTEX, fragment, new ProgramTranslator.Terrain(0.5f, true));
+        assertTrue(scene.fragment().contains("vec3 screenPos = vec3(" + forward + ".xy, " + forward + ".z);"), scene.fragment());
+        assertTrue(scene.fragment().contains("luxium_Coverage = vec4(gl_FragCoord.z, 0.0, 0.0, 1.0);"), scene.fragment());
+        compile("fragdepth", scene);
+        ProgramTranslator.Result shadow = ProgramTranslator.translateForTerrain(VERTEX, fragment, new ProgramTranslator.Terrain(0.1f, false, true));
+        assertTrue(shadow.fragment().contains("vec3 screenPos = vec3(gl_FragCoord.xy, gl_FragCoord.z);"), shadow.fragment());
+    }
+
     @Test
     void complementaryTerrainCompilesToMetal() throws Exception {
         List<Path> packs = PackReader.findPacks(Path.of("run/shaderpacks"));

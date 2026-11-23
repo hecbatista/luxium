@@ -188,6 +188,10 @@ public class PlaytestTour implements FabricClientGameTest {
         settle(10);
         shot("07-zoo-nether-portal");
         frames("nether-portal-block", 16);
+        // Close and at an angle: the pack's portal parallax, and its close-up fade (PORTAL_REDUCE_CLOSEUP).
+        cmd("tp @a 18.5 " + (Y + 3) + " 12 40 10");
+        settle(10);
+        shot("07b-zoo-nether-portal-angled");
         cmd("tp @a -6 " + (Y + 3) + " 5 0 5");
         settle(10);
         shot("08-zoo-signs-frames");
