@@ -2,7 +2,7 @@
 
 Started 2026-11-23, after 7i. Goal: a jar that other Apple Silicon players can install to run
 Complementary Unbound on Metal, with honest notes on what works and what doesn't.
-**Status: preparing; benchmarking in progress.**
+**Status: 0.1.0-alpha.1 published 2026-11-23 (GitHub pre-release); benchmarking continues.**
 
 Facts as of 2026-11-23:
 - `hecbatista/luxium` is already **public**. LICENSE (LGPL-3.0-only, the text Iris ships) was added 2026-11-23; it reaches GitHub with the next push.
@@ -53,7 +53,7 @@ Facts as of 2026-11-23:
   - choosing a pack and turning shaders off; pack settings;
   - known issues; how to report a bug (log, pack and settings, F2 screenshots or a recording, Mac model);
   - building from source; credits; license.
-- [ ] **Push and pre-release** (needs the user's go): push `main`, tag `v0.1.0-alpha.1`, GitHub pre-release with the jar and the README's install notes. Channel: GitHub pre-release first (user's decision); Modrinth later.
+- [x] **Push and pre-release** (2026-11-23, user's go): `main` pushed (`9ad6e93`), tag `v0.1.0-alpha.1`, [GitHub pre-release](https://github.com/hecbatista/luxium/releases/tag/v0.1.0-alpha.1) with `luxium-0.1.0-alpha.1.jar` (467,919 bytes, SHA-256 `5a8b015f…4586`, downloaded back and checked). Not yet done: a smoke test of the released jar installed in a real launcher (dev runs load classes, not the jar).
 
 ## Benchmarking (first results 2026-11-23: `docs/release/benchmarks.md`; more scenes and machines still to come)
 What we can say honestly, measured the same way each time:
