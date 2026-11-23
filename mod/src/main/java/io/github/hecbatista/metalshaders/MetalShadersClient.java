@@ -59,8 +59,58 @@ public final class MetalShadersClient implements ClientModInitializer {
         LOGGER.info("Luxium loaded. Metallum version: {}. Shader packs folder: {}",
                 metallumVersion, shaderpacks);
 
+        configFile = loader.getConfigDir().resolve("luxium.properties");
+        try {
+            // Test switch: LUXIUM_TEST_CONFIG="enableShaders=false;shaderPack=X" writes the file
+            // first, so a game test starts the way a player's edited file would.
+            String testConfig = System.getenv("LUXIUM_TEST_CONFIG");
+            if (testConfig != null) {
+                io.github.hecbatista.metalshaders.pack.LuxiumConfig.writeOverride(configFile, testConfig);
+            }
+            shadersEnabledAtStartup = io.github.hecbatista.metalshaders.pack.LuxiumConfig.enabled(configFile);
+        } catch (IOException | RuntimeException e) {
+            LOGGER.error("Couldn't read {}: shaders stay on", configFile, e);
+        }
+        LOGGER.info("Shaders {} ({})", shadersEnabledAtStartup ? "on" : "off: the game renders as without Luxium", configFile);
+
         logPacks(shaderpacks);
         readMeshDirectives(shaderpacks);
+    }
+
+    /** config/luxium.properties (LuxiumConfig). */
+    private static Path configFile;
+
+    /**
+     * enableShaders as read at startup. It decides the chunk vertex format for the whole session
+     * (ChunkMeshFormatsMixin), so turning shaders on or off takes a restart.
+     */
+    public static volatile boolean shadersEnabledAtStartup = true;
+
+    private static String lastChoice;
+
+    /** The pack to use now, or null (shaders off, none in shaderpacks/, or the named one missing). */
+    private static Path choosePack(Path shaderpacks) {
+        if (configFile == null) {
+            return null;
+        }
+        try {
+            var choice = io.github.hecbatista.metalshaders.pack.LuxiumConfig.choose(shaderpacks, configFile);
+            Path pack = shadersEnabledAtStartup ? choice.pack() : null;
+            String reason = shadersEnabledAtStartup || !choice.enabled() ? choice.reason()
+                    : "shaders were off at startup: restart to turn them on";
+            if (!reason.equals(lastChoice)) {
+                lastChoice = reason;
+                if (pack == null && choice.enabled() && shadersEnabledAtStartup && reason.contains("isn't in")) {
+                    LOGGER.warn("Shader pack: {}", reason);
+                } else {
+                    LOGGER.info("Shader pack: {}", pack == null ? "none, " + reason : pack.getFileName() + " (" + reason + ")");
+                }
+            }
+            return pack;
+        } catch (IOException | RuntimeException e) {
+            LOGGER.error("Choosing the shader pack failed: no pack is used", e);
+            return null;
+        }
     }
 
     /** Whether Luxium found a pack to use (a pack in shaderpacks/, read at startup and at load). */
@@ -96,13 +146,13 @@ public final class MetalShadersClient implements ClientModInitializer {
      */
     private static boolean readMeshDirectives(Path shaderpacks) {
         try {
-            List<Path> packs = PackReader.findPacks(shaderpacks);
-            packPresent = !packs.isEmpty();
-            if (packs.isEmpty()) {
+            Path chosen = choosePack(shaderpacks);
+            packPresent = chosen != null;
+            if (chosen == null) {
                 return false;
             }
-            packOptions = loadOptions(packs.getFirst());
-            String properties = PackReader.open(packs.getFirst(), (name, root, shaders) ->
+            packOptions = loadOptions(chosen);
+            String properties = PackReader.open(chosen, (name, root, shaders) ->
                     PackReader.readText(shaders, "/shaders.properties").orElse(""));
             java.util.Properties props = new java.util.Properties();
             Map<String, String> shaderPropertyDefines = new LinkedHashMap<>(StandardDefines.forMac());
@@ -111,11 +161,11 @@ public final class MetalShadersClient implements ClientModInitializer {
                     packOptions.propertyDefines(shaderPropertyDefines))));
             boolean separateAo = props.getProperty("separateAo", "false").strip().equals("true");
             io.github.hecbatista.metalshaders.sodium.LuxiumChunkVertex.setSeparateAo(separateAo);
-            LOGGER.info("Chunk meshes: separateAo={} (from {})", separateAo, packs.getFirst().getFileName());
+            LOGGER.info("Chunk meshes: separateAo={} (from {})", separateAo, chosen.getFileName());
 
             // block.properties -> mc_Entity, preprocessed like the other .properties files.
             Map<String, String> defines = packOptions.propertyDefines(StandardDefines.forMac());
-            String blocks = PackReader.open(packs.getFirst(), (name, root, shaders) ->
+            String blocks = PackReader.open(chosen, (name, root, shaders) ->
                     PackReader.readText(shaders, "/block.properties").orElse(""));
             io.github.hecbatista.metalshaders.pack.BlockIds blockIds =
                     io.github.hecbatista.metalshaders.pack.BlockIds.parse(PropertiesPreprocessor.preprocess(blocks, defines));
@@ -130,7 +180,7 @@ public final class MetalShadersClient implements ClientModInitializer {
                     io.github.hecbatista.metalshaders.sodium.BlockStateIds.idOf("minecraft:oak_leaves"),
                     io.github.hecbatista.metalshaders.sodium.BlockStateIds.idOf("minecraft:gold_block"),
                     io.github.hecbatista.metalshaders.sodium.BlockStateIds.idOf("minecraft:oak_log"));
-            String key = packs.getFirst() + "|" + separateAo + "|" + states + "|" + packOptions.changed();
+            String key = chosen + "|" + separateAo + "|" + states + "|" + packOptions.changed();
             boolean changed = !key.equals(meshKey);
             meshKey = key;
             return changed;
@@ -246,11 +296,10 @@ public final class MetalShadersClient implements ClientModInitializer {
      */
     private static void loadPackValues() {
         try {
-            List<Path> packs = PackReader.findPacks(FabricLoader.getInstance().getGameDir().resolve("shaderpacks"));
-            if (packs.isEmpty()) {
+            Path pack = choosePack(FabricLoader.getInstance().getGameDir().resolve("shaderpacks"));
+            if (pack == null) {
                 return;
             }
-            Path pack = packs.getFirst();
             if (packOptions == null) {
                 packOptions = loadOptions(pack);
             }

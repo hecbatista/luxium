@@ -102,4 +102,6 @@ The full meanings are in `docs/history/` (grep the name).
   (7g Metal cache warm-up off, for timings). Game tests always run on a warm Metal cache; for a
   cold-cache timing see 7g in `docs/history/step-7.md`.
 - Test only: `LUXIUM_TOUR=1`, `LUXIUM_TOUR_ONLY`, `LUXIUM_TEST_NO_PACK=1`, `LUXIUM_TEST_SETTINGS`,
+  `LUXIUM_TEST_CONFIG="enableShaders=false;shaderPack=X"` (writes config/luxium.properties before Luxium reads it),
+  `LUXIUM_TEST_NO_BOB=1`, `LUXIUM_METALLUM_JAR=<jar>` (run against another Metallum, e.g. Modrinth's),
   `LUXIUM_TEST_WALK_ONLY=1`, `LUXIUM_TEST_BOX_ONLY=1`, `LUXIUM_PERF=1`
