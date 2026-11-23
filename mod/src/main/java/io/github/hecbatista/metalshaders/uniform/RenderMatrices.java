@@ -11,9 +11,11 @@ import java.util.Map;
  * (GameRendererRenderMixin, at RenderSystem.setProjectionMatrix inside GameRenderer.renderLevel).
  * <p>
  * As Iris does it (MixinLevelRenderer.java:113-115, MatrixUniforms, MatrixUtils; see NOTICE):
- * gbufferModelView is the camera's rotation only (positions are relative to the camera);
- * gbufferProjection is the game's projection, view bobbing included, turned from reversed-Z back
- * into the OpenGL convention; each also comes inverted and as last frame's value.
+ * gbufferModelView is the camera's rotation (positions are relative to the camera) with view
+ * bobbing, hurt shake and the nausea spin in it; gbufferProjection is the game's plain projection,
+ * turned from reversed-Z back into the OpenGL convention (GameRendererRenderMixin moves the bob
+ * out of the projection, as Iris MixinModelViewBobbing does); each also comes inverted and as
+ * last frame's value.
  */
 public final class RenderMatrices {
     private final Map<String, Object> values = new HashMap<>();

@@ -518,6 +518,52 @@ public class PlaytestTour implements FabricClientGameTest {
         settle(20);
         shot("62-beach-sky");
         frames("beach-sky", 24);
+        beachSprint(at, ground.getY(), yaw);
+    }
+
+    /**
+     * The user's follow-up (2026-11-23): sprint-jumping on land toward the water, a cyan band
+     * jumps up and down on the water and the sand's reflection changes. A real survival sprint
+     * (view bobbing and the sprint FOV change, unlike the teleported jump) down a sand runway built
+     * toward the sea. LUXIUM_TEST_NO_BOB=1 turns view bobbing off, to tell bobbing from speed.
+     */
+    private void beachSprint(BlockPos at, int groundY, float yaw) {
+        boolean noBob = System.getenv("LUXIUM_TEST_NO_BOB") != null;
+        double dx = -Math.sin(Math.toRadians(yaw));
+        double dz = Math.cos(Math.toRadians(yaw));
+        // A runway: 36 blocks of sand ending at the beach spot, two wide, cleared above.
+        for (int i = 0; i <= 36; i++) {
+            int x = (int) Math.floor(at.getX() - dx * i);
+            int z = (int) Math.floor(at.getZ() - dz * i);
+            cmd(fill(x - 1, groundY - 1, z - 1, x + 1, groundY - 1, z + 1, "sand"));
+            cmd(fill(x - 1, groundY, z - 1, x + 1, groundY + 6, z + 1, "air"));
+        }
+        cmd("gamemode survival @a");
+        hud(true);
+        context.runOnClient(mc -> mc.options.bobView().set(!noBob));
+        double sx = at.getX() + 0.5 - dx * 34;
+        double sz = at.getZ() + 0.5 - dz * 34;
+        cmd(String.format(java.util.Locale.ROOT, "tp @a %.3f %d %.3f %s 8", sx, groundY, sz, yaw));
+        settle(30);
+        var input = context.getInput();
+        input.holdKey(o -> o.keyUp);
+        input.holdKey(o -> o.keySprint);
+        input.holdKey(o -> o.keyJump);
+        Path dir = frameDir("beach-sprint");
+        for (int i = 0; i < 48; i++) {
+            context.waitTick();
+            frame(dir, i);
+            if (i == 30) {
+                shot("63-beach-sprint");
+            }
+        }
+        input.releaseKey(o -> o.keyJump);
+        input.releaseKey(o -> o.keySprint);
+        input.releaseKey(o -> o.keyUp);
+        context.runOnClient(mc -> mc.options.bobView().set(true));
+        context.waitTicks(10);
+        cmd("gamemode spectator @a");
+        hud(false);
     }
 
     /** A carved cave 60 blocks under spawn: torches, glow lichen, lava, ores. No sky light. */

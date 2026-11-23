@@ -315,6 +315,17 @@ GNU Lesser General Public License version 3
   Changed: raw-texture directives, minecraft: resource paths and customTexture.* aren't
   supported yet and are skipped with a warning.
 
+  src/main/java/io/github/hecbatista/metalshaders/mixin/GameRendererRenderMixin.java (the view
+  bobbing part) follows net.irisshaders.iris.mixin.MixinModelViewBobbing: while a pack is in
+  use, GameRenderer.renderLevel's bobbing matrix and its nausea/portal rotate and scale are kept
+  out of the projection and applied to the camera's view rotation (bob x view) before the level
+  is drawn. Changed: Luxium also captures gbufferModelView with the bob at setProjectionMatrix.
+
+  src/main/java/io/github/hecbatista/metalshaders/mixin/EntityRenderDispatcherMixin.java
+  (luxium$keepVanillaShadow) follows net.irisshaders.iris.mixin.MixinEntityRenderDispatcher
+  and IrisRenderingPipeline.shouldDisableVanillaEntityShadows: the vanilla blob shadow under
+  entities is not submitted while the pack has a shadow pass.
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3

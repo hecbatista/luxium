@@ -198,3 +198,14 @@ Step 7 (polish), agreed order with the user (2026-11-20): pack settings → Neth
     - Regression: clouds now show above the test platform; the bright swirls in the underwater shot are gone; still clips pass (land 0.008%, underwater 0.0002%, Nether 0.033%, End 0%).
     - The moving-camera `walk` clip still flags (0.16%, as before).
     - 0 validation messages, 98 unit tests, scoreboard 90/90.
+
+- **7i (2026-11-23, ✅): view bobbing in the model-view matrix; no vanilla entity shadows.** Both from the user's play session after 7h.
+  - **The band.** Sprint-jumping on land toward water, a pale cyan band jumped up and down on the water, and the sun glare on sand flipped.
+    - Found with a 30 s screen recording (`screencapture -v`) and ffmpeg (installed 2026-11-23 with the user's OK): a band-brightness scan over 866 frames (scratchpad `RowFlash.java`) found one-frame jumps of the water to pale cyan, with a white glare on the sand.
+    - Cause: vanilla folds view bobbing, hurt shake and the nausea/portal spin into the projection (`GameRenderer.renderLevel`). Iris moves them into the model-view (`MixinModelViewBobbing`, "severe issues with most shaderpacks"; OptiFine does the same). Complementary takes view directions from `gbufferProjection` and the sun's direction from `gbufferModelView` (`GetSunVector`), so under Luxium they disagreed on every bob step.
+    - Fix: `GameRendererRenderMixin` keeps the projection plain and applies the bob to `CameraRenderState.viewRotationMatrix` (bob × view) before `LevelRenderer.render`. Projection × view is unchanged, so vanilla-drawn geometry is unaffected. The capture uses bob × view for `gbufferModelView`.
+    - Tour: the `beach` stop now ends with `beach-sprint`, a real survival sprint-jump down a sand runway toward the sea. `LUXIUM_TEST_NO_BOB=1` turns bobbing off for A/B runs.
+    - Result: largest one-frame band rise on the sprint clip 20.0 (Iris 19.8). Moving-camera flicker 4.7% (was 10.5%; Iris 7.3%). The user confirmed the band is gone in play.
+  - **Blob shadows.** The user saw the round shadows under the pig and spider flashing in the regression scene. Iris doesn't draw vanilla entity shadows while the pack has a shadow pass (`MixinEntityRenderDispatcher`, `shouldDisableVanillaEntityShadows`). Now `EntityRenderDispatcherMixin` skips `submitShadow` when `TerrainTakeover.shadowActive()`. The blob is gone (shot 3), and the land clip is 0.0015% (was 0.008–0.011%).
+  - **Checks:** 0 validation messages (beach and regression), 98 unit tests, all still clips pass (End 0%, land 0.0015%, Nether 0.056% soul fire, offscreen 0%, underwater 0.0005%). The moving `walk` clip is 0.14%, as before.
+  - **Testing note:** don't start the user's game (`runClient`) while a game test runs from the same checkout. The test's screenshots vanished mid-run (bob-fix: 0 shots, 4 of 48 frames).
