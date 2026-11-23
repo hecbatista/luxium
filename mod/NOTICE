@@ -239,6 +239,18 @@ GNU Lesser General Public License version 3
   with its depth in depthtex0, follows Vitrail's docs/frame.md ("The hand is the one family the
   engine has to move rather than intercept").
 
+  The enchantment glint (glsl/ProgramTranslator.java Format.glint, render/EntityTakeover.java
+  Glint, pack/StandardDefines.java) follows Iris: gl_TextureMatrix[0] is mat4(1.0) in glint draws
+  (pipeline.transform.transformer.VanillaTransformer, isGlint() && hasOverlay()), and the inline
+  glint API of pipeline.transform.transformer.GlintTransformer: mc_hasGlint() / mc_sampleGlint()
+  (glintAlpha * the glint texture at TextureMat * UV0, or UV3 in the special-glint format, passed
+  to the fragment stage as a varying), constants where the draw has no glint; IRIS_INLINE_GLINT is
+  defined as gl.shader.StandardMacros does, and glintAlpha is the glint strength option as in
+  uniforms.IrisExclusiveUniforms. Which glinted pipelines are served by the base programs follows
+  pipeline.IrisPipelines / programs.ShaderKey (the *_GLINT keys use the entity and hand programs).
+  Changed: glint draws are told apart by the 26.3 pipeline's GLINT shader define, the texture is
+  the game's own GlintSampler, and the strength is a value in Luxium's uniform block.
+
   Spider eyes, beacon beams and lightning (render/EntityTakeover.java) follow Iris for which
   program serves which pipeline and its fallbacks (shaderpack.loading.ProgramId SpiderEyes,
   BeaconBeam, Lightning; pipeline.programs.ShaderKey EMISSIVE_ENTITIES, BEACON, LIGHTNING), their

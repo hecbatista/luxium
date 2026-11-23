@@ -235,7 +235,7 @@ public final class ProgramTranslator {
 
     /** Vanilla vertex-format element names and the GLSL type each arrives as. */
     static final Map<String, String> ELEMENT_TYPES = Map.of(
-            "Position", "vec3", "Color", "vec4", "UV0", "vec2", "UV1", "ivec2", "UV2", "ivec2", "Normal", "vec3");
+            "Position", "vec3", "Color", "vec4", "UV0", "vec2", "UV1", "ivec2", "UV2", "ivec2", "UV3", "vec2", "Normal", "vec3");
 
     /**
      * Translates a geometry program to be drawn with one of the game's own vertex formats.
@@ -259,21 +259,38 @@ public final class ProgramTranslator {
      * @param handDepth      squeeze the depth into 0.4375..0.5625 (OpenGL convention) as Iris does
      *                       for the hand (HandRenderer.DEPTH = 0.125, MC_HAND_DEPTH), so packs can
      *                       tell hand pixels apart (Complementary: depth < 0.56)
+     * @param glint          the game's pipeline draws the enchantment glint inline (26.3 shader
+     *                       define GLINT, with a GlintSampler): its DynamicTransforms.TextureMat is
+     *                       the glint's scrolling matrix, not the albedo's, so gl_TextureMatrix[0]
+     *                       is the identity, and the pack's mc_hasGlint()/mc_sampleGlint() sample
+     *                       the glint as Iris's VanillaTransformer and GlintTransformer do (see NOTICE)
      */
     public record Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames, boolean handDepth, boolean overlay,
-                         boolean shadow) {
+                         boolean shadow, boolean glint) {
         public Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames) {
-            this(alphaTest, coverage, samplerRenames, false, true, false);
+            this(alphaTest, coverage, samplerRenames, false, true, false, false);
         }
 
         public Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames, boolean handDepth) {
-            this(alphaTest, coverage, samplerRenames, handDepth, true, false);
+            this(alphaTest, coverage, samplerRenames, handDepth, true, false, false);
         }
 
         public Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames, boolean handDepth, boolean overlay) {
-            this(alphaTest, coverage, samplerRenames, handDepth, overlay, false);
+            this(alphaTest, coverage, samplerRenames, handDepth, overlay, false, false);
+        }
+
+        public Format(float alphaTest, boolean coverage, Map<String, String> samplerRenames, boolean handDepth, boolean overlay,
+                      boolean shadow) {
+            this(alphaTest, coverage, samplerRenames, handDepth, overlay, shadow, false);
         }
     }
+
+    /** The game's glint texture in its GLINT pipelines (BindGroupLayouts.GLINT_SAMPLER, 26.3). */
+    public static final String GLINT_SAMPLER = "GlintSampler";
+    /** The glint strength option (Iris's glintAlpha uniform), in the program's block. */
+    public static final String GLINT_ALPHA = "luxium_GlintAlpha";
+    /** The varying carrying the glint's texture coordinate (Iris's iris_glintCoord). */
+    static final String GLINT_COORD = "luxium_GlintCoord";
 
     /**
      * In a shadow-pass game draw, gl_ModelViewMatrix = luxium_ShadowFix * ModelViewMat, where the
@@ -460,6 +477,11 @@ public final class ProgramTranslator {
         // stays a uniform, 0, as Iris's CommonUniforms supplies it outside the overlay path.
         boolean overlay = dynamic && format.overlay() && elements.contains("UV1")
                 && (vs.declaredNames.contains("entityColor") || fs.declaredNames.contains("entityColor"));
+        // The inline glint (Iris GlintTransformer): only where the pack samples it in the fragment
+        // stage of a GLINT pipeline's draw. Its coordinate is TextureMat * UV0 (UV3 in the
+        // ENTITY_GLINT_SPECIAL format), as the game's item.vsh computes texCoordGlint.
+        boolean glintSampling = dynamic && format.glint() && fs.identifiers.contains("mc_sampleGlint");
+        String glintUv = elements != null && elements.contains("UV3") ? "UV3" : "UV0";
         List<String> warnings = new ArrayList<>();
         boolean fullscreen = mode == Mode.FULLSCREEN;
 
@@ -492,6 +514,15 @@ public final class ProgramTranslator {
 
         if (overlay) {
             samplers.putIfAbsent(OVERLAY_SAMPLER, new Sampler("sampler2D", OVERLAY_SAMPLER));
+        }
+        if (glintSampling) {
+            long inFragment = fs.declarations.stream().filter(d -> d.storage().equals("uniform") && isOpaque(d.type()))
+                    .flatMap(d -> d.declarators().stream()).filter(x -> fs.mentions(x.name())).count();
+            if (inFragment + 1 > MAX_SAMPLERS_PER_STAGE) {
+                throw new TranslationException("The fragment stage uses " + inFragment + " textures plus the glint; Metal allows "
+                        + MAX_SAMPLERS_PER_STAGE + " per stage");
+            }
+            samplers.putIfAbsent(GLINT_SAMPLER, new Sampler("sampler2D", GLINT_SAMPLER));
         }
 
         // 1. The shared uniform block: loose uniforms from both stages, plus built-ins used.
@@ -536,6 +567,9 @@ public final class ProgramTranslator {
             if (dynamic && (s.identifiers.contains("gl_ModelViewProjectionMatrix") || s.identifiers.contains("ftransform"))) {
                 uniforms.putIfAbsent("luxium_ProjectionMatrix", new Uniform("mat4", "luxium_ProjectionMatrix", "", null));
             }
+            if (glintSampling) {
+                uniforms.putIfAbsent(GLINT_ALPHA, new Uniform("float", GLINT_ALPHA, "", null));
+            }
             if (s.identifiers.contains("ftransform") && !fullscreen && !dynamic) {
                 uniforms.putIfAbsent("luxium_ModelViewProjectionMatrix",
                         new Uniform("mat4", "luxium_ModelViewProjectionMatrix", "", null));
@@ -555,6 +589,10 @@ public final class ProgramTranslator {
             needs.put("UV2", vs.identifiers.contains("gl_MultiTexCoord1") || vs.identifiers.contains("gl_MultiTexCoord2"));
             needs.put("Normal", vs.identifiers.contains("gl_Normal"));
             needs.put("UV1", overlay);
+            needs.put("UV3", glintSampling && glintUv.equals("UV3"));
+            if (glintSampling && glintUv.equals("UV0")) {
+                needs.put("UV0", true);
+            }
             for (Map.Entry<String, Boolean> e : needs.entrySet()) {
                 if (e.getValue() && elements.contains(e.getKey())) {
                     String type = ELEMENT_TYPES.get(e.getKey());
@@ -626,6 +664,10 @@ public final class ProgramTranslator {
         if (overlay) {
             varyingTypes.put("entityColor", new Slot("entityColor", "vec4", "", -1));
             vertexOut.add("entityColor");
+        }
+        if (glintSampling) {
+            varyingTypes.put(GLINT_COORD, new Slot(GLINT_COORD, "vec2", "", -1));
+            vertexOut.add(GLINT_COORD);
         }
         for (Declaration d : vs.declarations) {
             if (d.storage().equals("out") || d.storage().equals("varying")) {
@@ -790,7 +832,9 @@ public final class ProgramTranslator {
                         for (int q = i + 1; q <= close; q++) {
                             t.set(q, new Token(Kind.SPACE, ""));
                         }
-                        t.set(i, new Token(Kind.IDENT, "(TextureMat)"));
+                        // In a GLINT pipeline TextureMat scrolls the glint, not the albedo
+                        // (Iris VanillaTransformer: mat4(1.0) for glint draws with an overlay).
+                        t.set(i, new Token(Kind.IDENT, format.glint() ? "mat4(1.0)" : "(TextureMat)"));
                         continue;
                     }
                 }
@@ -875,6 +919,14 @@ public final class ProgramTranslator {
                 h.append("uniform sampler2D ").append(OVERLAY_SAMPLER).append(";\n");
             }
         }
+        boolean glintSampling = dynamic && varyings.containsKey(GLINT_COORD);
+        if (glintSampling) {
+            Slot v = varyings.get(GLINT_COORD);
+            h.append("layout(location = ").append(v.location()).append(vertex ? ") out vec2 " : ") in vec2 ").append(GLINT_COORD).append(";\n");
+            if (!vertex) {
+                h.append("uniform sampler2D ").append(GLINT_SAMPLER).append(";\n");
+            }
+        }
         if (uniforms.containsKey("luxium_Fog")) {
             h.append("struct LuxiumFog { vec4 color; float density; float start; float end; float scale; };\n");
         }
@@ -884,6 +936,15 @@ public final class ProgramTranslator {
                 h.append("    ").append(u.type()).append(' ').append(u.name()).append(u.array()).append(";\n");
             }
             h.append("};\n");
+        }
+        if (s.identifiers.contains("mc_hasGlint") || s.identifiers.contains("mc_sampleGlint")) {
+            // Iris's inline-glint API (GlintTransformer; packs test IRIS_INLINE_GLINT): real in a
+            // GLINT pipeline's fragment stage, constant everywhere else.
+            boolean real = glintSampling && !vertex;
+            h.append("bool mc_hasGlint() { return ").append(dynamic && format.glint()).append("; }\n");
+            h.append(real
+                    ? "vec3 mc_sampleGlint() { return " + GLINT_ALPHA + " * texture(" + GLINT_SAMPLER + ", " + GLINT_COORD + ").rgb; }\n"
+                    : "vec3 mc_sampleGlint() { return vec3(0.0); }\n");
         }
         if (vertex) {
             for (Slot in : vertexInputs.values()) {
@@ -977,6 +1038,10 @@ public final class ProgramTranslator {
                     + "    entityColor = vec4(luxium_overlay.rgb, 1.0 - luxium_overlay.a);\n"
                     + "    entityColor.rgb *= float(entityColor.a != 0.0);\n"
                     : "";
+            if (glintSampling) {
+                String uv = vertexInputs.containsKey("UV3") ? "UV3" : "UV0";
+                prologue += "    " + GLINT_COORD + " = (TextureMat * vec4(" + uv + ", 0.0, 1.0)).xy;\n";
+            }
             // Reversed-Z (see the comment above). For the hand, the OpenGL depth d is first squeezed
             // to 0.4375 + 0.125 d (Iris HandRenderer); stored reversed that's 0.5 w - 0.0625 z.
             String depth = dynamic && format.shadow()

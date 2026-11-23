@@ -80,11 +80,7 @@ abstract class LevelRendererTerrainMixin {
         }
         level.suspend();   // the window resolves textures and writes a buffer: no pass may be open
         EntityTakeover.openWindow(MetalShadersClient::value);
-        try {
-            original.call(frame, pass);
-        } finally {
-            EntityTakeover.closeWindow();
-        }
+        EntityTakeover.inWindow(() -> original.call(frame, pass));
     }
 
     /**
@@ -146,11 +142,7 @@ abstract class LevelRendererTerrainMixin {
         }
         level.suspend();
         EntityTakeover.openTranslucentWindow(MetalShadersClient::value);
-        try {
-            original.call(frame, pass);
-        } finally {
-            EntityTakeover.closeWindow();
-        }
+        EntityTakeover.inWindow(() -> original.call(frame, pass));
     }
 
     /** Rain and snow (WeatherEffectRenderer.render): routed to the pack's weather program. */
@@ -164,13 +156,12 @@ abstract class LevelRendererTerrainMixin {
             original.call(weather, state, pass);
             return;
         }
-        try {
+        // On a failure the window's close also closes the pack's pass (routing.finish is skipped).
+        EntityTakeover.inWindow(() -> {
             original.call(weather, state, routing);
-        } finally {
             routing.finish();
             EntityTakeover.endParticles();
-            EntityTakeover.closeWindow();
-        }
+        });
     }
 
     /** The level's "after terrain" features (translucent particles): the pack's translucent window again. */
@@ -183,11 +174,7 @@ abstract class LevelRendererTerrainMixin {
         }
         level.suspend();
         EntityTakeover.openTranslucentWindow(MetalShadersClient::value);
-        try {
-            original.call(frame, pass);
-        } finally {
-            EntityTakeover.closeWindow();
-        }
+        EntityTakeover.inWindow(() -> original.call(frame, pass));
     }
 
     @WrapOperation(method = "executeClassicTransparency", at = @At(value = "INVOKE",

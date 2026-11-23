@@ -14,8 +14,9 @@ import java.util.Map;
  * justify the value. Everything else Iris defines (StandardMacros.java:47-121) is left out on
  * purpose until we need it, because defining a name changes which branch a pack takes:
  * <ul>
- *   <li>Feature claims (IRIS_FEATURE_*, IRIS_INLINE_GLINT, IRIS_HAS_TRANSLUCENCY_SORTING,
- *       DISTANT_HORIZONS, ...): only once we actually support the feature.</li>
+ *   <li>Feature claims (IRIS_FEATURE_*, IRIS_HAS_TRANSLUCENCY_SORTING, DISTANT_HORIZONS, ...):
+ *       only once we actually support the feature. IRIS_INLINE_GLINT is claimed: the translator
+ *       supplies mc_hasGlint()/mc_sampleGlint() (ProgramTranslator.Format#glint).</li>
  *   <li>MC_GL_VERSION, MC_GLSL_VERSION, MC_GL_VENDOR_*, MC_GL_RENDERER_*: there's no OpenGL
  *       driver under Metal, so we'd be guessing. Complementary doesn't read the versions.</li>
  * </ul>
@@ -51,6 +52,9 @@ public final class StandardDefines {
         defines.put("MC_OS_MAC", "");
         defines.put("IS_IRIS", "");
         defines.put("IRIS_VERSION", IRIS_VERSION);
+        // Iris StandardMacros: packs may call mc_hasGlint()/mc_sampleGlint() (Complementary does in
+        // gbuffers_entities and gbuffers_hand to draw the enchantment glint of GLINT pipelines).
+        defines.put("IRIS_INLINE_GLINT", "");
         for (int i = 0; i < RENDER_STAGES.size(); i++) {
             defines.put("MC_RENDER_STAGE_" + RENDER_STAGES.get(i), Integer.toString(i));
         }

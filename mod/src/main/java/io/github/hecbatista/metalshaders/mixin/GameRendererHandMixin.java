@@ -61,10 +61,6 @@ abstract class GameRendererHandMixin {
         boolean zeroToOne = RenderSystem.getDevice().getDeviceInfo().isZZeroToOne();
         Matrix4f handProjection = RenderMatrices.undoRevZ(this.hudProjection.getMatrix(new Matrix4f()), zeroToOne);
         EntityTakeover.openHandWindow(MetalShadersClient::value, handProjection, depth);
-        try {
-            original.call(pass, frame);
-        } finally {
-            EntityTakeover.closeWindow();
-        }
+        EntityTakeover.inWindow(() -> original.call(pass, frame));
     }
 }

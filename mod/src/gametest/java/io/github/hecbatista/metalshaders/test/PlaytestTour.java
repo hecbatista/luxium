@@ -123,7 +123,7 @@ public class PlaytestTour implements FabricClientGameTest {
         cmd("setblock -10 " + (Y + 3) + " 9 oak_wall_sign[facing=north]{front_text:{messages:[\"Luxium\",\"sign text\",\"line 3\",\"\"]}}");
         cmd("setblock -8 " + (Y + 3) + " 9 oak_wall_sign[facing=north]{front_text:{has_glowing_text:1b,color:\"lime\",messages:[\"Glowing\",\"text\",\"\",\"\"]}}");
         cmd("summon item_frame -5 " + (Y + 3) + " 9 {Facing:2b,Item:{id:\"minecraft:diamond_sword\",count:1,components:{\"minecraft:enchantment_glint_override\":true}}}");
-        cmd("summon glow_item_frame -3 " + (Y + 3) + " 9 {Facing:2b,Item:{id:\"minecraft:compass\",count:1}}");
+        cmd("summon glow_item_frame -3 " + (Y + 3) + " 9 {Facing:2b,Item:{id:\"minecraft:compass\",count:1,components:{\"minecraft:enchantment_glint_override\":true}}}");
         cmd("summon painting 1 " + (Y + 3) + " 9 {facing:2b,variant:\"minecraft:kebab\"}");
         // Block entities in a row at z = 6.
         String[] row = {

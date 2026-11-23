@@ -63,13 +63,84 @@ import java.util.function.Function;
  * translucent one tenth (vanilla marks cutout pipelines with ALPHA_CUTOUT).
  */
 public final class EntityTakeover {
-    private record Program(ProgramTranslator.Result result, Std140Layout.Layout layout, Map<String, String> defaults) {
+    /**
+     * One translation of a family's program, with its own per-draw uniform buffers. Variants of one
+     * program differ in block size (an overlay-less variant keeps entityColor in the block, a glint
+     * variant adds the glint strength), so each variant's buffers are sized for its own layout.
+     */
+    private static final class Program {
+        final ProgramTranslator.Result result;
+        final Std140Layout.Layout layout;
+        final Map<String, String> defaults;
+        final String label;
+        /** One uniform buffer per draw this frame (each draw has its own ids); the first {@link #slot} are in use. */
+        final List<MappableRingBuffer> rings = new java.util.ArrayList<>();
+        int slot;
+
+        Program(ProgramTranslator.Result result, Std140Layout.Layout layout, Map<String, String> defaults, String label) {
+            this.result = result;
+            this.layout = layout;
+            this.defaults = defaults;
+            this.label = label;
+        }
+
+        ProgramTranslator.Result result() {
+            return result;
+        }
+
+        Std140Layout.Layout layout() {
+            return layout;
+        }
+
+        Map<String, String> defaults() {
+            return defaults;
+        }
+
+        /** The next free uniform buffer for a draw, sized for this variant's block. */
+        MappableRingBuffer nextRing() {
+            while (rings.size() <= slot) {
+                rings.add(new MappableRingBuffer(() -> "Luxium " + label + " uniforms",
+                        GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_MAP_WRITE, layout.size()));
+            }
+            return rings.get(slot++);
+        }
+
+        /** Frame start (no pass open): the buffers used last frame rotate. */
+        void rotate() {
+            for (int i = 0; i < slot; i++) {
+                rings.get(i).rotate();
+            }
+            slot = 0;
+        }
+
+        void close() {
+            rings.forEach(MappableRingBuffer::close);
+            rings.clear();
+            slot = 0;
+        }
+    }
+
+    /**
+     * How a vanilla pipeline draws the enchantment glint. 26.3 draws it inline: GLINT_SNIPPET adds
+     * the shader define GLINT and a GlintSampler, and the draw's TextureMat is then the glint's
+     * scrolling matrix (entity.vsh / item.vsh texCoordGlint). GLINT_SPECIAL pipelines (compasses
+     * and clocks) use the ENTITY_GLINT_SPECIAL format, whose UV3 carries the glint's coordinate.
+     */
+    private enum Glint {
+        NONE, STANDARD, SPECIAL;
+
+        static Glint of(RenderPipeline pipeline) {
+            if (!pipeline.getShaderDefines().flags().contains("GLINT")) {
+                return NONE;
+            }
+            return DefaultVertexFormat.ENTITY_GLINT_SPECIAL.equals(pipeline.getVertexFormatBinding(0)) ? SPECIAL : STANDARD;
+        }
     }
 
     /** Pack albedo names -> the game's skin sampler; lightmap -> the game's lightmap sampler. */
     private static final Map<String, String> RENAMES = Map.of(
             "tex", "Sampler0", "texture", "Sampler0", "gtexture", "Sampler0", "gcolor", "Sampler0", "lightmap", "Sampler2");
-    private static final Set<String> GAME_BOUND = Set.of("Sampler0", "Sampler1", "Sampler2");
+    private static final Set<String> GAME_BOUND = Set.of("Sampler0", "Sampler1", "Sampler2", ProgramTranslator.GLINT_SAMPLER);
     private static final Matrix4f LIGHTMAP_MATRIX = new Matrix4f(
             0.00390625f, 0, 0, 0, 0, 0.00390625f, 0, 0, 0, 0, 0.00390625f, 0, 0.03125f, 0.03125f, 0.03125f, 1);
     private static final Set<String> ELEMENTS = Set.of("Position", "Color", "UV0", "UV1", "UV2", "Normal");
@@ -78,7 +149,7 @@ public final class EntityTakeover {
     private static final class Family {
         final String program;
         final boolean translucent;
-        /** Translations by alpha test and by whether the draw binds an overlay texture. */
+        /** Translations by alpha test, by whether the draw binds an overlay texture, and by glint. */
         final Map<String, Program> byAlpha = new HashMap<>();
         final Map<RenderPipeline, CompiledRenderPipeline> compiled = new IdentityHashMap<>();
         final Set<RenderPipeline> refused = new HashSet<>();
@@ -106,9 +177,6 @@ public final class EntityTakeover {
         /** Iris's default blend override for the program (ProgramId), used where the pack sets none. */
         Optional<BlendFunction> blendOverride;
         boolean prepared;
-        /** One uniform buffer per draw this frame (each draw has its own ids). */
-        final List<MappableRingBuffer> rings = new java.util.ArrayList<>();
-        int slot;
         int served;
 
         Family(String program, boolean translucent, int stage) {
@@ -131,25 +199,37 @@ public final class EntityTakeover {
         }
 
         Program program(float alpha) throws ProgramTranslator.TranslationException {
-            return program(alpha, true);
+            return program(alpha, true, Glint.NONE);
         }
 
-        Program program(float alpha, boolean overlay) throws ProgramTranslator.TranslationException {
-            String key = alpha + "/" + overlay;
+        Program program(float alpha, boolean overlay, Glint glint) throws ProgramTranslator.TranslationException {
+            String key = alpha + "/" + overlay + "/" + glint;
             Program p = byAlpha.get(key);
             if (p == null) {
-                ProgramTranslator.Result r = ProgramTranslator.translateForDraw(glsl[0], glsl[1], elements,
-                        new ProgramTranslator.Format(alpha, coverage(), RENAMES, hand, overlay, shadow));
+                Set<String> drawElements = elements;
+                if (glint == Glint.SPECIAL) {
+                    drawElements = new HashSet<>(elements);
+                    drawElements.add("UV3");
+                }
+                ProgramTranslator.Result r = ProgramTranslator.translateForDraw(glsl[0], glsl[1], drawElements,
+                        new ProgramTranslator.Format(alpha, coverage(), RENAMES, hand, overlay, shadow, glint != Glint.NONE));
                 Map<String, String> defaults = new HashMap<>();
                 r.uniforms().forEach(u -> {
                     if (u.defaultValue() != null) {
                         defaults.put(u.name(), u.defaultValue());
                     }
                 });
-                p = new Program(r, Std140Layout.of(r.uniforms()), defaults);
+                p = new Program(r, Std140Layout.of(r.uniforms()), defaults, program + " " + key);
                 byAlpha.put(key, p);
             }
             return p;
+        }
+
+        /** Whether a pipeline's vertex format is this family's (an ENTITY family also takes the special-glint format). */
+        boolean takesFormat(RenderPipeline pipeline) {
+            com.mojang.renderpearl.api.vertex.VertexFormat binding = pipeline.getVertexFormatBinding(0);
+            return format.equals(binding)
+                    || (format.equals(DefaultVertexFormat.ENTITY) && DefaultVertexFormat.ENTITY_GLINT_SPECIAL.equals(binding));
         }
 
         float alphaFor(RenderPipeline pipeline) {
@@ -320,10 +400,32 @@ public final class EntityTakeover {
         }
         holdDepth = ShadowTargets.depthAttachment();
         open(Phase.SHADOW, values, List.of(SHADOW_ENTITIES));
+        inWindow(() -> frame.executeSolid(DropPass.INSTANCE));
+    }
+
+    /**
+     * Runs {@code body} inside an open window and closes the window afterwards. If the body fails,
+     * closing can fail too (a draw that threw between its pushDebugGroup and popDebugGroup leaves
+     * the pack's pass with a debug group open, and closing it throws "Render pass had debug
+     * groups left open!"); that second failure is attached to the first as suppressed instead of
+     * replacing it, so the real cause is what reaches the log.
+     */
+    public static void inWindow(Runnable body) {
         try {
-            frame.executeSolid(DropPass.INSTANCE);
-        } finally {
+            body.run();
+        } catch (Throwable t) {
+            closeWindowAfter(t);
+            throw t;
+        }
+        closeWindow();
+    }
+
+    /** Closes the window after {@code failure}, keeping a failure to close as suppressed. */
+    public static void closeWindowAfter(Throwable failure) {
+        try {
             closeWindow();
+        } catch (Throwable c) {
+            failure.addSuppressed(c);
         }
     }
 
@@ -481,8 +583,7 @@ public final class EntityTakeover {
     private static String refusal(Family f, RenderPipeline pipeline) throws RuntimeException {
         List<ColorTargetState> targets = pipeline.getColorTargetStates();
         // The bindings list may hold empty slots (PipelineBuilder skips nulls): only slot 0 may be used.
-        if (!pipeline.getVertexFormatBindings().stream().skip(1).allMatch(Objects::isNull)
-                || !f.format.equals(pipeline.getVertexFormatBinding(0))) {
+        if (!pipeline.getVertexFormatBindings().stream().skip(1).allMatch(Objects::isNull) || !f.takesFormat(pipeline)) {
             return "not the vertex format " + f.program + " is drawn with";
         }
         if (targets.size() != 1) {
@@ -500,7 +601,7 @@ public final class EntityTakeover {
         BindGroupLayout.flattenUniforms(pipeline.getBindGroupLayouts()).forEach(u -> declared.add(u.name()));
         Program p;
         try {
-            p = f.program(f.alphaFor(pipeline), declared.contains(ProgramTranslator.OVERLAY_SAMPLER));
+            p = f.program(f.alphaFor(pipeline), declared.contains(ProgramTranslator.OVERLAY_SAMPLER), Glint.of(pipeline));
         } catch (ProgramTranslator.TranslationException e) {
             return "translation failed: " + e.getMessage();
         }
@@ -528,9 +629,11 @@ public final class EntityTakeover {
         Set<String> declared = new HashSet<>();
         BindGroupLayout.flattenUniforms(vanilla.getBindGroupLayouts()).forEach(u -> declared.add(u.name()));
         boolean overlay = declared.contains(ProgramTranslator.OVERLAY_SAMPLER);
-        Program p = f.program(alpha, overlay);
+        Glint glint = Glint.of(vanilla);
+        Program p = f.program(alpha, overlay, glint);
         ProgramTranslator.Result r = p.result();
-        String variant = (Float.isNaN(alpha) ? "solid" : "cutout") + (overlay ? "" : "_no_overlay");
+        String variant = (Float.isNaN(alpha) ? "solid" : "cutout") + (overlay ? "" : "_no_overlay")
+                + (glint == Glint.NONE ? "" : "_glint" + (glint == Glint.SPECIAL ? "_special" : ""));
         Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/" + f.program + "_" + variant);
         RenderPipeline.Builder b = RenderPipeline.builder()
                 .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/" + f.program + "/" + vanilla.getLocation().getPath()))
@@ -540,7 +643,7 @@ public final class EntityTakeover {
                 .withPolygonMode(vanilla.getPolygonMode())
                 .withDepthStencilState(f.shadow ? new com.mojang.renderpearl.api.pipeline.DepthStencilState(
                         com.mojang.renderpearl.api.pipeline.CompareOp.LESS_THAN_OR_EQUAL, true) : vanilla.getDepthStencilState())
-                .withVertexBinding(0, f.format);
+                .withVertexBinding(0, vanilla.getVertexFormatBinding(0));
         Optional<BlendFunction> vanillaBlend = vanilla.getColorTargetStates().getFirst().blendFunction();
         for (int i = 0; i < f.writes.size(); i++) {
             int index = f.writes.get(i);
@@ -589,11 +692,9 @@ public final class EntityTakeover {
             f.compiled.values().forEach(CompiledRenderPipeline::close);
             f.compiled.clear();
             f.refused.clear();
+            f.byAlpha.values().forEach(Program::close);
             f.byAlpha.clear();
             f.inputs.clear();
-            f.rings.forEach(MappableRingBuffer::close);
-            f.rings.clear();
-            f.slot = 0;
             f.served = 0;
             f.glsl = null;
             f.blendProgram = null;
@@ -610,10 +711,7 @@ public final class EntityTakeover {
 
     static void beginFrame() {
         for (Family f : ALL) {
-            for (int i = 0; i < f.slot; i++) {
-                f.rings.get(i).rotate();
-            }
-            f.slot = 0;
+            f.byAlpha.values().forEach(Program::rotate);
         }
         DrawIds.beginFrame();
     }
@@ -654,11 +752,17 @@ public final class EntityTakeover {
     }
 
     public static void closeWindow() {
-        releaseHold();
-        window = null;
-        handProjection = null;
-        holdDepth = null;
-        particleFamily = null;
+        try {
+            releaseHold();
+        } finally {
+            window = null;
+            handProjection = null;
+            holdDepth = null;
+            particleFamily = null;
+            drawing = null;
+            drawingIds = null;
+            inHold = false;
+        }
         for (Family f : ALL) {
             if (f.served > 0 && System.nanoTime() - logged > 5_000_000_000L) {
                 logged = System.nanoTime();
@@ -759,8 +863,9 @@ public final class EntityTakeover {
     /** The pack's pass for a served draw, opened if needed (the level's pass must be suspended). */
     public static RenderPass hold() {
         Family f = Objects.requireNonNull(drawing);
-        if (hold != null && holdFamily != f && !holdFamily.writes.equals(f.writes)) {
-            releaseHold();   // another program with other draw buffers: another pass
+        if (hold != null && holdFamily != f && (!holdFamily.writes.equals(f.writes) || holdFamily.coverage() != f.coverage()
+                || holdFamily.shadow != f.shadow)) {
+            releaseHold();   // another program with other attachments: another pass
         }
         if (hold == null) {
             holdFamily = f;
@@ -788,9 +893,10 @@ public final class EntityTakeover {
 
     /** Closes the pack's entity pass, if one is open (before any other pass opens). */
     public static void releaseHold() {
-        if (hold != null) {
-            hold.close();
-            hold = null;
+        RenderPass h = hold;
+        hold = null;   // forgotten first: a pass whose close throws must not be closed again
+        if (h != null) {
+            h.close();
         }
     }
 
@@ -832,12 +938,9 @@ public final class EntityTakeover {
         }
         if (p.layout().size() > 0) {
             // A buffer per draw: the ids differ from draw to draw. Mapping is CPU work, so it's
-            // fine inside the pass; rotating isn't, and happens at frame start.
-            while (f.rings.size() <= f.slot) {
-                f.rings.add(new MappableRingBuffer(() -> "Luxium " + f.program + " uniforms",
-                        GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_MAP_WRITE, p.layout().size()));
-            }
-            MappableRingBuffer ring = f.rings.get(f.slot++);
+            // fine inside the pass; rotating isn't, and happens at frame start. The buffers are the
+            // variant's own, sized for its block (variants of one program differ in size).
+            MappableRingBuffer ring = p.nextRing();
             DrawIds.Ids ids = drawingIds;
             Function<String, Object> values = frameValues;
             int stage = f.stage;
@@ -878,7 +981,10 @@ public final class EntityTakeover {
         Matrix4fc[] textureMatrices = new Matrix4fc[8];
         Arrays.fill(textureMatrices, new Matrix4f());
         textureMatrices[1] = LIGHTMAP_MATRIX;
+        // Iris IrisExclusiveUniforms glintAlpha: the glint strength option (the game's GlintAlpha).
+        float glintAlpha = Minecraft.getInstance().options.glintStrength().get().floatValue();
         return name -> switch (name) {
+            case ProgramTranslator.GLINT_ALPHA -> glintAlpha;
             case "luxium_ModelViewMatrix" -> modelView;
             case "luxium_ProjectionMatrix" -> projection;
             case ProgramTranslator.SHADOW_FIX -> fix;

@@ -146,6 +146,85 @@ class TerrainTranslationTest {
         compile(pack.getFileName() + "-entities", r);
     }
 
+    private static final String GLINT_VERTEX = """
+            out vec2 texCoord;
+            void main() {
+                texCoord = (gl_TextureMatrix[0] * gl_MultiTexCoord0).xy;
+                gl_Position = ftransform();
+            }
+            """;
+    private static final String GLINT_FRAGMENT = """
+            uniform sampler2D tex;
+            in vec2 texCoord;
+            void main() {
+                vec4 color = texture2D(tex, texCoord);
+                if (mc_hasGlint()) {
+                    vec3 glint = mc_sampleGlint();
+                    color.rgb += glint * glint;
+                }
+                /* DRAWBUFFERS:0 */
+                gl_FragData[0] = color;
+            }
+            """;
+
+    /**
+     * In a GLINT pipeline the draw's TextureMat scrolls the glint, so the albedo's texture matrix is
+     * the identity there, and mc_sampleGlint() reads GlintSampler at TextureMat * UV0 (UV3 in the
+     * special-glint format). Elsewhere TextureMat stays, and the glint functions are constants.
+     */
+    @Test
+    void glintDrawsKeepTheAlbedoStillAndSampleTheGlint() throws Exception {
+        java.util.Set<String> entity = java.util.Set.of("Position", "Color", "UV0", "UV1", "UV2", "Normal");
+        java.util.Map<String, String> renames = java.util.Map.of("tex", "Sampler0");
+        ProgramTranslator.Result plain = ProgramTranslator.translateForDraw(GLINT_VERTEX, GLINT_FRAGMENT, entity,
+                new ProgramTranslator.Format(0.1f, true, renames, false, true, false, false));
+        assertTrue(plain.vertex().contains("(TextureMat) * "), plain.vertex());
+        assertTrue(plain.fragment().contains("bool mc_hasGlint() { return false; }"), plain.fragment());
+        assertFalse(plain.samplers().stream().anyMatch(x -> x.name().equals(ProgramTranslator.GLINT_SAMPLER)));
+        compile("glint-none", plain);
+
+        ProgramTranslator.Result glint = ProgramTranslator.translateForDraw(GLINT_VERTEX, GLINT_FRAGMENT, entity,
+                new ProgramTranslator.Format(0.1f, true, renames, false, true, false, true));
+        assertTrue(glint.vertex().contains("texCoord = (mat4(1.0) * "), glint.vertex());
+        assertTrue(glint.vertex().contains("luxium_GlintCoord = (TextureMat * vec4(UV0, 0.0, 1.0)).xy;"), glint.vertex());
+        assertTrue(glint.fragment().contains("bool mc_hasGlint() { return true; }"), glint.fragment());
+        assertTrue(glint.fragment().contains("texture(GlintSampler, luxium_GlintCoord)"), glint.fragment());
+        assertTrue(glint.samplers().stream().anyMatch(x -> x.name().equals(ProgramTranslator.GLINT_SAMPLER)));
+        assertTrue(glint.uniforms().stream().anyMatch(u -> u.name().equals(ProgramTranslator.GLINT_ALPHA)));
+        compile("glint-standard", glint);
+
+        java.util.Set<String> special = new java.util.HashSet<>(entity);
+        special.add("UV3");
+        ProgramTranslator.Result glintSpecial = ProgramTranslator.translateForDraw(GLINT_VERTEX, GLINT_FRAGMENT, special,
+                new ProgramTranslator.Format(0.1f, true, renames, false, true, false, true));
+        assertTrue(glintSpecial.vertex().contains("luxium_GlintCoord = (TextureMat * vec4(UV3, 0.0, 1.0)).xy;"), glintSpecial.vertex());
+        assertTrue(glintSpecial.vertexInputs().stream().anyMatch(x -> x.name().equals("UV3")));
+        compile("glint-special", glintSpecial);
+    }
+
+    @Test
+    void complementaryEntitiesAndHandCompileWithTheGlint() throws Exception {
+        List<Path> packs = PackReader.findPacks(Path.of("run/shaderpacks"));
+        assumeFalse(packs.isEmpty(), "No packs in run/shaderpacks/");
+        Path pack = packs.getFirst();
+        for (String program : List.of("gbuffers_entities", "gbuffers_hand")) {
+            var vsh = PackPreprocessor.preprocessProgram(pack, "/world0/" + program + ".vsh", StandardDefines.forMac());
+            var fsh = PackPreprocessor.preprocessProgram(pack, "/world0/" + program + ".fsh", StandardDefines.forMac());
+            for (boolean special : List.of(false, true)) {
+                java.util.Set<String> elements = new java.util.HashSet<>(java.util.Set.of("Position", "Color", "UV0", "UV1", "UV2", "Normal"));
+                if (special) {
+                    elements.add("UV3");
+                }
+                ProgramTranslator.Result r = ProgramTranslator.translateForDraw(vsh.result().text(), fsh.result().text(), elements,
+                        new ProgramTranslator.Format(0.1f, program.equals("gbuffers_entities"),
+                                java.util.Map.of("tex", "Sampler0", "gtexture", "Sampler0", "texture", "Sampler0"),
+                                program.equals("gbuffers_hand"), true, false, true));
+                assertTrue(r.fragment().contains("texture(GlintSampler, luxium_GlintCoord)"), program + " samples the glint");
+                compile(pack.getFileName() + "-" + program + "-glint" + (special ? "-special" : ""), r);
+            }
+        }
+    }
+
     /** glslang (Vulkan 1.2) -> spirv-cross MSL -> xcrun metal, as TranslateRealPackTest does. */
     private static void compile(String name, ProgramTranslator.Result r) throws Exception {
         assumeTrue(tool("glslangValidator") && tool("spirv-cross"), "glslang/spirv-cross not installed");
