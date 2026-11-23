@@ -1,14 +1,14 @@
 # Test shader packs, pinned. Columns (tab-separated): modrinth slug, version id, version, file name, sha512.
 # scripts/fetch-testpacks.sh downloads them into run/testpacks/. Never commit the packs themselves:
 # most of these licenses forbid redistribution (only MakeUp is LGPL; Mellow and Miniature are MIT).
-# Picked 2026-11-20 from Modrinth's shader list, sorted by downloads. Complementary Unbound isn't
+# Picked 2026-11-20 (versions rechecked 2026-11-23) from Modrinth's shader list, sorted by downloads. Complementary Unbound isn't
 # here: it's the main pack and lives in run/shaderpacks/.
 complementary-reimagined	RKfUB9VC	r5.10	ComplementaryReimagined_r5.10.zip	edced01fb330af215ac73b8d9d31011565089f971f87145b87f413f40ee2128b48970aed26f8e5e879899647ec847b3eefca64bfc013aabbcf25275a207f663d
 bsl-shaders	Y68yiql9	10.1.8	BSL_v10.1.8.zip	94a3c25d6820868db624e11347873e6b572e7cd571967d9ac6f4690ca5d37ca302a7645d85eec800e0654541e3825fba14d37b5a25d3996aaf038178552be26f
 photon-shader	BnGklH5y	v1.4	photon_v1.4.zip	2dec87084dccf91a72a06235ecbfb3627f066699b5f70583f06077cba61433aedbfa6af28eb68bf1cdc726149cc3d9a587517cfab59e6a24e9d6a40b6874d655
 solas-shader	IsqhVpb8	3.9	Solas Shader V3.9.zip	754f88b030fc26a6284bc7fdede886af494b227a67e716ce89c8ec5a185f8ad33d0aeac573245c5e39621ac5b24b4778d50ce566647135c2f1b2f63643901c69
 bliss-shader	kC2Y8q1P	2.1.2	Bliss_v2.1.2_(Chocapic13_Shaders_edit).zip	dafc60be4980ec40f40edc0f2625cb0976f3c9ce5ed86383146a120480826bb1de70ef5e38b7f1437294ed4d38c6ef3c82ebef0ae4e00b8cee165788c9c18280
-makeup-ultra-fast-shaders	t4YRxQug	9.6	MakeUp-UltraFast-9.6.zip	fa7af14ac14bd77bc1c5d8abf5243e9f3dae08777272790de62b9f388db2f5383f8b00c61da358a356a43635afb7cab80ea7196ffd3a97e22d3184b76e9f3fd3
+makeup-ultra-fast-shaders	vXV151ey	9.6a	MakeUp-UltraFast-9.6a.zip	4497cf121736a01c9b4b7c3214d96274edaa44d8bfdd65a26b702ecdf2ae1841db6c1f055b66b3b884c38ea6cea3255dbf006f7e66e2976e1423cf1e0a8e23bb
 rethinking-voxels	cpD4esk9	r0.1-beta9	rethinking-voxels_r0.1-beta9.zip	1e32f41e67e527c3c60149677a05b61c6d305e440812e29abba745b8ed304954780ca48d58b834c49835790bc3c4d38f37c893c5cbdfea9edc07b72e1dabd296
 mellow	DmXr7SxM	3.5	Mellow v3.5.zip	5828a84bec5c307a574e08e72e4aace4c59d2b0ad34a55e95c0922de3b67a29a27b834407e3aa5fb8c501a72e57ab37067e481f7c5da9ae25652624d4e776d3d
 miniature-shader	LWmZ94RG	2.19	miniature-shader-2.19.zip	bc2d9f3d135e8608f4735e5372b893e17cdc630b7536ec1e0b9a4d2734167d1a2102e60de60731d21d8a9741cec1a82530d03bf634b7e7cf9a0f107077c0e7fa
