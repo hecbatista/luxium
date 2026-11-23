@@ -5,396 +5,35 @@ GitHub repo: `hecbatista/luxium` (renamed from `metal-shaders` on 2026-11-20; Gi
 ## Goal
 Load and run Iris/OptiFine-format shader packs (the `shaderpacks/` format) on Minecraft's **Metal** backend provided by the Metallum mod, on Apple Silicon macOS.
 
-Status (2026-11-20): steps 1–6 done; step 7 (polish) in progress, see "Step 7" below. The pack draws the sky, terrain, water, entities, block entities, particles, weather, the hand and the shadow map, through its own programs (see the step 6 notes below), with the user's pack settings applied. The text right below describes the early steps. `mod/` loads next to Metallum and, at startup, logs each pack in `shaderpacks/`: its shaders folder, world-to-folder map and program-file counts (`pack/PackReader.java`). Two pieces run in tests only, not yet in the game:
-- The preprocessor: `pack/IncludeExpander.java`, then `pack/GlslPreprocessor.java` (using JCPP), with `pack/StandardDefines.java`.
-- The translator: `glsl/GlslTokenizer.java` → `glsl/Declarations.java` → `glsl/ProgramTranslator.java`, our own code with no glsl-transformer.
+Status (2026-11-23): steps 1–6 done, step 7 (polish) in progress. The pack draws the sky, terrain, water, entities, block entities, particles, weather, the hand and the shadow map through its own programs, with the user's pack settings, in all three worlds.
 
-Rendering isn't touched.
-
-Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor ✅ · 4 translator ✅ · 5 uniforms ✅ · 6 render pipeline ✅ (gaps listed in the 6d-4 leftovers and the 6e handoff) · 7 polish (in progress).
-
-Step 6 plan (research 2026-11-20). Each sub-step ends with something visible in the game:
-- **6a: first pixels.** Our own tiny full-screen pass after the world draws: a mixin right after `this.renderLevel()` in `GameRenderer.render()` (`GameRenderer.java:497`, before the depth clear). This proves the whole chain: our GLSL → `FrontendGpuDevice.compilePipeline(RenderPipeline, ShaderSource, executor)` → `PipelineBuilder` (shaderc) → `MetalDevice.compilePipeline` (Metallum, `MetalDevice.java:130`) → screen.
-- **6b: the pack's `final` program.** Translated, with `colortex0` = a copy of the world image and `LuxiumUniforms` filled each frame by `UniformWriter`.
-- **6c: render targets and the deferred/composite chain.** Covers colortex formats from the pack, DRAWBUFFERS routing, ping-pong, depthtex copies and noisetex.
-- **6d: gbuffers.** The pack's terrain/entity/sky programs replace vanilla's, including Sodium's terrain path (see Vitrail `docs/internals/terrain.md`), plus the gbuffer matrices.
-- **6e: shadow pass.**
-- **6f: correctness gaps** from step 4.
-
-6a result (2026-11-20, ✅): `render/TestPass.java` draws a see-through gradient after the world, through `mixin/GameRendererRenderMixin` (after `renderLevel()`). `render/LuxiumShaderSource.java` feeds our GLSL to `RenderSystem.getDevice().compilePipeline(...)`.
-- In game (validation on, 0 messages) it compiled through shaderc → Metallum, and the user saw **blue at the top, red at the bottom**, under the GUI.
-- So the vertical axis keeps the OpenGL convention end to end (`gl_Position.y = +1` is the top), matching Vitrail's note. `gl_FragCoord`'s origin is still untested.
-- TestPass is always on until 6b replaces it.
-
-6b result (2026-11-20, ✅ with one gap): `render/FinalPass.java` runs Complementary's translated `final` program after the world draws, replacing TestPass.
-- Translator **FULLSCREEN mode** (Iris CompositeTransformer rules): gl_Vertex/gl_MultiTexCoord0 come from `gl_VertexIndex`, color is white, matrices are identity plus a 0..1 projection, and there are no vertex inputs. `ProgramTranslator.modeFor(name)` picks the mode.
-- The world image is copied to `colortex0`/`colortex3`, the 1x1 noise texture is neutral, depth/shadow textures are white, and the rest are black.
-- `LuxiumUniforms` comes from a `MappableRingBuffer` filled by `UniformWriter` every frame.
-- Two bugs found and fixed in game:
-  - The game's reflection lists **every declared** sampler (`SPIRVModule.reflect` uses `spvc_compiler_create_shader_resources`), and each gets a Metal slot. With 24 declared, Metallum's MSL failed with "'sampler' attribute parameter is out of bounds: must be between 0 and 15". Fix: the translator drops sampler declarations a stage never mentions, and refuses more than 16 per stage. Complementary's maximum is 14 (composite1).
-  - Placeholder textures were uploaded while a render pass was open, which raised "Close the existing render pass before performing additional commands". Fix: resolve every input before opening the pass.
-- Result: 0 validation messages. A readback measurement (every 5 s, logged as "Final pass measurement") shows about 98% of pixels changed by about 8/255 per channel, consistent with IMAGE_SHARPENING 5.
-- The underwater distortion is real but only about ±1 px (0.0007 × screen width), too small to see or to separate in that measurement. The user saw a faint shimmer.
-- Gap: the uniform byte layout isn't yet proven value-by-value on the GPU; composite passes (6c) depend on it heavily.
-- Every texture the pipeline lists must be bound before drawing (`FrontendRenderPass.java:486-490`).
-
-6c plan:
-- 6c-1 ✅ buffer plan.
-- 6c-2: run the chain (two halves per buffer, the flip rule, DRAWBUFFERS routing, depth copies, noisetex from the pack, `program.X.enabled`, and `scale.composite4 = 0.4`).
-- 6c-3: wire final to the chain.
-
-Until 6d (gbuffers) the chain runs on vanilla's image instead of the pack's gbuffer data, so the picture will look partly wrong.
-
-6c-1 result (2026-11-20):
-- `pack/RenderTargetPlan.java` folds `const` buffer directives in Iris's order (`PackDirectives.foldOrder`; final counts with the gbuffers).
-- Complementary world0 has 14 buffers. Formats: colortex0 RG11B10_FLOAT; 1 RGBA8_SNORM (from RGB8_SNORM); 2 RGBA16_FLOAT (from RGB16F); 3, 5, 12, 19 RGBA8; 4 RGBA8_SNORM; 6 RGBA8 (from RGB8); 7, 8 RGBA16_FLOAT; 13, 18 R8; 14 RGBA16_UNORM (from RGB16).
-- Not cleared each frame: 1, 2, 4, 5, 7, 14, 18, 19.
-- Iris allows 32 buffers (`IrisLimits.MAX_COLOR_BUFFERS`).
-- Metal has no 3-channel pixel formats, so promoted buffers must be cleared with alpha 1 and written color-only (write mask) to read like OpenGL.
-- Complementary's chain in world0: deferred1 (0,5,4) → composite (7,1) → composite1 (0,5) → [composite3 (0), off when WORLD_BLUR == -1] → composite4 (3, at 0.4 scale) → composite5 (3) → composite6 (3,2) → composite7 (3, FXAA) → final.
-
-6c-2 progress (2026-11-20): `render/PackChain.java` runs the full chain after the world.
-- Two halves per buffer with the flip, DRAWBUFFERS routing to multiple attachments, and promoted buffers written color-only.
-- Clears per plan (default clear colors: colortex1 white, others 0; promoted ones get alpha 1).
-- The "seed" pass copies vanilla's image into colortex0; depthtex0/1/2 are a copy of vanilla's depth (D32_FLOAT).
-- noisetex is loaded from the pack (`texture.noise`).
-- `program.<folder>/<name>.enabled` and `scale.<name>` come from the preprocessed shaders.properties. Scale goes into the full-screen projection, because Metallum always sets a full viewport.
-- The pack's settings (defaults, or the user's from step 7) are defined for .properties files, so `#if WORLD_BLUR == -1` switches composite3 off. (This was `pack/OptionDefaults.java`, replaced by `pack/PackOptions.java` in step 7.)
-- **Debug view:** `LUXIUM_STOP_AFTER=<pass|seed> LUXIUM_SHOW=<colortexN|depthtex0>` (environment variables, inherited by the game) shows one buffer on screen. NaN or infinity shows as magenta.
-
-Result in the game test: 8 passes compile and run (deferred1, composite, composite1, composite4 @0.4, composite5–7, final), 14 buffers, 0 validation messages, **but the screen is black**.
-- Per-pass debug: the seed colortex0 is correct, and **deferred1 already writes 100% NaN** to colortex0.
-- Prime suspect: the gbuffer matrices aren't supplied yet (all zero), so position reconstruction divides by zero.
-- depthtex0 looks all black. Minecraft 26.x renders **reversed-Z** (far = 0), and Complementary expects the OpenGL convention.
-- Fixed (2026-11-20):
-  - `uniform/RenderMatrices.java` captures the matrices in `GameRendererRenderMixin`, at `RenderSystem.setProjectionMatrix` inside `GameRenderer.renderLevel`, using MixinExtras `@Local`.
-    - gbufferModelView = `CameraRenderState.viewRotationMatrix`.
-    - gbufferProjection = the final projection with view bobbing, passed through Iris's `MatrixUtils.undoRevZ` (zZeroToOne branch; Metallum's `DeviceInfo.isZZeroToOne` is true).
-    - Each also comes inverted and as last frame's value.
-  - depthtex0/1/2 are converted once per frame to `1 - depth` in an R32_FLOAT texture (Iris's DepthTransformer does `1 - read`; converting the image as Vitrail does also covers reads through helper functions).
-- Result: **0% NaN at every pass** (was 100% from deferred1). The land shot shows the scene with Complementary's fog and sky look, plus a thin white streak near the top-left (unexplained).
-- The underwater shot is almost black. Likely cause: the stand-ins (no gbuffers_water data). Re-check after 6d.
-
-6d plan (research 2026-11-20; Vitrail `docs/frame.md`, `docs/internals/terrain.md`, `entities.md`). Each piece should end visible in the game test:
-- **6d-1: gbuffer plumbing + sky.**
-  - Cut the chain in three as Vitrail does: begin/prepare before the world, deferred after opaque features (before translucents), composite + final after the level.
-  - Add a way to draw one vanilla "family" with the pack's program into colortex targets (several attachments, the game's depth), plus per-draw values (renderStage etc.).
-  - Prove it on the sky (`gbuffers_skybasic`/`skytextured`).
-- 6d-1 design (Vitrail `frame.md` "The seed", `sky-and-shadows.md` "The sky"):
-  - Pack gbuffer passes draw **during** the world into colortex current halves, with the **game's depth** attached. So the buffer clears move to **frame start**, before `renderLevel`.
-  - Each pack gbuffer program also writes its fragment depth into a **coverage mask** (R32_FLOAT, cleared to 2.0 = "nothing"). The sky writes the far plane (reversed-Z far = 0).
-  - The **seed** then fills colortex0 with the game's image only where the game drew in front of (or instead of) the pack: `mask` vs world depth, equal within a few ULP. Apple GPUs differ by about 1 ULP on sloped surfaces, in a 32-px tile pattern.
-  - Sky facts:
-    - 8 pieces in 4 vertex formats; declare exactly the bound format's elements.
-    - `renderStage` tells the pieces apart.
-    - The sun/moon/stars/band carry their own model-view (the day rotation), separate from the camera's.
-    - The sky pipeline has **no depth state**; the disc is a triangle fan.
-    - It's all 8 pieces or none, and a boss bar asking for world fog (the ender dragon) skips the sky entirely.
-  - Order: plumbing first (no visible change = regression check), then the sky.
-  - Plumbing ✅ (2026-11-20):
-    - `PackChain.beginFrame` (from `GameRendererRenderMixin`, before `renderLevel`) clears the buffers and the coverage mask.
-    - The seed discards where `mask` matches the raw world depth within 4 ULP (`floatBitsToInt`).
-    - Game test: picture identical to before, 0 validation messages.
-    - Next: the sky.
-  - Sky ✅ (2026-11-20):
-    - `render/SkyTakeover.java` + `mixin/SkyRendererMixin.java` (MixinExtras `@WrapOperation`) open vanilla's sky pass on colortex0.
-    - Vanilla's SKY/STARS/SUNRISE_SUNSET pipelines are swapped for gbuffers_skybasic and CELESTIAL for gbuffers_skytextured. Each is compiled with `ProgramTranslator.translateForFormat` for that pipeline's vertex format, and copies the pipeline's topology, blend and depth state.
-    - The per-piece model-view and color come from `DynamicGpuData.writeTransform`, and renderStage from the piece's debug label. The sun/moon texture (Sampler0) is bound under the pack's albedo names. The End's sky came in step 7b.
-    - Format mode adds a vertex epilogue `z' = (w - z) / 2` (OpenGL clip depth onto the shared reversed-Z buffer).
-    - `UniformWriter` writes mat4 arrays (luxium_TextureMatrix).
-  - **Big bug found and fixed:** the chain ran after `GameRenderer.renderLevel()`, but `render3dHud` clears the depth (`GameRenderer.java:689`) before drawing the hand. So the chain always saw depth 0 (CPU readback: 100% zeros), and composites treated everything as sky. The chain now runs before `render3dHud`. This also fixed the near-black underwater shot.
-  - Debug: `LUXIUM_SHOW=rawdepth|maindepth`, `LUXIUM_SHOW_SCALE=<n>`, `LUXIUM_DEPTH_PROBE=1` (CPU readback of the game's depth).
-  - Result: land shows the scene under Complementary's sky gradient (the white streak is gone), underwater is visible and tinted, and there are 0 validation messages.
-- **6d-2 result (2026-11-20, ✅): solid and cutout terrain drawn by the pack's `gbuffers_terrain` through Sodium.**
-  - Sodium facts (0.9.2, decompiled with the Vineflower jar in the Gradle cache: `find ~/.gradle/caches -name 'vineflower*.jar'`):
-    - On Metal, Sodium's `DrawBackend` is `OPENGL` (it only picks the VK backends for `VulkanDevice`), so draws go through `GLDrawContext` → `RenderPass.multiDrawIndexed`.
-    - The pass is handed in: 26.3 opens one "Main" pass in `LevelRenderer.addMainPass`'s lambda (`lambda$addMainPass$0`), and `executeSolid` draws the opaque terrain first.
-    - `DefaultChunkRenderer.render` always calls `pass.pushConstants` (20 bytes: region offset, time, region id). Its GLSL takes the `#ifdef VULKAN` push-constant branch (glslang defines VULKAN), and Metallum supports push constants.
-    - 26.3's `PipelineBuilder` binds vertex inputs **by element name**, with the location from the shader. So a shader may declare a subset of the format, and Vitrail's 26.2 "silent shift" trap doesn't apply.
-  - Pieces:
-    - `sodium/LuxiumChunkVertex.java` (36 bytes = Sodium's 20, written the same way, + block id, mid-texcoord, normal, tangent) is used **all session** via `mixin/sodium/ChunkMeshFormatsMixin` (also covers ArenaAggregator's stride).
-    - `ProgramTranslator.translateForTerrain` (Iris SodiumTransformer decode; alpha test per pass; extra `luxium_Coverage` output = `gl_FragCoord.z`).
-    - `render/TerrainTakeover.java` + `mixin/LevelRendererTerrainMixin` (draws Sodium's OPAQUE group into its own pass on colortex0/6/4 + coverage + the game's depth, just before "Main" opens, then skips the game's opaque call) + `mixin/sodium/DefaultChunkRendererMixin` (swaps the pipeline, binds the UBO and textures after `setPipeline`).
-    - Block ids: `pack/BlockIds.java` + `sodium/BlockStateIds.java` + `mixin/sodium/BlockRendererMixin` (thread-local id per `renderModel`). Complementary: 418 ids, 35,551 states (stone=10080, oak_leaves=10009).
-    - `separateAo` and block ids are read at startup and again at pack load; if they changed, `mc.levelExtractor.allChanged()` rebuilds the chunks (needed in the game test, which copies the pack in after startup).
-    - `sampler2DShadow` now goes through the "arithmetic road" (plain sampler2D + `luxium_shadowCompare`, four gathered texels LEQUAL), because the API has no compare samplers.
-    - Fixed: `PropertiesPreprocessor` treated `# If you want…` as `#if`; it now uses Iris's exact directive test.
-  - Game test (scene now has a leaves block for the cutout pass): both passes draw, **0 validation messages**.
-    - With `LUXIUM_NO_TERRAIN=1` (new debug switch) the stone is flat grey; with the pack it's warm and sunlit, and the leaves get Complementary's bright, waving foliage.
-    - `LUXIUM_SHOW=colortex4` shows correct world-space normals.
-    - Unit tests pass, including `TerrainTranslationTest` (Complementary terrain → glslang → spirv-cross → `xcrun metal`); scoreboard 90/90.
-  - Known gaps:
-    - `oldLighting=false` isn't applied: Sodium still bakes the per-face shade into AO (tops are 1.0, so the stone floor test can't see it).
-    - Tag entries (`%tag`) in block.properties are skipped.
-    - `at_midBlock` is zero.
-    - `fogColor` is still 0.
-    - The view-bob split isn't done.
-- **6d-3 result (2026-11-20, ✅): water and translucent terrain drawn by the pack's `gbuffers_water`.**
-  - The chain is cut in two around the world (Vitrail's "after opaque" / "after level"):
-    - `mixin/LevelRendererTerrainMixin.luxium$afterOpaque` wraps `executeClassicTransparency` (LevelRenderer.java:461). It closes the game's "Main" pass (closing is idempotent), then:
-      - `PackChain.drawDeferred`: converts depth (also kept as depthtex1/2 = before translucents), seeds colortex0, runs the deferred passes.
-      - `TerrainTakeover.drawTranslucent`: Sodium's TRANSLUCENT group with `gbuffers_water`.
-      - Then opens a pass on the **translucent catch** (an RGBA8 image cleared to transparent, with the game's depth) for the rest of the game's translucent phase (translucent features, clouds, weather, world border).
-      - `PackChain.composeCatch` then composes it onto colortex0 (premultiplied "over"; the game's TRANSLUCENT blend onto a clear image leaves premultiplied colour).
-    - `PackChain.draw` (before render3dHud) re-converts depthtex0 (now with translucents) and runs composite + final. If the cut wasn't reached (e.g. improved transparency / OIT), it runs the whole chain as before.
-  - Water pipeline:
-    - Writes colortex0 and colortex3, with no coverage output (`ProgramTranslator.Terrain(alpha, coverage)`).
-    - Blend comes from `blend.gbuffers_water[.<buffer>]`, else vanilla TRANSLUCENT. Alpha test from `alphaTest.gbuffers_water` (Complementary: > 0.0001).
-  - Block ids: fluids via `mixin/sodium/DefaultFluidRendererMixin` (fluid bit set). Translucent quads the sorter keeps carry the id on `ChunkVertexEncoder.Vertex` (`mixin/sodium/ChunkVertexMixin` + `sodium/LuxiumVertexData`). Complementary: water = 32000, glass = 32008.
-  - **Bug found and fixed:** gbuffer programs' input textures were resolved at frame start. The water then read the half of colortex5 from *before* deferred1's flip, and Complementary's gbuffers_water discards where `gaux2.a` (cloud depth) is nearer, so every water/glass pixel vanished. Inputs are now resolved right before each terrain pass opens.
-  - Debug additions:
-    - `LUXIUM_SHOW=depthdiff`: |depthtex0 − depthtex1|, ×`LUXIUM_SHOW_SCALE` (default 1000).
-    - `LUXIUM_SHOW=<buffer>:alt`: the other half; after a pass that wrote the buffer, that's what the pass read.
-  - Game test: the glass box and the water are the pack's; the stone floor shows through the water and the gold/log blocks through the glass. 0 validation messages. Unit tests pass (72), scoreboard 90/90.
-  - Known gaps:
-    - Game features drawn after the cut but outside `executeClassicTransparency` (entity outlines, see-through text, always-on-top gizmos) land in the game's image and are overwritten by final.
-    - Translucent features drawn before translucent terrain in vanilla now depth-test against the water (hidden behind it, not seen through it).
-    - The caught layer is the game's finished sRGB colour composed onto the pack's colortex0.
-    - Improved transparency (OIT) isn't taken over.
-    - Water inputs that the chain hasn't written this frame (gaux4 = colortex7) read last frame's values, as under Iris.
-- **6d-4, first slice (2026-11-20, ✅): the level's solid entities and block entities drawn by the pack's `gbuffers_entities`.**
-  - How the game draws them (26.3): `executeSolid` → `featureFrame.executeSolid(renderPass)` → each feature renderer's `executeGroup` → `PreparedRenderType.draw` per draw. That call sets the vanilla pipeline, binds `DynamicTransforms` (ModelViewMat, TextureMat, ColorModulator) and the textures (Sampler0 skin, Sampler1 overlay, Sampler2 lightmap) by name, then `drawIndexed`. Every draw shares the level's single "Main" pass.
-  - Pieces:
-    - `render/LevelPass.java`: the game is handed a stand-in for "Main" that forwards every call to a real pass. `suspend()` closes the real pass; the next call reopens it (no clear, default uniforms, debug groups, scissor).
-    - `mixin/LevelRendererTerrainMixin.luxium$solidFeatures` opens the entity window around `featureFrame.executeSolid`.
-    - `mixin/RenderTypeFeatureRendererMixin` routes each `drawFromBuffer`: served pipelines go to the pack's pass (the "hold": gbuffers_entities' targets colortex0/3/6/4 + coverage mask + the game's depth); others go back to the LevelPass, which releases the hold first.
-    - `mixin/PreparedRenderTypeMixin` swaps the pipeline and binds the pack's block and textures right after `setPipeline`.
-    - `render/EntityTakeover.java` serves pipelines with the `ENTITY` format, one unblended target, and depth. Each is compiled on first use with the vanilla state; alpha > 0.1 if the vanilla pipeline defines `ALPHA_CUTOUT`.
-  - Translator: `ProgramTranslator.translateForDraw` + `Format(alphaTest, coverage, samplerRenames)`. Draw mode reads the `DynamicTransforms` block, takes the light from UV2, and renames the pack's albedo sampler (`tex`/`gtexture`/`texture`) → `Sampler0` and `lightmap` → `Sampler2`, so the game's own draw binds them. Format mode now gives full light (240) where a format has no UV2, as Iris does (the sky's average colour didn't change).
-  - Traps found:
-    - `RenderPipeline.getVertexFormatBindings()` has empty (`null`) slots, so check slot 0 and that the rest are null.
-    - `MappableRingBuffer.rotate()` records a command, so do it only when no pass is open.
-  - Game test (scene gains a pig with NoAI and a chest): both are drawn by the pack (pipelines entity_cutout and entity_cutout_cull). Their average colour moves (pig 157/118/114 → 147/123/127). 0 validation messages, 73 unit tests pass, scoreboard 90/90.
-  - New debug switch: `LUXIUM_NO_ENTITIES=1`.
-- **6d-4, second slice (2026-11-20, ✅): hit flash, translucent entities, clouds=off.**
-  - `entityColor`: in draw mode, if the pack declares `uniform vec4 entityColor`, it becomes a varying. The vertex prologue reads `texelFetch(Sampler1, UV1, 0)` (Iris EntityPatcher).
-    - A pipeline is served only if it declares every game texture (Sampler0-2) the pack reads, since the game binds only declared ones.
-    - Game test shot 3 (pig hurt): the pack's pig goes from 147/123/127 to 193/131/129.
-  - Translucent entities: `EntityTakeover` now has two families.
-    - SOLID: gbuffers_entities, unblended, before the deferred cut, with the coverage mask.
-    - TRANSLUCENT: gbuffers_entities_translucent, which falls back to gbuffers_entities. Blended pipelines, after the cut, onto the deferred halves, with the vanilla blend unless the pack's `blend.*` says otherwise, alpha > 0.1, no coverage mask.
-    - The catch pass is a `LevelPass` too; the window opens around `featureFrame.executeTranslucent` in `executeClassicTransparency`.
-    - Game test: the slime's outer layer is the pack's (entity_translucent). `entity_shadow` stays the game's (no Sampler1).
-  - `clouds=off` in shaders.properties (Complementary's default, CLOUD_STYLE_DEFINE = -1) skips `CloudRenderer.render` in `executeClassicTransparency` (Iris ShaderProperties).
-  - 0 validation messages, 73 unit tests pass, scoreboard 90/90.
-- **6d-4, third slice (2026-11-20, ✅): entity ids and gbuffers_block.**
-  - `render/DrawIds.java` carries ids from the submission to the draw:
-    - the dispatchers' `submit` (mixins on `EntityRenderDispatcher` / `BlockEntityRenderDispatcher`; block state via `BlockEntityRenderStateAccessor`) sets the current ids;
-    - `SubmitNodeCollection.submitModel/submitCustomGeometry` record RenderType → ids;
-    - `RenderTypeFeatureRenderer$Group.getOrAddDraw` records the PreparedRenderType → ids;
-    - `EntityTakeover` reads them per draw.
-  - One value per draw is right because the game only merges draws with equal pipeline + textures. Two entity types sharing a texture would share an id (Vitrail puts ids on the vertex and never meets that).
-  - `EntityTakeover`: families are chosen per draw. Block entities' solid draws go to `gbuffers_block` (falls back to gbuffers_entities). Each served draw writes its own uniform ring slot with `entityId`, `blockEntityId` and `renderStage` (ENTITIES 11, BLOCK_ENTITIES 12); the rings rotate at `PackChain.beginFrame`.
-  - `entity.properties` is read with `ItemIds.parse(text, "entity.")`. Complementary: 74 types, slime = 50084, pig unlisted = −1.
-  - Game test log: pig entityId −1; slime 50084 (both layers); chest → gbuffers_block with blockEntityId 5008. 0 validation messages, 74 unit tests pass, scoreboard 90/90.
-- **6d-4, fourth slice (2026-11-20, ✅): particles.**
-  - `QuadParticleFeatureRenderer.executeGroup` draws all of a group's layers through one pass: it binds its shared uniforms (default ones, DynamicTransforms, Sampler2) once, then each layer sets its pipeline, Sampler0, and draws.
-    - While a window is open, the group is handed a `render/RoutingPass`. On each `setPipeline` it sends the layer to the pack's pass (if the pipeline is the pack's) or to the level's `LevelPass`, replaying the shared uniforms when it switches.
-    - `mixin/QuadParticleFeatureRendererMixin` swaps each layer's pipeline in `drawLayers`.
-  - Families: particles (solid window, with the coverage mask) and particles_translucent (a window around `executeTranslucentAfterTerrain`, where 26.3 draws translucent particles). Both use the PARTICLE format and alpha > 0.1, and the program is found through Iris's fallbacks (Complementary: gbuffers_textured for both, targets 0, 6, 3).
-  - Each `EntityTakeover` family now has its own vertex format.
-  - Game test: flame and happy_villager particles in shot 1 are drawn by the pack (pipeline opaque_particle). 0 validation messages, 74 unit tests pass, scoreboard 90/90.
-- **6d-4, fifth slice (2026-11-20, ✅): weather.**
-  - `WeatherEffectRenderer.render` (PARTICLE format, pipeline WEATHER; it sets the pipeline, binds DynamicTransforms and Sampler2, then draws rain and snow with their textures) is routed like particles: a `RoutingPass` and its own window, inside the catch.
-  - The program comes through Iris's fallbacks (Complementary: gbuffers_weather, targets 0 and 4). The alpha test follows the pack's `alphaTest.gbuffers_weather` (> 0.0001); stage RAIN_SNOW = 21.
-  - **Metallum / vanilla bug found:** during rain with no snow, vanilla draws snow with `drawIndexed(0, …)`. Metallum passes that to Metal, and Metal's validation aborts the game ("indexCount(0) must be non-zero"). It happens without our takeover too (`LUXIUM_NO_ENTITIES=1`). `LevelPass` and `RoutingPass` now skip zero-count draws. Worth reporting to Metallum.
-  - Game test shot 4 (rain): Complementary's rain look (overcast sky, wet floor, streaks). 0 validation messages, 74 unit tests pass, scoreboard 90/90.
-- **6d-4, sixth slice (2026-11-20, ✅): the hand.**
-  - Depth: Complementary treats depth < 0.56 as "hand" (held-item reflections, TAA, edges). Iris squeezes the hand's 0..1 depth to 0.4375 + 0.125 d (`HandRenderer.DEPTH`).
-    - In draw mode, `Format.handDepth` writes reversed `0.5 w − 0.0625 z`.
-    - The hand's projection is the hud's (`hudProjection.getMatrix` → `RenderMatrices.undoRevZ`).
-  - Chain order changed:
-    - `PackChain.afterLevel` (before `render3dHud`) converts depth.
-    - `PackChain.afterHand` runs right after `renderItemInHand`, before screen effects and the crosshair: it merges the hand's depth into depthtex0/1/2 (hand > 0 → 1 − hand), then runs composites + final.
-    - Fallback at `renderLevel` RETURN. If the pack's hand isn't active, the composites run before the hand as before.
-  - `mixin/GameRendererHandMixin`: the "Item in hand" pass is a `LevelPass`, and the hand window opens around `renderAllFeatures`, with the hold depth = the hand's own depth view.
-  - Families `gbuffers_hand` (stage 16) and `gbuffers_hand_water` (falls back to hand, stage 23), one tenth.
-  - Game test shot 5 (creative, iron sword, HUD on): the sword (`item_cutout`) and the arm (`entity_translucent`) are the pack's. 0 validation messages, 74 unit tests pass, scoreboard 90/90.
-- **6d-4, seventh slice (2026-11-20, ✅): spider eyes, beacon beams, lightning.**
-  - Families chosen by vanilla pipeline path (`Family.pipelinePath`), as Iris does:
-    - `pipeline/eyes` → gbuffers_spidereyes (blend SRC_ALPHA ONE ZERO ONE unless the pack says otherwise);
-    - `pipeline/beacon_beam_opaque` / `_translucent` → gbuffers_beaconbeam (BLOCK format, no alpha test);
-    - `pipeline/lightning` → gbuffers_lightning (POSITION_COLOR format, no alpha test; not in the test scene).
-  - Draws whose pipeline binds no overlay texture (spider eyes) get a translation with `Format.overlay = false`, so `entityColor` stays a uniform, 0.
-  - Glint isn't a pass of its own in 26.3: it's a `GLINT` variant of the entity and item pipelines, served by the base program as in Iris (`HAND_CUTOUT_GLINT` → hand).
-  - Game test: spider with eyes, beacon with beam (blockEntityId 32016). 0 validation messages, 74 unit tests pass, scoreboard 90/90.
-- **6d-4 leftovers (small, can wait):**
-  - ~~`currentRenderedItemId`, `current_player`, translucent particles~~: done in 7e.
-  - Hand draws in a non-ENTITY format would be painted over by final.
-  - `LevelPass` covers "Main", the catch and the hand pass only. The OIT path (improved transparency) is switched off while a pack is in use (7d), as in Iris.
-- **6e, first slice (2026-11-20, ✅): terrain shadows.**
-  - `uniform/ShadowMatrices.java` (Iris's math) publishes from `GameUniforms` each frame: `shadowAngle`, `shadowModelView(Inverse)`, `shadowProjection(Inverse)` (OpenGL convention).
-  - Directives are read from the programs' `const` lines. Complementary: 2048, distance 192, sunPathRotation −40, near/far −100.05/156, interval 2.
-  - `TerrainTakeover.drawShadow` runs just before the opaque terrain:
-    - the pack's `shadow.vsh/fsh` (terrain mode with `Terrain.shadow`: forward depth `(z + w) / 2`, no culling, depth ≤) draws Sodium's OPAQUE group into `render/ShadowTargets` (D32 2048² cleared to 1; shadowcolor0/1 RGBA8 cleared white);
-    - the depth is then copied to an R32F image that `PackChain.input` hands out as shadowtex0/1/shadow/watershadow, with shadowcolor0/1 as the colour buffers.
-  - Game test: the shadow map (`LUXIUM_SHOW=shadowtex0`) shows the platform in Complementary's distorted layout. The floor beside the leaves goes from 93/107/63 to 58/69/61. 0 validation messages, 74 unit tests pass, scoreboard 90/90.
-- **6e, second slice (2026-11-20, ✅): translucent casters.**
-  - The shadow pass draws Sodium's OPAQUE group, copies the depth as `shadowtex1`/`shadow` (Vitrail "Two maps, one render"), then draws the TRANSLUCENT group with the shadow program (alpha > 0.1, **unblended**: Iris ShadowWater BlendModeOverride.OFF) and copies the whole map as `shadowtex0`/`watershadow`.
-  - Game test shot 3: the glass box casts its frame grid and blue-tinted light through the water onto the floor (Complementary's coloured shadows through shadowcolor). 0 validation messages, 74 unit tests pass, scoreboard 90/90.
-- **6e, third slice (2026-11-20, ✅): entity and block-entity casters.**
-  - In the shadow pass, after the opaque terrain, `EntityTakeover.drawShadowCasters` replays the level's already-prepared solid features (`PreparedFrame.executeSolid`, noted from the main-pass lambda) through a `DropPass`.
-    - Served ENTITY-format draws go to the pack's `shadow` program (family SHADOW_ENTITIES, any blend drawn unblended, one tenth, no culling, depth ≤, the shadow targets); everything else is dropped, never drawn on screen.
-    - The draw's pose is moved to the light: `gl_ModelViewMatrix = luxium_ShadowFix * ModelViewMat`, with `luxium_ShadowFix = shadowModelView · inverse(gbufferModelView)` (`Format.shadow`: forward depth).
-  - Game test: the pig, slime and chest cast shadows (floor beside the pig 89/106/120 → 65/77/90). 0 validation messages, 74 unit tests pass, scoreboard 90/90.
-- **6e handoff: what's left of the shadow pass.**
-  - ~~Casters are only Sodium's camera-visible sections~~: fixed for terrain in 7c (the light's own render list). Entity casters are still the camera-visible ones.
-  - Fixed: Sodium's block-face culling (`DefaultChunkRenderer.prepare` reads `useBlockFaceCulling`) is off while the pack's shadow pass is active, so faces turned away from the camera still cast shadows; the camera's pipelines cull back faces anyway.
-  - No hand casters, and no beacon beams (BLOCK format) or particles in the map.
-  - No shadowcolor format or clear directives; no mipmaps or hardware filtering; the shadow map isn't drawn a frame ahead.
-- **6f result (2026-11-20, ✅): the step-4 correctness gaps, checked on Complementary.**
-  - `gl_FragCoord` origin: measured with the new debug view `LUXIUM_SHOW=fragcoord` (`LUXIUM_STOP_AFTER=seed`): `uv.y` and `gl_FragCoord.y / height` both read 0.98 at the top and 0.02 at the bottom. So it already follows OpenGL's bottom-left origin (Metallum flips the viewport), and no rewrite is needed.
-  - Not used by Complementary's world0 programs, so nothing to fix for the target pack:
-    - `gl_VertexID` (only `gbuffers_line`, which isn't taken over);
-    - `packUnorm` / `unpackUnorm` / `packHalf`;
-    - `textureLod` (no mip-less sampling trap);
-    - compute (`shadowcomp.csh`: coloured lighting, off under `MC_OS_MAC`).
-  - Still open in general (other packs): `invariant gl_Position` against Metal fast-math (no seam seen so far), `.gsh` geometry programs, `gl_VertexID` base vertex.
-- Metallum's only Sodium mixin picks the graphics API (`metallum.sodium.mixins.json`: `SodiumPreferredGraphicsApiMixin`). Sodium already draws through the game's RenderPearl API, so Vitrail's Sodium-level hooks should apply on Metal too.
-
-Step 7 (polish), agreed order with the user (2026-11-20): pack settings → Nether/End → off-screen shadow casters → improved transparency (OIT) → small 6d-4 leftovers → performance → housekeeping. Check in with the user before each slice. **Every slice's final pass includes the frame-sequence flicker check** (user request 2026-11-20; see "Automated in-game screenshots").
-- **7a result (2026-11-20, ✅): pack settings the user changes.**
-  - `pack/PackOptions.java` follows Iris's option rules (credited in NOTICE):
-    - Value options are `#define NAME value // [allowed]`. On/off options are `#define NAME` / `//#define NAME`, and count only if some file in the same include group tests the name with a bare `#ifdef`/`#ifndef`. That rule covers `const bool` options too.
-    - `const` options are limited to Iris's directive names.
-    - Include groups are the weakly connected parts of the include graph, which starts at the program names Iris knows. So `clrwl_*` and `voxy_*` aren't starts.
-    - A name with two different defaults is dropped as ambiguous.
-  - The settings file is Iris's: `shaderpacks/<pack file name>.txt` (e.g. `ComplementaryUnbound_r5.10.zip.txt`), `NAME=value` lines, read once when the pack loads (restart the game after editing). Luxium only reads it; Iris also rewrites it.
-    - On/off options take `true`/`false`. Value options take any value, as in Iris.
-    - Unknown names and bad values are logged as "Pack settings ignored".
-  - Applying: each file's lines are edited before include expansion (`PackPreprocessor.preprocessProgram(..., options)`, an `IncludeExpander.FileSource` wrapper). `.properties` files get `PackOptions.propertyDefines`: options that are on, then the game's defines, then every value option (Iris's order).
-  - Every start writes `shaderpacks/<pack>.luxium-options.txt`: every option with its current value, default, allowed values, and the pack's English names from `lang/en_US.lang`.
-  - Complementary: 407 options (172 on/off, 235 with values), none ambiguous. The `.properties` files test only two names that aren't options (`IRIS_FEATURE_BLOCK_EMISSION_ATTRIBUTE`, `DISTANT_HORIZONS`); the old reader didn't define them either.
-  - Game test: run twice.
-    - Defaults: picture unchanged.
-    - `LUXIUM_TEST_SETTINGS="T_SATURATION=0.00;NOT_A_SETTING=1"`: the whole picture is grey (land and underwater), and the unknown name is logged as ignored.
-    - 0 validation messages, 86 unit tests pass (new: `PackOptionsTest`), scoreboard 90/90.
-    - Flicker check: land worst 0.012% of pixels (edges of the animated mobs), underwater 0.009%. A fake one-frame glitch is caught.
-  - Not done: profiles (`profile.*`), an in-game settings screen, and reloading without a restart. A reload needs every `prepare` (PackChain, takeovers, shadow targets) to free and rebuild its GPU state.
-- **7b result (2026-11-20, ✅): the Nether and the End.**
-  - Each world loads its own folder (`MetalShadersClient.loadWorld`), checked every frame in `onFrameExtracted`. Iris's rules (`PackInfo.worldKey` + `folderFor`):
-    - A world named in `dimension.properties` uses its folder.
-    - Otherwise the End's sky means the End's folder and the Overworld's sky the Overworld's.
-    - Otherwise the folder of `*`, else the shaders/ root.
-  - Switching unloads the last world first (`PackChain.unload` → `SkyTakeover`/`TerrainTakeover`/`EntityTakeover`/`ShadowTargets.unload`: close every pipeline, ring buffer and texture, forget programs). Closing right away is safe because Metallum's command buffers retain what queued frames use (`commandQueue.commandBuffer()`, retained references); the resize path already relied on that.
-  - Pack-wide values (settings, item/entity ids, formulas, preprocessed shaders.properties) load once in `loadPackValues`. Only the world folder's programs reload.
-  - Load time per world: about 1.8 s when macOS's Metal shader cache is warm, about 9 s the first time a folder's shaders are ever compiled.
-  - `program.<folder>/<name>.enabled` (`pack/ProgramSwitches.java`, Iris's BooleanParser rules) now applies to every program, not only the composites. A switched-off program counts as missing, so the fallbacks pick another.
-    - Example: `SHADOW_QUALITY=-1` switches off `shadow` in every world.
-    - Under that setting the empty sky below the horizon turns dark, because Complementary also turns off its light shafts (`LIGHTSHAFTS_ACTIVE` needs `SHADOW_QUALITY > -1` in the Overworld). That's the pack's own behaviour, not a bug.
-  - The End sky: vanilla's END_SKY pipeline (POSITION_TEX_COLOR, quads) is drawn with `gbuffers_skytextured` (Iris IrisPipelines); End sky and End flash are stage CUSTOM_SKY (3). `SkyRendererMixin` now also wraps `DynamicGpuData.writeTransform(Matrix4f)` (the End sky's transform, white).
-  - Sky coverage fix: the coverage mask is cleared to "nothing" at frame start, and `PackChain.skyDrawn` marks the background as the pack's only when the pack's sky pass actually opens. Before, a frame where the game skips the sky drew a black background. The game skips it with no sky in the world (Nether), a boss's world fog (the dragon), lava or powder snow fog, or blindness/darkness.
-  - Game test:
-    - Shot 6: a carved Nether room (lava, glowstone, soul fire) in the pack's orange haze.
-    - Shot 7: an End platform at (0, 72, −205) under the pack's End sky, outside the dragon's 192-block arena (`EnderDragonFight.validPlayer`).
-    - Shot 8: back in the Overworld (world0 reloaded), matching shot 1.
-    - 0 validation messages; 91 unit tests pass (new `WorldFoldersTest`); scoreboard 90/90.
-    - Flicker: land 0.012%, underwater 0.030%, Nether 0.033% (all on the animated soul fire), End 0%.
-    - With `SHADOW_QUALITY=-1`: every world's shadow program is switched off and the floor loses the glass grid's shadow.
-  - Gaps:
-    - The world folder's programs compile on the render thread while the loading screen is up.
-    - Only one world's programs are kept: going back compiles again (warm cache: about 1.8 s).
-    - Nether/End weather, clouds and DH/voxy programs aren't checked.
-
-- **7c result (2026-11-20, ✅): shadows from casters the camera can't see.**
-  - The shadow pass's terrain now comes from the light's own Sodium render list, as Iris does on the same Sodium 0.9.2 (`render/ShadowCulling.withLightLists`, around `TerrainTakeover.drawShadowTerrain`):
-    - Each region gets a second render list and batch map (`mixin/sodium/RenderRegionMixin` + `sodium/ShadowRegion`), swapped in for the shadow draw. Every place Sodium empties a batch empties all maps, including the three in `RenderRegionManager.uploadResults` (`RenderRegionManagerMixin`, `require = 3`).
-    - Sodium's `renderOutOfGraph` walk fills the light's lists (`RenderSectionManagerAccessor` invoker), then `SodiumWorldRenderer.prepareChunkRendering` fills its batches.
-    - Afterwards the camera's `renderLists`, `taskLists` and `renderTree` are put back and its batches prepared again. `prepare` writes the shared `shouldDraw` array, and `renderTree` also drives entity culling.
-  - The walk's frustum is the shadow map's box (`ShadowCulling.LightBox`): a section's corners go through `shadowProjection × shadowModelView` (camera-relative, as the shadow programs use them) and must overlap the unit cube. `intersectAab` returns −2/−1/0 as Sodium's tree walk reads JOML. Iris's default "advanced" frustum is tighter; the box never drops a caster.
-  - Debug: `LUXIUM_SHADOW_CAMERA_LIST=1` keeps the camera's list (the old behaviour). The log line "Shadow terrain: N regions seen by the light, M by the camera" appears every 5 s.
-  - Game test shot 9:
-    - The scene is a floor at y = 160 around x = 100, with a stone-brick tower at x 118–121 behind the camera, at time 1500.
-    - The camera looks west and down. The tower's long morning shadow lies across the floor; with `LUXIUM_SHADOW_CAMERA_LIST=1` the floor has none.
-    - Go there before the `fill`s: a fill only works in loaded chunks (the first try filled nothing).
-    - 0 validation messages; 94 unit tests pass (new `ShadowCullingTest`); scoreboard 90/90.
-    - Flicker: land 0.014%, underwater 0.019%, Nether 0.045% (soul fire), End 0%, shot 9 sequence 0%.
-  - Still open:
-    - Entity casters are still only the camera-visible ones (the level's prepared solid features).
-    - Sections never built because the camera hasn't been near them have no mesh to cast with. Sodium builds from the camera's task lists; the light's task lists are dropped, as in Iris.
-    - Sodium is now declared in `fabric.mod.json` (`"sodium": "~0.9.2"`, user-approved 2026-11-20): Luxium's terrain and shadows are drawn through Sodium and its mixins target 0.9.2's internals.
-
-- **7d result (2026-11-20, ✅): Improved Transparency (the game's OIT path).**
-  - Following Iris (`MixinDisableFabulousGraphics`), the option is switched off while a pack is in use, and the graphics preset becomes Custom. The pack does its own transparency, and Iris never takes over `LevelRenderer.executeOit` either.
-  - `mixin/LevelExtractorMixin` checks at the start of `LevelExtractor.allChanged` (runs whenever the option changes, from the menu or the debug key) and `onResourceManagerReload`. `MetalShadersClient.keepImprovedTransparencyOff` also runs once when the pack loads. "A pack is in use" means `shaderpacks/` has one (`packPresent`, read at startup and at load).
-  - Game test shot 10 turns the option on from the client, asserts it's off again 40 ticks later (`computeOnClient`), and matches shot 1's view. Log: "Improved Transparency switched off".
-  - 0 validation messages; 94 unit tests pass; scoreboard 90/90; flicker check passes (land 0.010%, underwater 0.025%, Nether 0.027%, End and shot 9 0%).
-
-- **7e result (2026-11-20, ✅): small leftovers (current_player, currentRenderedItemId, translucent particles).**
-  - `render/DrawIds.enterEntity(EntityRenderState)` follows Iris (MixinEntityRenderDispatcher): the camera's own player (`AvatarRenderState.id` = `getCameraEntity()` id) uses `minecraft:current_player` if the pack lists it (Complementary: 50017), and a converting zombie villager uses `minecraft:zombie_villager_converting`.
-  - `currentRenderedItemId` follows Iris's item chain:
-    - `ItemModelResolverMixin` (appendItemLayers) notes the item on the render state (`ItemStackRenderStateMixin`).
-    - `ItemLayerRenderStateMixin` makes its id current while a layer is submitted (`DrawIds.enterItem`/`leaveItem`, nested inside an entity's ids).
-    - `ItemFeatureRendererSubmitMixin` keeps the ids on the record.
-    - `ItemFeatureRendererMixin` applies them while `prepareSubmit` builds the draws (`DrawIds.buildWith`, read in `notePrepared`).
-    - A block item uses its block's block.properties id and sets blockEntityId 1; other items use item.properties (model component name first). Special-renderer items (shields, chests) go through the usual `submitModel` path with the item's ids current.
-  - Game test log: hand sword `item_cutout (gbuffers_hand): currentRenderedItemId 45012`; shot 5b (third person) `entity_translucent: entityId 50017` and its sword `entityId 50017, currentRenderedItemId 45012`.
-  - Shot 3 now spawns campfire smoke (the game's TRANSLUCENT particle layer). Log: `pipeline/translucent_particle -> gbuffers_particles_translucent`.
-  - 0 validation messages; 95 unit tests pass; scoreboard 90/90; flicker check passes.
-  - Not done:
-    - One value per draw: different items merged into one draw (same texture atlas and pipeline, e.g. several dropped items) share the first one's id. Iris and Vitrail put ids on each vertex; doing that means a longer ENTITY vertex format, like LuxiumChunkVertex for terrain.
-    - The first-person arm has no entityId (it isn't drawn through EntityRenderDispatcher.submit; Iris's isn't either).
-    - `gbuffers_line` (block outlines) is still the game's (visible through the catch). Complementary's line program builds thick lines from `gl_VertexID` and Iris's core-profile names (`vaPosition`, `vaNormal`, `projectionMatrix`), which the translator doesn't supply yet.
-
-Facts for step 6:
-- **Full-screen passes:** vanilla `PostPass` uses `renderPass.draw(3, 1, 0, 0)` with no vertex buffer. Pack composite vertex shaders expect a quad (`gl_Vertex`, `gl_MultiTexCoord0`), so we need a quad vertex buffer or a special vertex prologue.
-- **Binding:** uniform blocks and textures are bound **by name** (`RenderPass.setUniform(name, buffer)` / `(name, view, sampler)`). The pipeline declares them via `RenderPipeline.Builder.withBindGroupLayout`. Shaders are referenced by `Identifier` (`withVertexShader`/`withFragmentShader`) and resolved through the `ShaderSource` given to `compilePipeline`.
-- **Multiple render targets:** `withColorTargetState(index, …)` in the API; Metallum handles lists of color attachments (`MetalCommandEncoder.java:271`).
-- **Vitrail's 26.3 seam:** `common/src/mc26.3/java/dev/vitrail/render/GraphicsApi.java` and `AheadCompiler.java` (`device.compilePipeline(pipeline, source, Runnable::run).join().finishCompile()`). Its Vulkan-only mixins are for compute and storage images, which we don't need with `MC_OS_MAC`.
-- Vitrail `docs/internals/game-graphics-api.md` warns:
-  - Precompile every pipeline with its real source before the first pass, or it silently compiles with no source.
-  - Scene depth is cleared a few lines after the seam, so copy it there.
-  - Detect resizes by comparing sizes every frame, not with the resize event.
-
-Step 4 result: `TranslateRealPackTest` (the scoreboard) translates every vertex+fragment program, then runs glslang for Vulkan 1.2 with only `--auto-map-bindings` (no `-R`, no `--aml`), spirv-cross with Metallum's MSL options, and `xcrun metal`. On Complementary that's **90/90** programs: 30 per world, excluding dh_/clrwl_/voxy programs that need mods we don't have. A reflection check (`spirv-cross --reflect`) found 0 vertex/fragment interface mismatches. Outputs go to `mod/build/translated/<pack>/`, plus `scoreboard.txt`.
-
-Step 5 progress (2026-11-20):
-- `glsl/Std140Layout.java` computes byte offsets in `LuxiumUniforms`. `Std140LayoutTest` checks it against glslang via `spirv-cross --reflect`: all 7,815 members in 90 programs match, and so does every block size.
-- Complementary reads 92 block values:
-  - about 65 built-ins. Each maps to an Iris file in `iris/.../uniforms/` (WorldTime, SystemTime, Celestial, Camera, Common, Viewport, Fog, IrisExclusive, IdMap, Matrix…). Check every Minecraft method in the 26.3 sources: e.g. `Level.getDefaultClockTime()` replaces day time, and moon phase comes from `Camera.attributeProbe()` + `EnvironmentAttributes.MOON_PHASE`.
-  - about 25 custom formulas in `shaders.properties` (`uniform.float.x = smooth(...)`). Iris evaluates these with its own `kroppeb.stareval` (part of Iris, LGPL). We'll write a small evaluator and credit the behavior.
-  - Per-draw values (entityId, renderStage, the luxium_* matrices…) are set during rendering, so they belong to step 6.
-- Game values v1:
-  - `uniform/GameUniforms.java` updates once per frame from `mixin/GameRendererMixin` (TAIL of `GameRenderer.extract`). `uniform/UniformWriter.java` packs the values into std140 bytes; missing names get the pack's default or zero and are reported.
-  - In game (2026-11-20, validation on, 0 messages): the logged values matched F3 (camera = feet + 1.62, 1708×960, frameTime ≈ 1/fps, worldTime frozen while paused, sunAngle follows vanilla's eased curve).
-- Pack formulas (2026-11-20): `pack/PropertiesPreprocessor.java` runs `shaders.properties` through JCPP with the game defines plus `BIOME_*`. `uniform/Formula.java` (parser + typed evaluator, bounded) and `uniform/CustomUniforms.java` (ordering, cycles, dropping) evaluate the formulas once per frame.
-  - Complementary: 27 formulas loaded, 4 dropped. `BIOME_ICE_CAVES` doesn't exist in 26.3; `endFlashIntensity` isn't supplied yet.
-  - In game they reacted correctly: water, tree shade, walking, frame timing. Coverage rose to **55 of 88**.
-  - The remaining 33 are mostly matrices and per-draw values (step 6).
-  - Biome ids come from `mixin/BiomesMixin` in Iris's order (FOREST = 8).
-  - Wetness half-lives come from `pack/PackDirectives.java` (Complementary: 300 from shadow + composite6).
-- Step 5 done (2026-11-20). Added: eyePosition, relativeEyePosition, playerLookVector, cloudHeight, isElytraFlying, heavyFog, lightningBoltPosition, endFlashIntensity, plus heldItemId/heldBlockLightValue for both hands (`pack/ItemIds.java` reads item.properties; 244 items).
-  - Checked in game: torch = 44002 with light 14, empty hand = air = 40008.
-  - Formulas: 30 of 31 load; only `BIOME_ICE_CAVES` is dropped, as in Iris.
-  - Coverage is **64 of 88**, plus `velocity` (Iris 26.3 never supplies it: `HardcodedCustomUniforms` is never called, so we deliberately leave it 0).
-  - The 23 still missing are all render-time values for step 6: gbuffer*/shadow* matrices, luxium_* per-draw matrices, entityId/blockEntityId/currentRenderedItemId/entityColor/renderStage/atlasSize, plus fogColor, darknessLightFactor and endFlashPosition, which Iris captures while drawing.
-- Earlier coverage for world0/gbuffers_terrain was **34 of 88** values. Still missing: the ~25 pack formulas, matrices (gbuffer*, shadow*, luxium_*), per-draw values, and smaller ones (fogColor, wetness, eyePosition, relativeEyePosition, playerLookVector, velocity, atlasSize, heldItem*, lightningBoltPosition, endFlash*, darknessLightFactor).
-
-Translator v1 only makes programs **compile**. These things are known to matter for drawing correctly and aren't handled yet:
-- `gl_FragCoord` origin: GL is bottom-left, Vulkan/Metal are top-left.
-- Reversed-Z depth: Iris's `iris_undoRevZ`, and Vitrail converting the depth image.
-- `texture()` on samplers without mips: Vitrail pins these to level 0.
-- `invariant gl_Position` against Metal fast-math.
-- `packUnorm*` on Apple Silicon: Vitrail found it wrong through MoltenVK.
-- `gl_VertexID` → `gl_VertexIndex`: this adds base vertex.
-- `gl_TextureMatrix` is assumed to be `mat4[8]`.
-- .csh/.gsh programs aren't translated.
-- Placeholder names (`luxium_ModelViewMatrix`, `luxium_Vertex`…) need real values in steps 5–6.
-
-Tests: `./gradlew test` in `mod/` (JUnit, no game needed). `RealPackTest` preprocesses every pack in `mod/run/shaderpacks/` into `mod/build/preprocessed/`, and then `mod/scripts/check-preprocessed.sh` validates that output with glslangValidator. Result on Complementary (2026-11-20): 219/219 programs preprocess in about 2 s, and 189 pass glslang. All 30 failures are explained in the script header (they need Distant Horizons, Colorwheel, colored lighting, or Iris-injected built-ins).
-
-Step 4 findings (2026-11-20):
-- **glsl-transformer, the GLSL parser Iris uses, is AGPL-3.0.** Its README says software that uses it "must itself be licensed as AGPLv3" (Iris has a special exception). Don't add it unless the user chooses AGPL.
-- Baseline: `experiments/02-translation-baseline/run.sh` adds crude `#define` stand-ins for the old built-ins. With them, 59/60 world0 programs reach SPIR-V and 59/59 compile to Metal. That run cheats with glslang `-R` (lets loose uniforms through) and `--aml` (numbers each stage's in/out slots separately). The real translator still has to:
-  - put loose uniforms in one block per program
-  - give in/out slots that match between the two stages by name
-  - map fragment outputs from DRAWBUFFERS/RENDERTARGETS
-  - add Iris's injected names (`projectionMatrix`, `modelViewMatrix`, `vaPosition`…), which `gbuffers_line` needs
-- The highest sampler index is composite1's 14, just under Metal's 16-per-stage limit.
-
-Known gaps: pack settings are read only at load (no profiles, no in-game screen). `dimension.properties` isn't preprocessed yet (Iris does it at `ShaderPack.java:126`), so `#if` lines in it are ignored; the other .properties files are. Credits for borrowed Iris material are in `mod/NOTICE`. The repo has **no LICENSE yet**, and the LGPL material in NOTICE affects which license fits.
+Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor ✅ · 4 translator ✅ · 5 uniforms ✅ · 6 render pipeline ✅ · 7 polish (in progress: 7a–7f done, then housekeeping).
 
 Target pack: **Complementary Unbound r5.10**. Its license (Complementary License Agreement 1.8) forbids redistributing or modifying it, so never commit any of its files. The mod must run it unmodified. Under Iris's `MC_OS_MAC` define, the pack forces `COLORED_LIGHTING 0`, which turns off its compute, SSBO and 3D-image features.
+
+## History and design notes: read on demand, never whole
+This file stays short because every session and every subagent loads it. The details of each step (what was built, the traps found, game-test evidence, known gaps) live in `docs/history/`. **Grep there before re-investigating anything.**
+
+| File | Covers |
+|---|---|
+| `docs/history/steps-1-5.md` | pack reader, preprocessor (JCPP), translator (no glsl-transformer: it's AGPL), std140 layout, uniforms and pack formulas, test and scoreboard results, translator gaps |
+| `docs/history/step-6.md` | 6a first pixels, 6b final, 6c render targets and chain, 6d gbuffers (sky, Sodium terrain, water and the catch, entities, ids, particles, weather, hand, spider eyes and beams), 6e shadows, 6f correctness, plus "Facts for step 6" (binding by name, full-screen passes, Vitrail's 26.3 seam) |
+| `docs/history/step-7.md` | 7a pack settings, 7b Nether/End, 7c off-screen shadow casters, 7d OIT off, 7e ids, 7f performance |
+| `docs/history/testing.md` | full notes on the client game tests |
+
+When a slice is finished, append its result to the right `docs/history/` file, and add only a one-line pointer here if it changes how to work.
+
+## How to work here
+- Step 7 slices: check in with the user before each one. Every slice's final pass includes the frame-sequence flicker check (user request 2026-11-20).
+- Running the game, reviewing screenshots, comparing with vanilla or Iris, and delegating to subagents: use the **`luxium-gametest` skill** (`.claude/skills/luxium-gametest/SKILL.md`). In short:
+  - run with `mod/scripts/gametest.sh` and read its summary;
+  - review with contact sheets (`mod/scripts/ContactSheet.java`);
+  - use Sonnet subagents for run-and-check work, at most 2 game-running agents at once, one worktree each.
+- Finding code: `graphify query "<question>" --budget 1500` answers from a free AST graph of `mod/src` and the Minecraft sources. Use it before reading big files; refresh it with `mod/scripts/graph-update.sh`.
+- Known gaps:
+  - Pack settings are read only at load (no profiles, no in-game screen).
+  - `dimension.properties` isn't preprocessed.
+  - The repo has **no LICENSE yet**, and the LGPL material credited in `mod/NOTICE` affects which license fits.
 
 ## Layout
 ```
@@ -449,26 +88,13 @@ metal-shaders/
 - Metallum and the Axiom skill are MIT; keep their copyright notice if any code is copied.
 
 ## Automated in-game screenshots (client game tests)
-Claude can test the game without the user. Fabric API's client game tests (`fabric-client-gametest-api-v1`, Fabric API `0.166.2+26.3`, gametest source set only, not a mod dependency) start the game, build a scene with commands, take screenshots and quit:
-```bash
-cd mod
-export JAVA_HOME=$(/usr/libexec/java_home -v 25)
-MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 ./gradlew runClientGameTest
-```
-- Test: `mod/src/gametest/java/io/github/hecbatista/metalshaders/test/ScreenshotTest.java`. Shots: 1 land, 3 hurt pig (with campfire smoke), 2 underwater, 4 rain, 5 hand, 5b third person, 6 Nether, 7 End, 8 back in the Overworld, 9 a hidden tower's shadow, 10 Improved Transparency switched back off. A full run takes about 100 s.
-- Screenshots land in `mod/build/run/clientGameTest/screenshots/` (854×480); view them with the Read tool.
-- The test's game folder is cleared every run, so the test copies `mod/run/shaderpacks/*` into it first.
-- Spectator mode and a hidden HUD keep shots clean. In Survival the player falls between teleports.
+Claude can test the game without the user, using Fabric API's client game tests (gametest source set only, not a mod dependency). Use the `luxium-gametest` skill; the full notes are in `docs/history/testing.md`.
+- Tests:
+  - `mod/src/gametest/java/io/github/hecbatista/metalshaders/test/ScreenshotTest.java`: a fixed scene with shots 1–10 and flicker clips, about 100 s.
+  - `PlaytestTour` (`LUXIUM_TOUR=1`, optionally `LUXIUM_TOUR_ONLY="stop,stop"`): a scripted play session through a generated world.
+- The test's game folder is wiped every run. The tests copy `mod/run/shaderpacks/*` in; `mod/scripts/gametest.sh` keeps each run's results in `mod/build/gametest/<label>/`.
 - `eula = true` in `mod/build.gradle`: the user agreed to the Minecraft EULA for this on 2026-11-20.
-- Frame sequences for flicker: 24 consecutive frames each (one per tick, still camera): `screenshots/frames-land/` and `frames-underwater/` after shot 1, `frames-nether/` and `frames-end/` after shots 6 and 7, `frames-offscreen/` after shot 9. Check them with:
-  ```bash
-  D=build/run/clientGameTest/screenshots; java scripts/FlickerCheck.java $D/frames-land $D/frames-underwater $D/frames-nether $D/frames-end $D/frames-offscreen
-  ```
-  - It flags pixels that jump for one frame and come back (A→B→A, change > 40/255, neighbours within 12/255). It fails (exit 1) above 0.1% of a frame's pixels.
-  - It writes `<dir>-flicker.png` (heat map) and `<dir>.gif` (a looping 20 fps clip to watch). No ffmpeg on this Mac.
-  - Baseline 2026-11-20: land 0.012%, underwater 0.03%, Nether 0.033% (soul fire), End 0%.
-- `LUXIUM_TEST_SETTINGS="NAME=value;NAME2=value2"` (environment variable) makes the test write the pack's settings file before the world loads.
-- API, read from the jar: `context.worldBuilder().create()`, `singleplayer.getServer().runCommand(...)`, `context.waitTicks(n)`, `context.takeScreenshot(name)`, `context.runOnClient(mc -> ...)`, `assertScreenshotEquals(...)`.
+- Flicker check: `java mod/scripts/FlickerCheck.java <frames dirs>`. It fails above 0.1% of a frame's pixels jumping for one frame (A→B→A). Clips with moving cameras or animated effects are expected to flag: read the heat map.
 
 ## Running and testing
 Always test with Metal's API validation and GPU shader validation on. To run **our mod** (with Metallum and Sodium):

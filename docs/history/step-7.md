@@ -1,0 +1,125 @@
+# Step 7: polish (7a onward)
+
+Moved out of CLAUDE.md on 2026-11-23 to keep every session small. New slices are appended here, not to CLAUDE.md.
+
+Step 7 (polish), agreed order with the user (2026-11-20): pack settings → Nether/End → off-screen shadow casters → improved transparency (OIT) → small 6d-4 leftovers → performance → housekeeping. Check in with the user before each slice. **Every slice's final pass includes the frame-sequence flicker check** (user request 2026-11-20; see "Automated in-game screenshots").
+- **7a result (2026-11-20, ✅): pack settings the user changes.**
+  - `pack/PackOptions.java` follows Iris's option rules (credited in NOTICE):
+    - Value options are `#define NAME value // [allowed]`. On/off options are `#define NAME` / `//#define NAME`, and count only if some file in the same include group tests the name with a bare `#ifdef`/`#ifndef`. That rule covers `const bool` options too.
+    - `const` options are limited to Iris's directive names.
+    - Include groups are the weakly connected parts of the include graph, which starts at the program names Iris knows. So `clrwl_*` and `voxy_*` aren't starts.
+    - A name with two different defaults is dropped as ambiguous.
+  - The settings file is Iris's: `shaderpacks/<pack file name>.txt` (e.g. `ComplementaryUnbound_r5.10.zip.txt`), `NAME=value` lines, read once when the pack loads (restart the game after editing). Luxium only reads it; Iris also rewrites it.
+    - On/off options take `true`/`false`. Value options take any value, as in Iris.
+    - Unknown names and bad values are logged as "Pack settings ignored".
+  - Applying: each file's lines are edited before include expansion (`PackPreprocessor.preprocessProgram(..., options)`, an `IncludeExpander.FileSource` wrapper). `.properties` files get `PackOptions.propertyDefines`: options that are on, then the game's defines, then every value option (Iris's order).
+  - Every start writes `shaderpacks/<pack>.luxium-options.txt`: every option with its current value, default, allowed values, and the pack's English names from `lang/en_US.lang`.
+  - Complementary: 407 options (172 on/off, 235 with values), none ambiguous. The `.properties` files test only two names that aren't options (`IRIS_FEATURE_BLOCK_EMISSION_ATTRIBUTE`, `DISTANT_HORIZONS`); the old reader didn't define them either.
+  - Game test: run twice.
+    - Defaults: picture unchanged.
+    - `LUXIUM_TEST_SETTINGS="T_SATURATION=0.00;NOT_A_SETTING=1"`: the whole picture is grey (land and underwater), and the unknown name is logged as ignored.
+    - 0 validation messages, 86 unit tests pass (new: `PackOptionsTest`), scoreboard 90/90.
+    - Flicker check: land worst 0.012% of pixels (edges of the animated mobs), underwater 0.009%. A fake one-frame glitch is caught.
+  - Not done: profiles (`profile.*`), an in-game settings screen, and reloading without a restart. A reload needs every `prepare` (PackChain, takeovers, shadow targets) to free and rebuild its GPU state.
+- **7b result (2026-11-20, ✅): the Nether and the End.**
+  - Each world loads its own folder (`MetalShadersClient.loadWorld`), checked every frame in `onFrameExtracted`. Iris's rules (`PackInfo.worldKey` + `folderFor`):
+    - A world named in `dimension.properties` uses its folder.
+    - Otherwise the End's sky means the End's folder and the Overworld's sky the Overworld's.
+    - Otherwise the folder of `*`, else the shaders/ root.
+  - Switching unloads the last world first (`PackChain.unload` → `SkyTakeover`/`TerrainTakeover`/`EntityTakeover`/`ShadowTargets.unload`: close every pipeline, ring buffer and texture, forget programs). Closing right away is safe because Metallum's command buffers retain what queued frames use (`commandQueue.commandBuffer()`, retained references); the resize path already relied on that.
+  - Pack-wide values (settings, item/entity ids, formulas, preprocessed shaders.properties) load once in `loadPackValues`. Only the world folder's programs reload.
+  - Load time per world: about 1.8 s when macOS's Metal shader cache is warm, about 9 s the first time a folder's shaders are ever compiled.
+  - `program.<folder>/<name>.enabled` (`pack/ProgramSwitches.java`, Iris's BooleanParser rules) now applies to every program, not only the composites. A switched-off program counts as missing, so the fallbacks pick another.
+    - Example: `SHADOW_QUALITY=-1` switches off `shadow` in every world.
+    - Under that setting the empty sky below the horizon turns dark, because Complementary also turns off its light shafts (`LIGHTSHAFTS_ACTIVE` needs `SHADOW_QUALITY > -1` in the Overworld). That's the pack's own behaviour, not a bug.
+  - The End sky: vanilla's END_SKY pipeline (POSITION_TEX_COLOR, quads) is drawn with `gbuffers_skytextured` (Iris IrisPipelines); End sky and End flash are stage CUSTOM_SKY (3). `SkyRendererMixin` now also wraps `DynamicGpuData.writeTransform(Matrix4f)` (the End sky's transform, white).
+  - Sky coverage fix: the coverage mask is cleared to "nothing" at frame start, and `PackChain.skyDrawn` marks the background as the pack's only when the pack's sky pass actually opens. Before, a frame where the game skips the sky drew a black background. The game skips it with no sky in the world (Nether), a boss's world fog (the dragon), lava or powder snow fog, or blindness/darkness.
+  - Game test:
+    - Shot 6: a carved Nether room (lava, glowstone, soul fire) in the pack's orange haze.
+    - Shot 7: an End platform at (0, 72, −205) under the pack's End sky, outside the dragon's 192-block arena (`EnderDragonFight.validPlayer`).
+    - Shot 8: back in the Overworld (world0 reloaded), matching shot 1.
+    - 0 validation messages; 91 unit tests pass (new `WorldFoldersTest`); scoreboard 90/90.
+    - Flicker: land 0.012%, underwater 0.030%, Nether 0.033% (all on the animated soul fire), End 0%.
+    - With `SHADOW_QUALITY=-1`: every world's shadow program is switched off and the floor loses the glass grid's shadow.
+  - Gaps:
+    - The world folder's programs compile on the render thread while the loading screen is up.
+    - Only one world's programs are kept: going back compiles again (warm cache: about 1.8 s).
+    - Nether/End weather, clouds and DH/voxy programs aren't checked.
+
+- **7c result (2026-11-20, ✅): shadows from casters the camera can't see.**
+  - The shadow pass's terrain now comes from the light's own Sodium render list, as Iris does on the same Sodium 0.9.2 (`render/ShadowCulling.withLightLists`, around `TerrainTakeover.drawShadowTerrain`):
+    - Each region gets a second render list and batch map (`mixin/sodium/RenderRegionMixin` + `sodium/ShadowRegion`), swapped in for the shadow draw. Every place Sodium empties a batch empties all maps, including the three in `RenderRegionManager.uploadResults` (`RenderRegionManagerMixin`, `require = 3`).
+    - Sodium's `renderOutOfGraph` walk fills the light's lists (`RenderSectionManagerAccessor` invoker), then `SodiumWorldRenderer.prepareChunkRendering` fills its batches.
+    - Afterwards the camera's `renderLists`, `taskLists` and `renderTree` are put back and its batches prepared again. `prepare` writes the shared `shouldDraw` array, and `renderTree` also drives entity culling.
+  - The walk's frustum is the shadow map's box (`ShadowCulling.LightBox`): a section's corners go through `shadowProjection × shadowModelView` (camera-relative, as the shadow programs use them) and must overlap the unit cube. `intersectAab` returns −2/−1/0 as Sodium's tree walk reads JOML. Iris's default "advanced" frustum is tighter; the box never drops a caster.
+  - Debug: `LUXIUM_SHADOW_CAMERA_LIST=1` keeps the camera's list (the old behaviour). The log line "Shadow terrain: N regions seen by the light, M by the camera" appears every 5 s.
+  - Game test shot 9:
+    - The scene is a floor at y = 160 around x = 100, with a stone-brick tower at x 118–121 behind the camera, at time 1500.
+    - The camera looks west and down. The tower's long morning shadow lies across the floor; with `LUXIUM_SHADOW_CAMERA_LIST=1` the floor has none.
+    - Go there before the `fill`s: a fill only works in loaded chunks (the first try filled nothing).
+    - 0 validation messages; 94 unit tests pass (new `ShadowCullingTest`); scoreboard 90/90.
+    - Flicker: land 0.014%, underwater 0.019%, Nether 0.045% (soul fire), End 0%, shot 9 sequence 0%.
+  - Still open:
+    - Entity casters are still only the camera-visible ones (the level's prepared solid features).
+    - Sections never built because the camera hasn't been near them have no mesh to cast with. Sodium builds from the camera's task lists; the light's task lists are dropped, as in Iris.
+    - Sodium is now declared in `fabric.mod.json` (`"sodium": "~0.9.2"`, user-approved 2026-11-20): Luxium's terrain and shadows are drawn through Sodium and its mixins target 0.9.2's internals.
+
+- **7d result (2026-11-20, ✅): Improved Transparency (the game's OIT path).**
+  - Following Iris (`MixinDisableFabulousGraphics`), the option is switched off while a pack is in use, and the graphics preset becomes Custom. The pack does its own transparency, and Iris never takes over `LevelRenderer.executeOit` either.
+  - `mixin/LevelExtractorMixin` checks at the start of `LevelExtractor.allChanged` (runs whenever the option changes, from the menu or the debug key) and `onResourceManagerReload`. `MetalShadersClient.keepImprovedTransparencyOff` also runs once when the pack loads. "A pack is in use" means `shaderpacks/` has one (`packPresent`, read at startup and at load).
+  - Game test shot 10 turns the option on from the client, asserts it's off again 40 ticks later (`computeOnClient`), and matches shot 1's view. Log: "Improved Transparency switched off".
+  - 0 validation messages; 94 unit tests pass; scoreboard 90/90; flicker check passes (land 0.010%, underwater 0.025%, Nether 0.027%, End and shot 9 0%).
+
+- **7e result (2026-11-20, ✅): small leftovers (current_player, currentRenderedItemId, translucent particles).**
+  - `render/DrawIds.enterEntity(EntityRenderState)` follows Iris (MixinEntityRenderDispatcher): the camera's own player (`AvatarRenderState.id` = `getCameraEntity()` id) uses `minecraft:current_player` if the pack lists it (Complementary: 50017), and a converting zombie villager uses `minecraft:zombie_villager_converting`.
+  - `currentRenderedItemId` follows Iris's item chain:
+    - `ItemModelResolverMixin` (appendItemLayers) notes the item on the render state (`ItemStackRenderStateMixin`).
+    - `ItemLayerRenderStateMixin` makes its id current while a layer is submitted (`DrawIds.enterItem`/`leaveItem`, nested inside an entity's ids).
+    - `ItemFeatureRendererSubmitMixin` keeps the ids on the record.
+    - `ItemFeatureRendererMixin` applies them while `prepareSubmit` builds the draws (`DrawIds.buildWith`, read in `notePrepared`).
+    - A block item uses its block's block.properties id and sets blockEntityId 1; other items use item.properties (model component name first). Special-renderer items (shields, chests) go through the usual `submitModel` path with the item's ids current.
+  - Game test log: hand sword `item_cutout (gbuffers_hand): currentRenderedItemId 45012`; shot 5b (third person) `entity_translucent: entityId 50017` and its sword `entityId 50017, currentRenderedItemId 45012`.
+  - Shot 3 now spawns campfire smoke (the game's TRANSLUCENT particle layer). Log: `pipeline/translucent_particle -> gbuffers_particles_translucent`.
+  - 0 validation messages; 95 unit tests pass; scoreboard 90/90; flicker check passes.
+  - Not done:
+    - One value per draw: different items merged into one draw (same texture atlas and pipeline, e.g. several dropped items) share the first one's id. Iris and Vitrail put ids on each vertex; doing that means a longer ENTITY vertex format, like LuxiumChunkVertex for terrain.
+    - The first-person arm has no entityId (it isn't drawn through EntityRenderDispatcher.submit; Iris's isn't either).
+    - `gbuffers_line` (block outlines) is still the game's (visible through the catch). Complementary's line program builds thick lines from `gl_VertexID` and Iris's core-profile names (`vaPosition`, `vaNormal`, `projectionMatrix`), which the translator doesn't supply yet.
+
+- **7f result (2026-11-20, ✅): performance, measured first.**
+  - `render/PerfStats` (`LUXIUM_PERF=1`) records frame time (between two `GameRenderer.extract`s, so it includes waiting for the GPU) and Luxium's CPU time per step. The game test then measures 5 s at land/underwater/Nether/End (`Perf [label]: ...` in the log), with the frame cap, vsync and the AFK limiter (`inactivityFpsLimit` = MINIMIZED, else 30 fps after a minute) off. `LUXIUM_TEST_NO_PACK=1` runs the test without a pack.
+  - GPU time can't be measured through the game's API: Metallum's "timestamps" (`MetalDevice.getTimestampNow`) are CPU clock readings.
+  - The test runs usually reach the display's 120 Hz cap (8.33 ms) with and without the pack, probably vsync when the window isn't in front. The one uncapped run reached about 270 fps with the pack at 854×480.
+  - Findings:
+    - Luxium's CPU work is about 1 ms per frame: shadow 0.25, opaque terrain 0.3, deferred 0.1, composites+final 0.25, game values 0.05.
+    - No frame over 50 ms while holding still.
+    - First-use pipeline compiles froze the game for 10–100 ms each (gbuffers_entities/hand ones about 85 ms), and again after every world switch.
+  - Fix 1, pre-compiling at world load (`EntityTakeover.prewarm`, called from `loadWorld`):
+    - The list is `PREWARM`, keyed by family and made of `RenderPipelines` *constants*. Names aren't unique: there are three `pipeline/item_cutout`, and `RenderPipelines.requiredPipelines()` is a map by name that keeps only the last.
+    - It covers the arm and held item, common mobs, chests, armour, dropped items, particles and rain: 23 compiles, about 1.3 s, so world load is about 3 s.
+    - Compiling everything a family could serve was 136 pipelines and 7–15 s per world (most of it OIT pipelines that are never drawn), so that was dropped.
+    - Left at first use: spider eyes and beacon beams (11–21 ms).
+    - Each compile re-runs GLSL→SPIR-V in the game's `PipelineBuilder` (no cache) plus Metallum's backend. Compiling on a background thread isn't safe on the public Metallum 0.0.25 (the local build's `synchronize getOrCompileFunction` fix).
+  - Fix 2: Sodium's block-face culling is kept off only while the light's batches are filled (`ShadowCulling.keepAllFaces`; also for the camera's batches under `LUXIUM_SHADOW_CAMERA_LIST`). The camera's batches cull faces again, so it draws fewer. Pictures unchanged (shots 1 and 9).
+  - 0 validation messages; 95 unit tests pass; flicker check passes (land 0.013%, underwater 0.018%, Nether 0.039% soul fire, End and shot 9 0%).
+  - Not done:
+    - Keeping several worlds' programs (Iris keeps one pipeline per world; returning to a world recompiles, about 3 s).
+    - Caching SPIR-V across pipelines.
+    - Measuring GPU cost (needs an uncapped, focused window or Xcode's Metal tools).
+
+- **After 7f (2026-11-21, from the "Luxium step 7: polish" session; uncommitted until the 2026-11-23 consolidation): flashes, grey horizon, sun.**
+  - The user reported occasional flashing in normal play, a sun that moved oddly, a grey strip at the horizon, and grey streaks flickering on sand.
+  - Tools added:
+    - `render/FlashProbe.java`, the flash recorder (bursts of screenshots while playing);
+    - walk, turn and creep modes in `ScreenshotTest` (`LUXIUM_TEST_WALK_ONLY`, `LUXIUM_TEST_BOX_ONLY`);
+    - a moving-camera mode in `FlickerCheck` (`--tiles`).
+  - **Grey horizon strip: fixed.** Two things Iris does that Luxium didn't:
+    - Iris clears the starting image to the game's fog colour every frame. Luxium cleared it to black.
+    - Iris draws an extra horizon shape around the player before the sky, so the pack also shades the sky below the horizon line.
+    - Luxium now does both (`SkyTakeover`, `SkyRendererMixin`, `PackChain`) and supplies the real `fogColor` (`mixin/FogRendererMixin`, `GameUniforms`); it was always 0 before. The ocean fades into the sky, and the grey "walls" around high test platforms are gone.
+  - **Sun: one real difference fixed.** Complementary tilts the sun's path by `sunPathRotation` (−40°). Iris applies that tilt to the sun, moon and stars it draws; Luxium tilted only the lighting and shadows, so the visible disc wasn't where the light came from. It's unconfirmed whether this was the "crazy" movement the user saw.
+  - **Sand and grass flicker: narrowed down, not fixed.**
+    - Shadow edges shift between frames, but the shadow map itself is stable while turning.
+    - Prime suspect: the pack's TAA, which smooths a per-frame shadow-edge pattern using the previous frame. With TAA off, the flicker in the glass-box test disappears.
+    - Still open: whether Luxium feeds TAA something slightly wrong (previous-frame matrices, camera position), or Complementary looks the same under Iris. Use the Iris runner (`iris-compare/`) to settle it.
+  - Checks at the time: 0 validation messages, 95 unit tests, scoreboard 90/90, the five flicker clips pass.
