@@ -9,6 +9,19 @@ one at a time with the flow in `mod/scripts/PACK-TESTING.md`:
 Earlier results (Complementary Unbound r5.10, Complementary Reimagined r5.9.3, Bliss v2.1.2,
 Solas v3.9) are in `docs/release/alpha.md`, "Fails safe".
 
+## Complementary Reimagined r5.10 (2026-11-23): works
+
+- Offline: 219/219 programs preprocess; **90/90** reach Metal.
+- In game: loads, 0 validation messages, no crash. 30 formulas loaded, 1 dropped
+  (`inIceCaves`: `BIOME_ICE_CAVES` doesn't exist in 26.3; Iris drops it too).
+- Side by side with Iris on the zoo and beach stops: sky, clouds, water, terrain, entities,
+  block entities, signs and frames, glass and portals match.
+- Differences:
+  - The End portal and End gateway starfield is clearly dimmer than under Iris (fewer, fainter
+    stars). Already seen with Unbound (`docs/history/step-7.md`, "The End portal's starfield is a
+    little dimmer"); not specific to this pack.
+  - Mob poses and the beach-sprint position differ by timing between the two runners.
+
 ## BSL v10.1.8, after the formula fix (2026-11-23): renders, matches Iris
 
 - Fixes: `uniform/Formula.java` gains Iris's remaining scalar functions (`frac`, `fmod`,

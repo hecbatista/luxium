@@ -36,7 +36,7 @@ Status as of 2026-11-23, with each pack at its default settings:
 | Pack | Status | Notes |
 |---|---|---|
 | Complementary Unbound r5.10 | ✅ Works | The pack Luxium is built against. Compared with Iris scene by scene: sky, terrain, water, clouds, shadows, entities, block entities, particles, weather, hand, Nether and End. |
-| Complementary Reimagined r5.9.3 | ✅ Loads and renders | No errors; not yet compared with Iris in detail. |
+| Complementary Reimagined r5.10 | ✅ Works | Matches Iris on the zoo and beach test scenes; the End portal's starfield is dimmer (same as Unbound). r5.9.3 also loads. |
 | Bliss v2.1.2 (Chocapic13 edit) | ❌ Falls back to vanilla | One program doesn't compile yet (missing `MC_HAND_DEPTH`, `texelFetch2D`). |
 | Solas v3.9 | ❌ Falls back to vanilla | One program doesn't compile yet (missing `MC_RENDER_QUALITY`). |
 | BSL v10.1.8 | ✅ Loads and renders | Matches Iris on the zoo and beach test scenes (sky, light, shadows, water, clouds, entities, block entities, portals, glass). Night, caves, weather, Nether and End not compared yet. |
