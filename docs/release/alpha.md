@@ -20,7 +20,13 @@ Facts as of 2026-11-23:
     - still clips pass; the moving sprint clip (5.7%) and the animated portal clip (0.25%) flag as on the local build;
     - shots match the local-Metallum run within run-to-run noise (mean |Δ| 1.0–2.9).
   - `fabric.mod.json` now requires `"metallum": "0.0.25"`, so a newer Metallum gets a clear dependency message instead of a mixin crash. Re-test and widen it when Metallum updates.
-- [ ] **Choosing the pack and switching it off.** Today Luxium takes the first pack in `shaderpacks/`, and the only off switch is removing it. Minimum: a config line (`config/luxium.properties`: `shaderPack=`, `enabled=`), or read Iris's `config/iris.properties` `shaderPack=`.
+- [ ] **Choosing the pack and switching it off, by settings file** (the in-game menus come in the next release: `docs/release/menus-plan.md`).
+  - `config/luxium.properties`, with Iris's key names: `enableShaders=true|false` and `shaderPack=<file or folder in shaderpacks/>`.
+  - It's written on first start, with the first pack filled in and the packs found listed in a comment. Changes apply at restart.
+  - A named pack that's missing gives vanilla rendering and a clear log line; no other pack is used in its place (as Iris).
+  - One pack resolver replaces the three `findPacks().getFirst()` calls in `MetalShadersClient`.
+  - Off must mean off: screenshots with `enableShaders=false` match a no-pack run (Sodium vertex format, Improved Transparency, clouds, bobbing and entity shadows all left alone).
+  - Test switch `LUXIUM_TEST_CONFIG` writes the file in game tests: off, choosing between two packs, a missing name.
 - [ ] **Fails safe.** No pack, a broken pack, or an untested pack must give vanilla rendering and a clear log line, never a crash. Check with no pack, a zip with garbage, and two or three popular packs (the `multi-pack-testing` worktree has a start on this).
 - [x] **Version and metadata**: `0.1.0-alpha.1`; mod id renamed `metalshaders` → `luxium` before any release (user's decision; the Java package stays `io.github.hecbatista.metalshaders`). The log tag is now `(luxium)`, and `fabric.mod.json` has license and issues links.
 - [ ] **README for players:**
@@ -53,6 +59,9 @@ What we can say honestly, measured the same way each time:
 - Iris renders Complementary about 2–6/255 brighter in the zoo shots (cause open; likely Iris's HIGH profile vs default settings).
 - The first world load after installing (cold Metal shader cache) takes 5–7 s per world; later loads about 1.7 s.
 - Apple Silicon only (Metal). Colored lighting stays off, as Complementary does on macOS (`MC_OS_MAC`).
+
+## Next release (after the alpha)
+- In-game menus: a Shader Packs screen and the pack's own options screens, opened from Video Settings, a key (`O`) and Mod Menu, with live Apply. Plan: `docs/release/menus-plan.md`.
 
 ## Should, soon after
 - [ ] Real GPU timing (the Metallum hook above) for the benchmark table.
