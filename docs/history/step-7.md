@@ -178,3 +178,23 @@ Step 7 (polish), agreed order with the user (2026-11-20): pack settings → Neth
     - Measured effect (mean |Δ| per pixel, 0–255): zoo shots before vs after 0.3–1.2, which is within run-to-run noise (two unchanged runs differ by 1.2–5.7, underwater the most). Behind glass, the distance to Iris went 5.61 → 5.47, also noise.
     - So the change is correct but makes no visible difference in our scenes. Iris is still 2–6 brighter in every zoo shot (luminance 103→106, 56→62, 150→152). That gap has another cause; the HIGH profile Iris applies is a candidate.
     - Checks: 0 validation messages (zoo and regression), 98 unit tests, scoreboard 90/90, check-preprocessed 177/42 (unchanged), flicker unchanged (walk 0.13%, the known shimmer; zoo and portal clips flag as before, from animation).
+
+- **7h (2026-11-23, ✅): pack custom textures, from the user's first real play session.** The user reported blotchy clouds with hard cuts, water reflections that broke while running and jumping, and grey patterns flashing on sand and trees when standing still. Iris had none of these.
+  - **Repro:** new tour stop `beach` in `PlaytestTour` (`LUXIUM_TOUR_ONLY=beach`). It faces the sea from the seed's beach, with three clips: `beach-still`, `beach-jump` (the camera follows a real jump arc by teleporting each tick, so both runtimes see the same motion) and `beach-sky`.
+    - Before the fix, flicker was Iris 0.000% / 0.022% / 0.000% vs Luxium 0.075% / 0.108% / 0.140%.
+    - The shots showed the cause: Luxium had almost no clouds and flat water with no waves.
+  - **Cause:** Complementary's `texture.deferred.colortex3` and `texture.gbuffers.gaux4` (both `lib/textures/cloud-water.png`) weren't supported. The cloud shapes (deferred), the water waves, cloud shadows and caustics (gbuffers and shadow) read live render targets instead: colortex3, and colortex7, the reflection buffer. That gave every symptom: shapes cut by whatever was in the buffer, reflections whose normals changed with the view, and ground patterns changing every frame. Also, every sampler was clamp-to-edge, but Iris samples `noisetex` linear and repeating, and the pack's PNG repeats (`clamp: false`).
+  - **Fix:** `render/CustomTextures` (Iris behaviour, credited in NOTICE):
+    - stages (gbuffers includes shadow, composite includes final);
+    - the sampler name matches any alias;
+    - in deferred and composite, an override switches off once an earlier pass of that stage wrote the target;
+    - mcmeta blur and clamp, defaulting to nearest and repeat;
+    - `noisetex` linear and repeat.
+    - `PackChain.inputView` is the gbuffers lookup; chain passes pass their stage and the targets written so far. All texture bindings now go through `CustomTextures.samplerFor`.
+    - Not yet: raw textures, `minecraft:` paths, `customTexture.*` (Complementary uses it only with world-space reflections on, off by default).
+  - **Result:**
+    - Clouds and water match Iris shot for shot (beach, mid-jump, sky).
+    - Flicker 0.032% / 0.034% / 0.000%; the rest is two swimming squids (heat map).
+    - Regression: clouds now show above the test platform; the bright swirls in the underwater shot are gone; still clips pass (land 0.008%, underwater 0.0002%, Nether 0.033%, End 0%).
+    - The moving-camera `walk` clip still flags (0.16%, as before).
+    - 0 validation messages, 98 unit tests, scoreboard 90/90.

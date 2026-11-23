@@ -1008,13 +1008,10 @@ public final class EntityTakeover {
         if (p == null) {
             return;
         }
-        GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
-        GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
         for (ProgramTranslator.Sampler s : p.result().samplers()) {
             GpuTextureView v = f.inputs.get(s.name());
             if (v != null) {
-                boolean depthLike = s.name().startsWith("depthtex") || s.name().startsWith("shadowtex");
-                pass.setUniform(s.name(), v, depthLike ? nearest : linear);
+                pass.setUniform(s.name(), v, CustomTextures.samplerFor(s.name(), v));
             }
         }
         if (p.layout().size() > 0) {

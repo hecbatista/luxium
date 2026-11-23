@@ -577,8 +577,6 @@ public final class TerrainTakeover {
         if (p == null) {
             return;
         }
-        GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
-        GpuSampler nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
         GpuTextureView atlas = currentPass.getAtlas();
         for (ProgramTranslator.Sampler s : p.result().samplers()) {
             if (ALBEDO.contains(s.name())) {
@@ -587,8 +585,7 @@ public final class TerrainTakeover {
             }
             GpuTextureView v = inputs.get(s.name());
             if (v != null) {
-                boolean depthLike = s.name().startsWith("depthtex") || s.name().startsWith("shadowtex");
-                pass.setUniform(s.name(), v, depthLike ? nearest : linear);
+                pass.setUniform(s.name(), v, CustomTextures.samplerFor(s.name(), v));
             }
         }
         if (p.layout().size() == 0) {

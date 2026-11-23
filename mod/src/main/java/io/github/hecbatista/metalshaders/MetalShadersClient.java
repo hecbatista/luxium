@@ -440,6 +440,7 @@ public final class MetalShadersClient implements ClientModInitializer {
         String clouds = props.getProperty("clouds", "").strip();
         PackChain.setCloudsOff(clouds.equals("off"));
         LOGGER.info("Chain: clouds={} (the game's clouds are {})", clouds.isEmpty() ? "(not set)" : clouds, clouds.equals("off") ? "hidden" : "drawn");
+        io.github.hecbatista.metalshaders.render.CustomTextures.load(pack, props);
         PackChain.prepare(plan, programs, scales, noise);
 
         // Step 6d-1: the sky, drawn by the pack's own sky programs.

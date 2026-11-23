@@ -302,6 +302,19 @@ GNU Lesser General Public License version 3
   start of LevelExtractor.allChanged and onResourceManagerReload. Changed: also checked once
   when the pack loads.
 
+  src/main/java/io/github/hecbatista/metalshaders/render/CustomTextures.java follows Iris's
+  texture.<stage>.<sampler> directives: the stage names and what each covers
+  (net.irisshaders.iris.shaderpack.texture.TextureStage: gbuffers includes the shadow
+  passes, composite includes final), the sampler name cut at its first dot
+  (shaderpack.properties.ShaderProperties), an override matching any of a sampler's names
+  (gl.program.ProgramSamplers.CustomTextureSamplerInterceptor), overrides of a render target
+  switched off once an earlier pass of the same stage has written it this frame
+  (pipeline.CompositeRenderer, flippedAtLeastOnce), PNG filtering from the .mcmeta file,
+  nearest and repeat unless "blur" or "clamp" (targets.backed.NativeImageBackedCustomTexture),
+  and noisetex read linear and repeating (targets.backed.NativeImageBackedNoiseTexture).
+  Changed: raw-texture directives, minecraft: resource paths and customTexture.* aren't
+  supported yet and are skipped with a warning.
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3

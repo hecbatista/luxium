@@ -10,6 +10,7 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.CameraType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.tags.BiomeTags;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -75,6 +76,7 @@ public class PlaytestTour implements FabricClientGameTest {
             stop("night", this::night);
             stop("day cycle", this::dayCycle);
             stop("biomes", this::biomes);
+            stop("beach", this::beach);
             stop("cave", this::cave);
             stop("fast flight", this::fastFlight);
             stop("portal trip", this::portalTrip);
@@ -460,6 +462,62 @@ public class PlaytestTour implements FabricClientGameTest {
             shot("59-eye-at-waterline");
             frames("waterline", 24);
         }
+    }
+
+    /**
+     * The user's three reports from playing (2026-11-23), on a beach facing the sea: shimmer on
+     * sand and trees with the camera still; water reflections that break while jumping; clouds that
+     * look cut and blotchy. The jump moves the camera along a real jump's arc (vanilla's 0.42 up,
+     * 0.08 gravity, 0.98 drag per tick) by teleporting each tick, so Luxium and Iris see the same
+     * motion. Clips: beach-still, beach-jump, beach-sky.
+     */
+    private void beach() {
+        spectator();
+        cmd("time set noon");
+        cmd("weather clear");
+        BlockPos at = findBiome(Biomes.BEACH);
+        if (at == null) {
+            log("beach not found nearby; skipped");
+            return;
+        }
+        cmd("tp @a " + at.getX() + " 200 " + at.getZ());
+        settle(10);
+        BlockPos sea = server.computeOnServer(s -> {
+            var pair = s.overworld().findClosestBiome3d(h -> h.is(BiomeTags.IS_OCEAN), at, 2000, 8, 64);
+            return pair == null ? null : pair.getFirst();
+        });
+        BlockPos ground = surface(at.getX(), at.getZ());
+        float yaw = sea == null ? 0f
+                : (float) Math.toDegrees(Math.atan2(-(sea.getX() - at.getX()), sea.getZ() - at.getZ()));
+        String xz = at.getX() + 0.5 + " %.3f " + (at.getZ() + 0.5);
+        String look = " " + yaw + " ";
+        log("beach at " + at.toShortString() + ", ground y " + ground.getY() + ", sea at " + (sea == null ? "?" : sea.toShortString()) + ", yaw " + yaw);
+        cmd("tp @a " + String.format(java.util.Locale.ROOT, xz, (double) ground.getY()) + look + "5");
+        settle(60);
+        shot("60-beach");
+        frames("beach-still", 24);
+        // The jump, then standing again.
+        Path dir = frameDir("beach-jump");
+        double y = ground.getY();
+        double vy = 0.42;
+        for (int i = 0; i < 24; i++) {
+            cmd("tp @a " + String.format(java.util.Locale.ROOT, xz, y) + look + "5");
+            context.waitTick();
+            frame(dir, i);
+            if (i == 6) {
+                shot("61-beach-mid-jump");
+            }
+            y += vy;
+            vy = (vy - 0.08) * 0.98;
+            if (y < ground.getY()) {
+                y = ground.getY();
+                vy = 0.42;   // jump again on landing
+            }
+        }
+        cmd("tp @a " + String.format(java.util.Locale.ROOT, xz, (double) ground.getY()) + look + "-55");
+        settle(20);
+        shot("62-beach-sky");
+        frames("beach-sky", 24);
     }
 
     /** A carved cave 60 blocks under spawn: torches, glow lichen, lava, ores. No sky light. */

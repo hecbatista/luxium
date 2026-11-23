@@ -224,6 +224,8 @@ public final class PackChain {
             noiseTexture = t;
             noise = device.createTextureView(t);
             noiseImage.close();
+            // Iris NativeImageBackedNoiseTexture: linear and repeat (packs read it with world coordinates).
+            CustomTextures.setSampler(noise, RenderSystem.getSamplerCache().getRepeat(FilterMode.LINEAR));
         }
         compileSeed(device);
     }
@@ -235,6 +237,7 @@ public final class PackChain {
      * (Metallum's command buffers retain their references), so closing now is safe.
      */
     public static void unload() {
+        CustomTextures.unload();
         SkyTakeover.unload();
         TerrainTakeover.unload();
         EntityTakeover.unload();
@@ -610,6 +613,9 @@ public final class PackChain {
     private static void runPasses(GpuDevice device, CommandEncoder encoder, RenderTarget target,
                                   Function<String, Object> values, boolean deferred) {
         String stopAfter = System.getenv("LUXIUM_STOP_AFTER");
+        // Render targets earlier passes of this stage wrote this frame: their texture.<stage>
+        // overrides are off from then on (Iris CompositeRenderer, flippedAtLeastOnce).
+        java.util.Set<Integer> writtenThisStage = new java.util.HashSet<>();
         for (Pass pass : passes) {
             if (stopped) {
                 return;
@@ -617,6 +623,7 @@ public final class PackChain {
             if (pass.name().startsWith("deferred") != deferred) {
                 continue;
             }
+            CustomTextures.Stage stage = CustomTextures.stageOfPass(pass.name());
             if (stopAfter != null && pass.name().equals("final")) {
                 showDebug(device, encoder, target);
                 stopped = true;
@@ -624,7 +631,8 @@ public final class PackChain {
             }
             Map<String, GpuTextureView> inputs = new HashMap<>();
             for (ProgramTranslator.Sampler s : pass.program().samplers()) {
-                inputs.put(s.name(), input(device, encoder, s.name()));
+                GpuTextureView custom = CustomTextures.override(stage, s.name(), writtenThisStage);
+                inputs.put(s.name(), custom != null ? custom : input(device, encoder, s.name()));
             }
             if (pass.ubo() != null) {
                 try (GpuBufferSlice.MappedView v = pass.ubo().currentBuffer().map(false, true)) {
@@ -649,10 +657,9 @@ public final class PackChain {
                 if (pass.ubo() != null) {
                     rp.setUniform(ProgramTranslator.UNIFORM_BLOCK, pass.ubo().currentBuffer());
                 }
-                var samplers = RenderSystem.getSamplerCache();
                 for (ProgramTranslator.Sampler s : pass.program().samplers()) {
-                    boolean nearest = s.name().startsWith("depthtex") || s.name().startsWith("shadowtex");
-                    rp.setUniform(s.name(), inputs.get(s.name()), samplers.getClampToEdge(nearest ? FilterMode.NEAREST : FilterMode.LINEAR));
+                    GpuTextureView v = inputs.get(s.name());
+                    rp.setUniform(s.name(), v, CustomTextures.samplerFor(s.name(), v));
                 }
                 rp.draw(3, 1, 0, 0);
             }
@@ -662,6 +669,7 @@ public final class PackChain {
             for (int index : new LinkedHashSet<>(pass.writes())) {
                 current.put(index, 1 - current.get(index));   // the flip
             }
+            writtenThisStage.addAll(pass.writes());
             if (pass.name().equals(stopAfter)) {
                 showDebug(device, encoder, target);
                 stopped = true;
@@ -948,6 +956,11 @@ public final class PackChain {
 
     /** What a sampler name reads. Creates placeholders, so call it outside any render pass. */
     public static GpuTextureView inputView(String name) {
+        // Every caller is a gbuffers or shadow program: Iris's GBUFFERS_AND_SHADOW texture stage.
+        GpuTextureView custom = CustomTextures.override(CustomTextures.Stage.GBUFFERS, name, java.util.Set.of());
+        if (custom != null) {
+            return custom;
+        }
         GpuDevice device = RenderSystem.getDevice();
         return input(device, device.createCommandEncoder(), name);
     }

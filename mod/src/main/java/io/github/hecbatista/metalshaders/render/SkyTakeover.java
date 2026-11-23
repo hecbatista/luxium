@@ -219,11 +219,10 @@ public final class SkyTakeover {
         if (p == null || !inSkyPass) {
             return;
         }
-        GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
         for (ProgramTranslator.Sampler s : p.result().samplers()) {
             GpuTextureView v = inputs.get(s.name());
             if (v != null) {
-                pass.setUniform(s.name(), v, linear);
+                pass.setUniform(s.name(), v, CustomTextures.samplerFor(s.name(), v));
             }
         }
         if (p.layout().size() == 0) {
