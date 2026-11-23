@@ -16,7 +16,10 @@ import java.util.Map;
  * <ul>
  *   <li>Feature claims (IRIS_FEATURE_*, IRIS_HAS_TRANSLUCENCY_SORTING, DISTANT_HORIZONS, ...):
  *       only once we actually support the feature. IRIS_INLINE_GLINT is claimed: the translator
- *       supplies mc_hasGlint()/mc_sampleGlint() (ProgramTranslator.Format#glint).</li>
+ *       supplies mc_hasGlint()/mc_sampleGlint() (ProgramTranslator.Format#glint).
+ *       IRIS_FEATURE_ENTITY_TRANSLUCENT is claimed: EntityTakeover draws the translucent entity
+ *       and block programs. Not claimed yet: FADE_VARIABLE (needs Sodium's section fade times
+ *       for mc_chunkFade) and BLOCK_EMISSION_ATTRIBUTE (no emission vertex attribute).</li>
  *   <li>MC_GL_VERSION, MC_GLSL_VERSION, MC_GL_VENDOR_*, MC_GL_RENDERER_*: there's no OpenGL
  *       driver under Metal, so we'd be guessing. Complementary doesn't read the versions.</li>
  * </ul>
@@ -55,6 +58,13 @@ public final class StandardDefines {
         // Iris StandardMacros: packs may call mc_hasGlint()/mc_sampleGlint() (Complementary does in
         // gbuffers_entities and gbuffers_hand to draw the enchantment glint of GLINT pipelines).
         defines.put("IRIS_INLINE_GLINT", "");
+        // Iris FeatureFlags.ENTITY_TRANSLUCENT (always usable; ShaderPack adds "IRIS_FEATURE_" + name):
+        // translucent entities and block entities get their own programs, gbuffers_entities_translucent
+        // and gbuffers_block_translucent, which EntityTakeover draws (families TRANSLUCENT and
+        // BLOCK_TRANSLUCENT). Without it Complementary's opaque gbuffers_entities/gbuffers_block take
+        // the fallback that mixes a translucency tint into colortex3 for every entity; under Iris
+        // opaque entities write 0 there (found with mod/scripts/pipecheck, 2026-11-23).
+        defines.put("IRIS_FEATURE_ENTITY_TRANSLUCENT", "");
         for (int i = 0; i < RENDER_STAGES.size(); i++) {
             defines.put("MC_RENDER_STAGE_" + RENDER_STAGES.get(i), Integer.toString(i));
         }

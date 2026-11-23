@@ -173,3 +173,8 @@ Step 7 (polish), agreed order with the user (2026-11-20): pack settings → Neth
     - Spider eyes: Iris's version samples the entity overlay (hurt tint); Luxium's can't, because the game's `eyes` pipeline declares no `Sampler1`. Negligible.
   - Ruled out: weather's alpha test (`1e-4` in Luxium vs `ONE_TENTH_ALPHA` in Iris's ShaderKey). The pack sets `alphaTest.gbuffers_weather=GREATER 0.0001`, so Luxium is right.
   - Iris's log in that run also shows `RuntimeException: Unknown variable: BIOME_ICE_CAVES` (an Iris custom-uniform problem, not ours).
+  - **Follow-up (2026-11-23): `IRIS_FEATURE_ENTITY_TRANSLUCENT` is now claimed** (`StandardDefines.forMac`). Iris always claims it (`FeatureFlags`), and Luxium meets what it promises: separate `gbuffers_entities_translucent` and `gbuffers_block_translucent` programs, drawn by the `TRANSLUCENT` and `BLOCK_TRANSLUCENT` families.
+    - Preprocessed output now matches Iris's branch: opaque `gbuffers_entities`/`gbuffers_block` use `translucentMult = vec3(1.0)`; the translucent program keeps the mix.
+    - Measured effect (mean |Δ| per pixel, 0–255): zoo shots before vs after 0.3–1.2, which is within run-to-run noise (two unchanged runs differ by 1.2–5.7, underwater the most). Behind glass, the distance to Iris went 5.61 → 5.47, also noise.
+    - So the change is correct but makes no visible difference in our scenes. Iris is still 2–6 brighter in every zoo shot (luminance 103→106, 56→62, 150→152). That gap has another cause; the HIGH profile Iris applies is a candidate.
+    - Checks: 0 validation messages (zoo and regression), 98 unit tests, scoreboard 90/90, check-preprocessed 177/42 (unchanged), flicker unchanged (walk 0.13%, the known shimmer; zoo and portal clips flag as before, from animation).
