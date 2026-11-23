@@ -35,14 +35,13 @@ When a slice is finished, append its result to the right `docs/history/` file, a
 - Known gaps:
   - Pack settings are read only at load (no profiles, no in-game screen).
   - `dimension.properties` isn't preprocessed.
-  - The repo has **no LICENSE yet**, and the LGPL material credited in `mod/NOTICE` affects which license fits.
 
 ## Layout
 ```
 metal-shaders/
 ├── CLAUDE.md, .mcp.json       this file; project MCP server apple-docs
 ├── .claude/skills/            the skills above
-├── mod/                       OUR mod, display name **Luxium** (Fabric, id `metalshaders`, package io.github.hecbatista.metalshaders)
+├── mod/                       OUR mod **Luxium** (Fabric, id `luxium` since 2026-11-23, Java package still io.github.hecbatista.metalshaders; LGPL-3.0-only)
 │   └── scripts/               gametest.sh, test.sh, ContactSheet.java, FlickerCheck.java, check-preprocessed.sh, graph-update.sh
 ├── docs/history/              per-step notes (table above)
 ├── branding/                  Luxium icon (`make_icon.py`)

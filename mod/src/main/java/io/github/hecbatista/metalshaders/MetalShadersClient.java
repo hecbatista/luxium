@@ -42,7 +42,7 @@ import java.util.Set;
  * (logging some of them every 5 seconds). Nothing is drawn yet.
  */
 public final class MetalShadersClient implements ClientModInitializer {
-    public static final String MOD_ID = "metalshaders";
+    public static final String MOD_ID = "luxium";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     @Override

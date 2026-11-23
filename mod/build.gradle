@@ -50,7 +50,7 @@ test {
 fabricApi {
 	configureTests {
 		createSourceSet = true
-		modId = "metalshaders-test"
+		modId = "luxium-test"
 		enableGameTests = false        // server-side game tests: not needed
 		enableClientGameTests = true
 		eula = true                    // the user agreed to the Minecraft EULA on 2026-11-20
@@ -78,9 +78,10 @@ processResources {
 	}
 }
 
-// Ship the third-party credits inside the mod jar.
+// Ship Luxium's license (LGPL-3.0-only, repo root) and the third-party credits inside the mod jar.
 jar {
 	from("NOTICE")
+	from("../LICENSE")
 }
 
 tasks.withType(JavaCompile).configureEach {

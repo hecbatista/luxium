@@ -343,9 +343,9 @@ public final class TerrainTakeover {
         // Iris leaves gbuffers_water on the vanilla translucent blend; terrain draws unblended.
         // (Iris ProgramId.Shadow*/ShadowWater: BlendModeOverride.OFF, so the shadow pass is never blended by default.)
         Optional<BlendFunction> defaultBlend = pass.isTranslucent() && !shadow ? Optional.of(BlendFunction.TRANSLUCENT) : Optional.empty();
-        Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/" + program + "_" + name);
+        Identifier shader = Identifier.fromNamespaceAndPath("luxium", "pack/" + program + "_" + name);
         RenderPipeline.Builder b = RenderPipeline.builder()
-                .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/terrain/" + name))
+                .withLocation(Identifier.fromNamespaceAndPath("luxium", "pipeline/terrain/" + name))
                 .withVertexShader(shader).withFragmentShader(shader)
                 // Sodium's chunk pipeline state (ShaderChunkRenderer.createShader, 0.9.2).
                 .withPrimitiveTopology(PrimitiveTopology.QUADS)

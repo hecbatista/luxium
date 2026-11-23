@@ -43,7 +43,7 @@ exc=$(grep -E "Exception|Error:|Caused by" "$log" \
 grep -q "Description:" "$log" && { echo "CRASH:"; grep -m1 -A3 "Description:" "$log"; }
 stops=$(grep -o "\[Luxium tour\] .*" "$log" | sed 's/\[Luxium tour\] //' | grep -E "stop done|failed|not found" | sed -E 's/== stop done: //')
 [ -n "$stops" ] && { echo "tour:"; echo "$stops" | tr '\n' ';' | sed 's/;/; /g'; echo; }
-warn=$(grep -E "WARN\] \(metalshaders\)|ERROR\] \(metalshaders\)" "$log" | sed -E 's/^\[[0-9:]+\] //' | cut -c1-160 | sort | uniq -c | sort -rn | head -6)
+warn=$(grep -E "WARN\] \(luxium\)|ERROR\] \(luxium\)" "$log" | sed -E 's/^\[[0-9:]+\] //' | cut -c1-160 | sort | uniq -c | sort -rn | head -6)
 [ -n "$warn" ] && { echo "luxium warnings:"; echo "$warn"; }
 
 clips=$(find "$shots" -maxdepth 1 -type d -name 'frames-*' 2>/dev/null | sort)

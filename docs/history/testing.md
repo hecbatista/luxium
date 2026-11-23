@@ -34,7 +34,7 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 25)
 MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 ./gradlew runClient
 ```
 - Why the local Metallum jar and not Modrinth's `metallum-mc` 0.0.25 (2026-10-10): the local clone has two more commits, including `5bee03e fix: synchronize MetalDevice.getOrCompileFunction()`, a thread-safety fix in shader compiling.
-- A healthy start of our mod logs `(metalshaders) Luxium loaded. Metallum version: 0.0.25` (the log said "Metal Shaders loaded" before the 2026-11-20 rename; confirmed 2026-11-20: title screen normal, zero validation messages). The game directory is `mod/run/`, so packs go in `mod/run/shaderpacks/`.
+- A healthy start of our mod logs `(luxium) Luxium loaded. Metallum version: 0.0.25` (the tag was `(metalshaders)` until the mod id became `luxium` on 2026-11-23, and the text "Metal Shaders loaded" before the 2026-11-20 rename; confirmed 2026-11-20: title screen normal, zero validation messages). The game directory is `mod/run/`, so packs go in `mod/run/shaderpacks/`.
 - A healthy start also logs `(metallum) Metal device: Apple M1 Max` and `Using graphics backend Metal`. The `ClassNotFoundException` warnings for Distant Horizons and `com/bloom/...ShineRenderBackend` are Metallum's optional compatibility hooks and are harmless.
 - Closing the game with `kill` makes Gradle print `BUILD FAILED ... exit value 143`. 143 means SIGTERM, so this is expected and not an error.
 - To run plain Metallum without our mod, use the same command from `references/metallum`.

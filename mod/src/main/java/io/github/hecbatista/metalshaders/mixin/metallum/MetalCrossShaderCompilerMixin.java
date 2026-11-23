@@ -23,7 +23,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class MetalCrossShaderCompilerMixin {
     @Inject(method = "compile", at = @At("RETURN"))
     private static void luxium$warmMetal(BackendRenderPipeline.CreateInfo info, CallbackInfoReturnable<Object> cir) {
-        if (!info.name().startsWith("metalshaders:") || !(cir.getReturnValue() instanceof MetallumCompiledAccessor compiled)) {
+        if (!info.name().startsWith("luxium:") || !(cir.getReturnValue() instanceof MetallumCompiledAccessor compiled)) {
             return;
         }
         if (PipelineCompiler.dumping()) {

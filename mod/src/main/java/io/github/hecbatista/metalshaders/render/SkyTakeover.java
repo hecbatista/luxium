@@ -111,9 +111,9 @@ public final class SkyTakeover {
         if (!writes.equals(List.of(0))) {
             throw new IllegalStateException(program + " writes " + writes + "; only colortex0 is supported for the sky yet");
         }
-        Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/" + program + "_" + vanilla.getLocation().getPath().replace('/', '_'));
+        Identifier shader = Identifier.fromNamespaceAndPath("luxium", "pack/" + program + "_" + vanilla.getLocation().getPath().replace('/', '_'));
         RenderPipeline.Builder b = RenderPipeline.builder()
-                .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/sky/" + vanilla.getLocation().getPath()))
+                .withLocation(Identifier.fromNamespaceAndPath("luxium", "pipeline/sky/" + vanilla.getLocation().getPath()))
                 .withVertexShader(shader).withFragmentShader(shader)
                 .withPrimitiveTopology(vanilla.getPrimitiveTopology())
                 .withVertexBinding(0, vanilla.getVertexFormatBindings().getFirst());

@@ -158,7 +158,7 @@ public final class PipelineCompiler {
         if (DUMP == null) {
             return;
         }
-        String base = pipelineName.replaceFirst("^metalshaders:pipeline/", "").replace(':', '_').replace('/', '_');
+        String base = pipelineName.replaceFirst("^luxium:pipeline/", "").replace(':', '_').replace('/', '_');
         try {
             Path dir = DUMP.resolve(dumpFolder);
             Files.createDirectories(dir);

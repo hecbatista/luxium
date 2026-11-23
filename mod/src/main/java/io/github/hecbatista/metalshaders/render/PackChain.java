@@ -150,9 +150,9 @@ public final class PackChain {
             }
             boolean isFinal = name.equals("final");
             List<Integer> writes = isFinal ? List.of() : r.drawBuffers();
-            Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/" + name);
+            Identifier shader = Identifier.fromNamespaceAndPath("luxium", "pack/" + name);
             RenderPipeline.Builder builder = RenderPipeline.builder()
-                    .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/pack_" + name))
+                    .withLocation(Identifier.fromNamespaceAndPath("luxium", "pipeline/pack_" + name))
                     .withVertexShader(shader)
                     .withFragmentShader(shader)
                     .withPrimitiveTopology(PrimitiveTopology.TRIANGLES);
@@ -291,9 +291,9 @@ public final class PackChain {
         if (failed) {
             return;
         }
-        Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/seed");
+        Identifier shader = Identifier.fromNamespaceAndPath("luxium", "pack/seed");
         RenderPipeline pipeline = RenderPipeline.builder()
-                .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/seed"))
+                .withLocation(Identifier.fromNamespaceAndPath("luxium", "pipeline/seed"))
                 .withVertexShader(shader).withFragmentShader(shader)
                 .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
                 .withBindGroupLayout(BindGroupLayout.builder().withUniform("world", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -341,7 +341,7 @@ public final class PackChain {
         // depthtex0/1/2: the game draws reversed-Z (far = 0); packs expect OpenGL's convention.
         // Iris rewrites each depth read to 1 - depth (DepthTransformer); converting the image once
         // instead (Vitrail's way) also covers reads through helper functions. See NOTICE.
-        Identifier depthShader = Identifier.fromNamespaceAndPath("metalshaders", "pack/depth_convert");
+        Identifier depthShader = Identifier.fromNamespaceAndPath("luxium", "pack/depth_convert");
         String depthFragment = """
                 #version 450
                 uniform sampler2D reversedDepth;
@@ -350,7 +350,7 @@ public final class PackChain {
                 void main() { depth = vec4(1.0 - texture(reversedDepth, uv).r); }
                 """;
         depthPipeline = device.compilePipeline(RenderPipeline.builder()
-                        .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/depth_convert"))
+                        .withLocation(Identifier.fromNamespaceAndPath("luxium", "pipeline/depth_convert"))
                         .withVertexShader(depthShader).withFragmentShader(depthShader)
                         .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
                         .withBindGroupLayout(BindGroupLayout.builder().withUniform("reversedDepth", UniformType.COMBINED_IMAGE_SAMPLER).build())
@@ -530,7 +530,7 @@ public final class PackChain {
     /** {@code into} = 1 - hand depth where the hand drew (reversed-Z: anything above 0), else as it was. */
     private static void mergeHand(GpuDevice device, CommandEncoder encoder, GpuTexture into, GpuTextureView intoView) {
         if (mergePipeline == null) {
-            Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/merge_hand_depth");
+            Identifier shader = Identifier.fromNamespaceAndPath("luxium", "pack/merge_hand_depth");
             String vertex = """
                     #version 450
                     layout(location = 0) out vec2 uv;
@@ -552,7 +552,7 @@ public final class PackChain {
                     }
                     """;
             mergePipeline = device.compilePipeline(RenderPipeline.builder()
-                            .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/merge_hand_depth"))
+                            .withLocation(Identifier.fromNamespaceAndPath("luxium", "pipeline/merge_hand_depth"))
                             .withVertexShader(shader).withFragmentShader(shader)
                             .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
                             .withBindGroupLayout(BindGroupLayout.builder().withUniform("previous", UniformType.COMBINED_IMAGE_SAMPLER)
@@ -722,7 +722,7 @@ public final class PackChain {
         }
         GpuDevice device = RenderSystem.getDevice();
         if (composePipeline == null) {
-            Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/compose_catch");
+            Identifier shader = Identifier.fromNamespaceAndPath("luxium", "pack/compose_catch");
             String vertex = """
                     #version 450
                     layout(location = 0) out vec2 uv;
@@ -740,7 +740,7 @@ public final class PackChain {
                     void main() { color = texture(caught, uv); }
                     """;
             composePipeline = device.compilePipeline(RenderPipeline.builder()
-                            .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/compose_catch"))
+                            .withLocation(Identifier.fromNamespaceAndPath("luxium", "pipeline/compose_catch"))
                             .withVertexShader(shader).withFragmentShader(shader)
                             .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
                             .withBindGroupLayout(BindGroupLayout.builder().withUniform("caught", UniformType.COMBINED_IMAGE_SAMPLER).build())
@@ -772,7 +772,7 @@ public final class PackChain {
     private static void showDebug(GpuDevice device, CommandEncoder encoder, RenderTarget target) {
         String show = System.getenv().getOrDefault("LUXIUM_SHOW", "colortex0");
         if (showPipeline == null) {
-            Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/show");
+            Identifier shader = Identifier.fromNamespaceAndPath("luxium", "pack/show");
             String vertex = """
                     #version 450
                     layout(location = 0) out vec2 uv;
@@ -802,7 +802,7 @@ public final class PackChain {
             fragment = fragment.replace("SCALE", System.getenv().getOrDefault("LUXIUM_SHOW_SCALE", "1.0"))
                     .replace("FRAGCOORD", show.equals("fragcoord") ? "true" : "false");
             showPipeline = device.compilePipeline(RenderPipeline.builder()
-                            .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/show"))
+                            .withLocation(Identifier.fromNamespaceAndPath("luxium", "pipeline/show"))
                             .withVertexShader(shader).withFragmentShader(shader)
                             .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
                             .withBindGroupLayout(BindGroupLayout.builder().withUniform("shown", UniformType.COMBINED_IMAGE_SAMPLER).build())
@@ -836,7 +836,7 @@ public final class PackChain {
     /** Debug (LUXIUM_SHOW=depthdiff): |depthtex0 - depthtex1| times LUXIUM_SHOW_SCALE (default 1000), red. */
     private static void showDepthDiff(GpuDevice device, CommandEncoder encoder, RenderTarget target) {
         if (diffPipeline == null) {
-            Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/show_depthdiff");
+            Identifier shader = Identifier.fromNamespaceAndPath("luxium", "pack/show_depthdiff");
             String vertex = """
                     #version 450
                     layout(location = 0) out vec2 uv;
@@ -858,7 +858,7 @@ public final class PackChain {
                     }
                     """.replace("SCALE", System.getenv().getOrDefault("LUXIUM_SHOW_SCALE", "1000.0"));
             diffPipeline = device.compilePipeline(RenderPipeline.builder()
-                            .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/show_depthdiff"))
+                            .withLocation(Identifier.fromNamespaceAndPath("luxium", "pipeline/show_depthdiff"))
                             .withVertexShader(shader).withFragmentShader(shader)
                             .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
                             .withBindGroupLayout(BindGroupLayout.builder().withUniform("depth0", UniformType.COMBINED_IMAGE_SAMPLER)

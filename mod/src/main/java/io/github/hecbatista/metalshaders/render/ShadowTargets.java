@@ -130,7 +130,7 @@ public final class ShadowTargets {
     private static void copyDepth(GpuTextureView into) {
         GpuDevice device = RenderSystem.getDevice();
         if (copyPipeline == null) {
-            Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/shadow_depth_copy");
+            Identifier shader = Identifier.fromNamespaceAndPath("luxium", "pack/shadow_depth_copy");
             String vertex = """
                     #version 450
                     layout(location = 0) out vec2 uv;
@@ -148,7 +148,7 @@ public final class ShadowTargets {
                     void main() { depth = vec4(texture(shadowDepth, uv).r); }
                     """;
             copyPipeline = device.compilePipeline(RenderPipeline.builder()
-                            .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/shadow_depth_copy"))
+                            .withLocation(Identifier.fromNamespaceAndPath("luxium", "pipeline/shadow_depth_copy"))
                             .withVertexShader(shader).withFragmentShader(shader)
                             .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
                             .withBindGroupLayout(BindGroupLayout.builder().withUniform("shadowDepth", UniformType.COMBINED_IMAGE_SAMPLER).build())

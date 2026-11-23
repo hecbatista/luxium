@@ -708,9 +708,9 @@ public final class EntityTakeover {
         ProgramTranslator.Result r = p.result();
         String variant = (Float.isNaN(alpha) ? "solid" : "cutout") + (overlay ? "" : "_no_overlay")
                 + (glint == Glint.NONE ? "" : "_glint" + (glint == Glint.SPECIAL ? "_special" : ""));
-        Identifier shader = Identifier.fromNamespaceAndPath("metalshaders", "pack/" + f.program + "_" + variant);
+        Identifier shader = Identifier.fromNamespaceAndPath("luxium", "pack/" + f.program + "_" + variant);
         RenderPipeline.Builder b = RenderPipeline.builder()
-                .withLocation(Identifier.fromNamespaceAndPath("metalshaders", "pipeline/" + f.program + "/" + vanilla.getLocation().getPath()))
+                .withLocation(Identifier.fromNamespaceAndPath("luxium", "pipeline/" + f.program + "/" + vanilla.getLocation().getPath()))
                 .withVertexShader(shader).withFragmentShader(shader)
                 .withPrimitiveTopology(vanilla.getPrimitiveTopology())
                 .withCull(!f.shadow && vanilla.isCull())

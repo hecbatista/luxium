@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "metalshaders-test",
+  "id": "luxium-test",
   "version": "${version}",
   "name": "Luxium client game tests",
   "description": "Automated in-game checks for Luxium (dev only, never shipped).",
@@ -12,7 +12,7 @@
     ]
   },
   "depends": {
-    "metalshaders": "*",
+    "luxium": "*",
     "fabric-api": "*"
   }
 }
