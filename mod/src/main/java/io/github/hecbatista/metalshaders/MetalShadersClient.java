@@ -296,6 +296,7 @@ public final class MetalShadersClient implements ClientModInitializer {
             PackChain.unload();
         }
         loadedFolder = folder;
+        io.github.hecbatista.metalshaders.render.PipelineCompiler.setDumpFolder(folder);
         long start = System.nanoTime();
         LOGGER.info("World {}: {} the pack's {} programs", worldId, reload ? "switching to" : "loading",
                 folder.isEmpty() ? "root" : folder + "/");

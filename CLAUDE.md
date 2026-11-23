@@ -19,16 +19,17 @@ This file stays short because every session and every subagent loads it. The det
 | `docs/history/steps-1-5.md` | pack reader, preprocessor (JCPP), translator (no glsl-transformer: it's AGPL), std140 layout, uniforms and pack formulas, test and scoreboard results, translator gaps |
 | `docs/history/step-6.md` | 6a first pixels, 6b final, 6c render targets and chain, 6d gbuffers (sky, Sodium terrain, water and the catch, entities, ids, particles, weather, hand, spider eyes and beams), 6e shadows, 6f correctness, plus "Facts for step 6" (binding by name, full-screen passes, Vitrail's 26.3 seam) |
 | `docs/history/step-7.md` | 7a pack settings, 7b Nether/End, 7c off-screen shadow casters, 7d OIT off, 7e ids, 7f performance, 7g compile pool and Metal cache warm-up |
-| `docs/history/testing.md` | full notes on the client game tests |
+| `docs/history/testing.md` | full notes on the client game tests; running the game by hand; validation facts and harmless startup warnings |
 
 When a slice is finished, append its result to the right `docs/history/` file, and add only a one-line pointer here if it changes how to work.
 
 ## How to work here
 - Step 7 slices: check in with the user before each one. Every slice's final pass includes the frame-sequence flicker check (user request 2026-11-20).
-- Running the game, reviewing screenshots, comparing with vanilla or Iris, and delegating to subagents: use the **`luxium-gametest` skill** (`.claude/skills/luxium-gametest/SKILL.md`). In short:
-  - run with `mod/scripts/gametest.sh` and read its summary;
-  - review with contact sheets (`mod/scripts/ContactSheet.java`);
-  - use Sonnet subagents for run-and-check work, at most 2 game-running agents at once, one worktree each.
+- Project skills (`.claude/skills/`). Load the one that fits before starting:
+  - **`luxium-gametest`**: run the game (`mod/scripts/gametest.sh`, always under validation), review contact sheets, compare with vanilla or Iris, flicker check, delegate to subagents (Sonnet for run-and-check, at most 2 game-running agents, one worktree each).
+  - **`luxium-offline-check`**: everything without the game. Unit tests through `mod/scripts/test.sh` (never a bare `./gradlew test`: it floods the output), the translation scoreboard, compiling one shader by hand, `LUXIUM_DUMP_SHADERS`.
+  - **`luxium-references`**: which reference answers what (Minecraft sources, Metallum, Iris, Vitrail, gaelquinta-metal), pinned commits, layouts, token-safe grep, credit rules, versions.
+  - **`axiom-graphics`**: Metal and GLSL→MSL reference tables.
 - Finding code: `graphify query "<question>" --budget 1500` answers from a free AST graph of `mod/src` and the Minecraft sources. Use it before reading big files; refresh it with `mod/scripts/graph-update.sh`.
 - Known gaps:
   - Pack settings are read only at load (no profiles, no in-game screen).
@@ -38,92 +39,38 @@ When a slice is finished, append its result to the right `docs/history/` file, a
 ## Layout
 ```
 metal-shaders/
-├── CLAUDE.md                  this file
-├── .mcp.json                  project-scoped MCP server: apple-docs
-├── .claude/skills/axiom-graphics/   Metal/GLSL→MSL reference skill (copied from CharlesWiltgen/Axiom, MIT)
+├── CLAUDE.md, .mcp.json       this file; project MCP server apple-docs
+├── .claude/skills/            the skills above
 ├── mod/                       OUR mod, display name **Luxium** (Fabric, id `metalshaders`, package io.github.hecbatista.metalshaders)
-├── branding/                  Luxium icon (`make_icon.py` draws it and copies icon.png into the mod)
-├── experiments/               small out-of-game tests (01-glsl-to-metal: GLSL → SPIR-V → MSL → metallib)
-└── references/                read-only reference code; do not edit, build our own code elsewhere
-    ├── metallum/              kokodio/metallum: the Metal backend we build on (MIT)
-    ├── iris/                  IrisShaders/Iris: the reference shader-pack implementation, OpenGL (LGPL-3.0)
-    ├── vitrail/               avpbynf/Vitrail-Shaders: runs OptiFine packs on the Vulkan backend (LGPL-3.0)
-    └── minecraft-26.3-sources/  decompiled Minecraft 26.3 (Mojang names), extracted from Loom's genSources jar
+│   └── scripts/               gametest.sh, test.sh, ContactSheet.java, FlickerCheck.java, check-preprocessed.sh, graph-update.sh
+├── docs/history/              per-step notes (table above)
+├── branding/                  Luxium icon (`make_icon.py`)
+├── experiments/               small out-of-game tests (GLSL → SPIR-V → MSL → metallib)
+└── references/                read-only, git-ignored: minecraft-26.3-sources, metallum, iris, vitrail, gaelquinta-metal (see luxium-references)
 ```
-
-### Pinned references (as cloned 2026-11-20)
-| Repo | Branch | Commit | Why this branch |
-|---|---|---|---|
-| metallum | master | 467d312b | default branch |
-| iris | **26.3** | 671a5c87 | Iris's default branch is `26.1`, which is wrong for us. `26.3` matches Metallum: Iris `build.gradle.kts` has `MINECRAFT_VERSION "26.3"` and `sodium-fabric:0.9.2+mc26.3`. (`26.3-new` exists but moved to Sodium 0.9.3-beta.5.) |
-| vitrail | main | 7a3cdcbe | builds for 26.2 by default; use `-Pminecraft=26.3` (see `versions/26.3.properties`) |
-| gaelquinta-metal | main | 6e0a0af | GaelQuinta/minecraft-metal-shaders (Apache-2.0): own native Metal shaders on mcopt, not packs. Read for Apple-GPU measurements (`docs/research/apple-gpu.md`), compile and test tooling; not a visual reference (cloned 2026-11-23) |
-| axiom-graphics skill | main | ffafd3b3 | recorded in `.claude/skills/axiom-graphics/.source-commit` |
-
-### Versions (from `references/metallum/gradle.properties` and `build.gradle`)
-- Minecraft 26.3, Fabric Loader 0.19.5, Loom 1.16-SNAPSHOT (resolved to 1.16.3), Sodium `mc26.3-0.9.2`, metal-jvm 0.1.0
-- Java 25 (`options.release = 25`); local JDK is Temurin 25.0.5 (`/usr/libexec/java_home -v 25`)
-- Gradle 9.4.1 via the wrapper
-
-### Where things are in each repo
-- **Metallum:** `src/main/java/com/metallum/{render,mixin,compat}`; mixin configs in `src/main/resources/` (`metallum.mixins.json`, plus `.sodium`, `.distanthorizons`, `.shine` variants).
-- **Iris:** `common/src/main/java/net/irisshaders/iris/`. `shaderpack/` handles pack loading and parsing, `pipeline/` the render pipeline, `uniforms/`, `gl/` OpenGL wrappers, `shadows/`.
-- **Vitrail:** `common/src/main/java/dev/vitrail/` (`pack/`, `glsl/`, `render/`, `uniform/`). Read `docs/` first: `translation.md`, `internals/`, `pack-format.md`, `why.md`, `compatibility.md`. Vitrail solves the same problem for Vulkan that we're solving for Metal, so it's the closest prior art.
 
 ## Rules
 
 ### Names: Mojang official only
-- Minecraft 26.x ships **unobfuscated**. This was verified: the genSources jar has 7,302 files and no obfuscated names like `class_1234` or `a.java`.
+- Minecraft 26.x ships **unobfuscated** (verified: the genSources jar has 7,302 files and no `class_1234`-style names).
 - Use Mojang's official names only. **Never Yarn names** (`class_XXXX`, `method_XXXX`, or Yarn-style names from old tutorials).
-- **Before using any Minecraft class, method or field, find it in `references/minecraft-26.3-sources/`** (for example `grep -rn "class LevelRenderer" references/minecraft-26.3-sources`). If you can't find it there, it doesn't exist in 26.3.
-- The original sources jar is at `references/metallum/.gradle/loom-cache/minecraftMaven/net/minecraft/minecraft-merged-5309bbdd7f/26.3/minecraft-merged-5309bbdd7f-26.3-sources.jar`. To regenerate it, run `./gradlew genSources` in `references/metallum`.
+- **Before using any Minecraft class, method or field, find it in `references/minecraft-26.3-sources/`** (for example `grep -rn --include='*.java' "class LevelRenderer" references/minecraft-26.3-sources`). If you can't find it there, it doesn't exist in 26.3.
 
 ### Verify, don't trust
 - Never guess versions, URLs, class names or APIs. Read the actual file or doc and cite it.
-- **Metallum's README describes the project as "vibecoded as hell".** Treat its code as something to verify against the Minecraft sources and Apple's Metal docs, not as ground truth.
-- Vitrail's Modrinth page says AI tools did most of its typing too. Same rule: verify before copying any of its behavior.
+- Metallum's README calls it "vibecoded as hell", and Vitrail's Modrinth page says AI tools did most of its typing. Verify their behavior against the Minecraft sources and Apple's docs before copying it.
 - For Metal APIs, check Apple's docs (the `apple-docs` MCP server) or `man MetalValidation`. The `axiom-graphics` skill is a guide, not a primary source.
 
 ### Licensing
-- **Iris and Vitrail are LGPL-3.0.** Any code, tables, grammars or formulas borrowed from them must be credited **file by file**: the source project and class, what was adapted, and what changed. Follow the format of `references/vitrail/NOTICE` (it credits Iris this way). Keep a `NOTICE` file in our own code once anything is borrowed.
-- Metallum and the Axiom skill are MIT; keep their copyright notice if any code is copied.
-
-## Automated in-game screenshots (client game tests)
-Claude can test the game without the user, using Fabric API's client game tests (gametest source set only, not a mod dependency). Use the `luxium-gametest` skill; the full notes are in `docs/history/testing.md`.
-- Tests:
-  - `mod/src/gametest/java/io/github/hecbatista/metalshaders/test/ScreenshotTest.java`: a fixed scene with shots 1–10 and flicker clips, about 100 s.
-  - `PlaytestTour` (`LUXIUM_TOUR=1`, optionally `LUXIUM_TOUR_ONLY="stop,stop"`): a scripted play session through a generated world.
-- The test's game folder is wiped every run. The tests copy `mod/run/shaderpacks/*` in; `mod/scripts/gametest.sh` keeps each run's results in `mod/build/gametest/<label>/`.
-- `eula = true` in `mod/build.gradle`: the user agreed to the Minecraft EULA for this on 2026-11-20.
-- Flicker check: `java mod/scripts/FlickerCheck.java <frames dirs>`. It fails above 0.1% of a frame's pixels jumping for one frame (A→B→A). Clips with moving cameras or animated effects are expected to flag: read the heat map.
+- **Iris and Vitrail are LGPL-3.0.** Any code, tables, grammars or formulas borrowed from them must be credited **file by file** in `mod/NOTICE`: the source project and class, what was adapted, and what changed (format of `references/vitrail/NOTICE`).
+- Metallum and the Axiom skill are MIT; gaelquinta-metal is Apache-2.0. Keep their notices if any code is copied.
 
 ## Running and testing
-Always test with Metal's API validation and GPU shader validation on. To run **our mod** (with Metallum and Sodium):
-```bash
-cd references/metallum && ./gradlew build   # once: mod/ uses this local jar (commit 467d312)
-cd ../../mod
-export JAVA_HOME=$(/usr/libexec/java_home -v 25)
-MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 ./gradlew runClient
-```
-- Why the local Metallum jar and not Modrinth's `metallum-mc` 0.0.25 (2026-10-10): the local clone has two more commits, including `5bee03e fix: synchronize MetalDevice.getOrCompileFunction()`, a thread-safety fix in shader compiling.
-- A healthy start of our mod logs `(metalshaders) Luxium loaded. Metallum version: 0.0.25` (the log said "Metal Shaders loaded" before the 2026-11-20 rename; confirmed 2026-11-20: title screen normal, zero validation messages). The game directory is `mod/run/`, so packs go in `mod/run/shaderpacks/`.
-- Closing the game with `kill` makes Gradle print `BUILD FAILED ... exit value 143`. 143 means SIGTERM, so this is expected and not an error.
-- To run plain Metallum without our mod, use the same command from `references/metallum`.
-- Source: `man MetalValidation` (`/usr/share/man/man1/MetalValidation.1`). Any non-zero `MTL_DEBUG_LAYER` enables API validation; any non-zero `MTL_SHADER_VALIDATION` enables GPU validation. More `MTL_DEBUG_LAYER_*` and `MTL_SHADER_VALIDATION_*` options are documented there.
-- **Confirmed working (2026-11-20).** The game process got both variables even though the long-running Gradle daemon didn't have them (checked with `ps eww <pid>`), so `--no-daemon` isn't needed. Metal printed `Metal API Validation Enabled` and `Metal GPU Validation Enabled` at startup. If those two lines are missing from a run, validation is off.
-- Baseline (2026-11-20): unmodified Metallum, run under API and GPU validation, reached the title screen, created and loaded a Creative world, flew around for about 40 seconds, and saved and quit. There were **zero Metal validation messages** and the world rendered normally (user-confirmed). Any validation failure after our changes is therefore ours.
-- `Requested post effect does not exist: minecraft:end_of_frame` is a **vanilla** warning, not Metallum's. `GameRenderer.update()` (`GameRenderer.java:433`) requests `END_OF_FRAME_POST_EFFECT` every frame, and the vanilla client jar ships no `post_effect/end_of_frame.json`. This full-screen hook may be relevant to the shader work later.
-- To check whether the game is running, use `pgrep -f 'java.*devlaunchinjector'`. A bare `pgrep -f devlaunchinjector` also matches any script that mentions the word.
-- Ignore an HTTP 429 from `sessionserver.mojang.com` at startup: that's Mojang rate-limiting the offline dev player's profile lookup.
-- A healthy start logs `(metallum) Metal device: Apple M1 Max` and `Using graphics backend Metal`. The `ClassNotFoundException` warnings for Distant Horizons and `com/bloom/...ShineRenderBackend` are Metallum's optional compatibility hooks and are harmless.
-
-## Tools available
-- JDK: Temurin 25.0.5
-- `xcrun metal` (Metal Toolchain 27B47, compiler 32023.922)
-- `glslangValidator` 16.6.0 (GLSL → SPIR-V, and GLSL validation)
-- `spirv-cross` 1.4.363.0 (SPIR-V → MSL and other targets)
-- MCP: `apple-docs` (kimsungwhee/apple-docs-mcp, project scope in `.mcp.json`)
-- Skill: `axiom-graphics` (see `skills/metal-migration-ref.md` for GLSL→MSL tables, `skills/metal-migration-diag.md` for black screens and frame capture)
+- Always run the game with Metal's API and GPU validation on (`MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1`; `gametest.sh` sets both). Startup must print `Metal API Validation Enabled` and `Metal GPU Validation Enabled`. The 2026-11-20 baseline (plain Metallum) had zero validation messages, so any message is ours.
+- `mod/` builds against the local Metallum jar: run `cd references/metallum && ./gradlew build` once.
+- Is the game running? Use `pgrep -f 'java.*devlaunchinjector'`. A bare `devlaunchinjector` also matches scripts.
+- `eula = true` in `mod/build.gradle`: the user agreed to the Minecraft EULA for the tests on 2026-11-20.
+- Running by hand, healthy-start log lines and harmless warnings: `docs/history/testing.md`.
 
 ## Constraints
-- The disk was about 13 GB free at setup. Check `df -h ~` before large downloads or builds.
+- The disk was about 13 GB free at setup (15 GB on 2026-11-23). Check `df -h ~` before large downloads or builds.

@@ -6,7 +6,8 @@ description: Run Luxium's in-game tests (client game tests, the scripted Playtes
 # Luxium game tests, reviews and delegation
 
 Goal: get the same answers with far fewer tokens. Never read raw Gradle or game logs, and never
-look at screenshots one by one when a contact sheet will do.
+look at screenshots one by one when a contact sheet will do. If the question is only "does it
+still translate and compile?", the `luxium-offline-check` skill answers it without a game run.
 
 ## Run
 ```bash
@@ -97,5 +98,8 @@ The full meanings are in `docs/history/` (grep the name).
 - `LUXIUM_STOP_AFTER=<pass|seed>` + `LUXIUM_SHOW=<colortexN|depthtex0|rawdepth|maindepth|depthdiff|fragcoord|shadowtex0|<buf>:alt>`,
   `LUXIUM_SHOW_SCALE=<n>`, `LUXIUM_DEPTH_PROBE=1`
 - `LUXIUM_NO_TERRAIN=1`, `LUXIUM_NO_ENTITIES=1`, `LUXIUM_SHADOW_CAMERA_LIST=1`
+- `LUXIUM_DUMP_SHADERS=<absolute dir>` (write every pipeline's GLSL and MSL), `LUXIUM_NO_METAL_WARM=1`
+  (7g Metal cache warm-up off, for timings). Game tests always run on a warm Metal cache; for a
+  cold-cache timing see 7g in `docs/history/step-7.md`.
 - Test only: `LUXIUM_TOUR=1`, `LUXIUM_TOUR_ONLY`, `LUXIUM_TEST_NO_PACK=1`, `LUXIUM_TEST_SETTINGS`,
   `LUXIUM_TEST_WALK_ONLY=1`, `LUXIUM_TEST_BOX_ONLY=1`, `LUXIUM_PERF=1`

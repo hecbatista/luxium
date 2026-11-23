@@ -4,6 +4,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.pipeline.CompiledRenderPipeline;
 import com.mojang.renderpearl.api.pipeline.RenderPipeline;
 import com.mojang.renderpearl.api.pipeline.ShaderSource;
+import com.mojang.renderpearl.api.pipeline.ShaderType;
 import io.github.hecbatista.metalshaders.MetalShadersClient;
 import io.github.kokodio.metaljvm.metal.MTLDevice;
 import io.github.kokodio.metaljvm.metal.MTLLibrary;
@@ -11,6 +12,10 @@ import io.github.kokodio.metaljvm.metal.Metal;
 import io.github.kokodio.metaljvm.objc.AutoreleasePool;
 import org.jspecify.annotations.Nullable;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -65,6 +70,15 @@ public final class PipelineCompiler {
     /** {@code LUXIUM_NO_METAL_WARM=1} turns the warm-up off, for before/after timings. */
     private static final boolean WARM = System.getenv("LUXIUM_NO_METAL_WARM") == null;
     private static volatile @Nullable MTLDevice warmDevice;
+    /**
+     * {@code LUXIUM_DUMP_SHADERS=<dir>}: every Luxium pipeline writes the GLSL we hand the game
+     * ({@code .vert.glsl}, {@code .frag.glsl}) and the MSL Metallum makes of it ({@code .vert.metal},
+     * {@code .frag.metal}) to {@code <dir>/<world folder>/}, named after the pipeline. These are the
+     * exact sources the game compiles, variants included, unlike the scoreboard's build/translated/.
+     */
+    private static final @Nullable Path DUMP = System.getenv("LUXIUM_DUMP_SHADERS") == null ? null
+            : Path.of(System.getenv("LUXIUM_DUMP_SHADERS"));
+    private static volatile String dumpFolder = "root";
 
     /** The pool, with each task's run time added to {@link #crossNanos}. */
     private static final Executor TIMED = task -> POOL.execute(() -> {
@@ -85,6 +99,7 @@ public final class PipelineCompiler {
 
     /** Starts a compile's cross half on the pool. Finish it with {@link #finish} on the render thread. */
     public static CompletableFuture<CompiledRenderPipeline.Pending> start(RenderPipeline pipeline, ShaderSource source) {
+        dumpGlsl(pipeline, source);
         return RenderSystem.getDevice().compilePipeline(pipeline, source, TIMED);
     }
 
@@ -104,6 +119,7 @@ public final class PipelineCompiler {
 
     /** Compiles one pipeline entirely on the calling (render) thread: a first-use compile. */
     public static @Nullable CompiledRenderPipeline compileNow(RenderPipeline pipeline, ShaderSource source) {
+        dumpGlsl(pipeline, source);
         long t0 = System.nanoTime();
         CompiledRenderPipeline.Pending pending = RenderSystem.getDevice().compilePipeline(pipeline, source, Runnable::run).join();
         lastCross = System.nanoTime() - t0;
@@ -114,6 +130,42 @@ public final class PipelineCompiler {
         metalNanos += lastMetal;
         count++;
         return compiled;
+    }
+
+    /** The world folder being loaded ("" for the pack's root), for {@link #DUMP}'s subfolder. */
+    public static void setDumpFolder(String folder) {
+        dumpFolder = folder.isEmpty() ? "root" : folder;
+    }
+
+    public static boolean dumping() {
+        return DUMP != null;
+    }
+
+    private static void dumpGlsl(RenderPipeline pipeline, ShaderSource source) {
+        if (DUMP == null) {
+            return;
+        }
+        for (Map.Entry<ShaderType, net.minecraft.resources.Identifier> e : pipeline.getShaders().entrySet()) {
+            String glsl = source.getShader(e.getValue(), e.getKey());
+            if (glsl != null) {
+                dump(pipeline.getLocation().toString(), (e.getKey() == ShaderType.VERTEX ? ".vert" : ".frag") + ".glsl", glsl);
+            }
+        }
+    }
+
+    /** Writes one dumped source (from here, and from MetalCrossShaderCompilerMixin for the MSL). */
+    public static void dump(String pipelineName, String suffix, String text) {
+        if (DUMP == null) {
+            return;
+        }
+        String base = pipelineName.replaceFirst("^metalshaders:pipeline/", "").replace(':', '_').replace('/', '_');
+        try {
+            Path dir = DUMP.resolve(dumpFolder);
+            Files.createDirectories(dir);
+            Files.writeString(dir.resolve(base + suffix), text);
+        } catch (IOException e) {
+            MetalShadersClient.LOGGER.warn("Shader dump to {} failed: {}", DUMP, e.getMessage());
+        }
     }
 
     /** Whether the calling thread is one of the pool's workers. */
