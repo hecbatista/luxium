@@ -136,6 +136,11 @@ public final class MetalShadersClient implements ClientModInitializer {
         return packPresent && loadedFolder != null && PackChain.ready();
     }
 
+    /** Whether the chosen pack failed to load (packUnusable was called for it). */
+    public static boolean packFailed() {
+        return packPresent && reportedFailure != null;
+    }
+
     /** The pack in use or about to be loaded (file or folder name), or null. */
     public static String activePackName() {
         return packPresent ? chosenName : null;

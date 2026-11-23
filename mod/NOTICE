@@ -344,6 +344,12 @@ GNU Lesser General Public License version 3
   (net.irisshaders.iris.mixin.gui.MixinVideoSettingsScreen). Changed: added with
   OptionsList.addBig(AbstractWidget) after the graphics preset, not as a fake OptionInstance.
 
+  src/main/java/io/github/hecbatista/metalshaders/gui/LuxiumDebugEntry.java and
+  mixin/DebugScreenEntriesMixin.java, mixin/DebugScreenEntryListMixin.java follow how Iris adds
+  its F3 lines (net.irisshaders.iris.gui.debug.IrisDebugEntry, mixin.MixinDebugEntries,
+  mixin.MixinDebugScreenEntriesList): an entry registered with DebugScreenEntries, shown in the
+  overlay unless the player set its status. Changed: one line of our own, with colours.
+
   src/main/java/io/github/hecbatista/metalshaders/sodium/SodiumPrograms.java solves the problem
   net.irisshaders.iris.compat.sodium.mixin.MixinShaderChunkRenderer solves (Sodium's terrain
   pipelines are built once, with the first chunk vertex format). Changed: one set kept per

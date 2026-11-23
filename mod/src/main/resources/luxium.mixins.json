@@ -9,6 +9,8 @@
     "BlockEntityRenderDispatcherMixin",
     "BlockEntityRenderStateAccessor",
     "CustomFeatureRendererIdsMixin",
+    "DebugScreenEntriesMixin",
+    "DebugScreenEntryListMixin",
     "EntityRenderDispatcherMixin",
     "FogRendererMixin",
     "GameRendererHandMixin",

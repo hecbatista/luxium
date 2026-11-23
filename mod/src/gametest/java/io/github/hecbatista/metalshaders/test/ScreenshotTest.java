@@ -558,6 +558,17 @@ public class ScreenshotTest implements FabricClientGameTest {
         context.waitTicks(20);
         assertActive(context, true);
         assertConfig(context, true);
+        // The F3 screen shows Luxium's line (on by default).
+        context.runOnClient(mc -> mc.debugEntries.setOverlayVisible(true));
+        context.waitTicks(5);
+        boolean shown = context.computeOnClient(mc -> mc.debugEntries.isCurrentlyEnabled(io.github.hecbatista.metalshaders.gui.LuxiumDebugEntry.ID));
+        String line = context.computeOnClient(mc -> io.github.hecbatista.metalshaders.gui.LuxiumDebugEntry.line());
+        System.out.println("[Luxium menus] F3 line shown " + shown + ": " + line);
+        if (!shown || !line.contains("Shaders on")) {
+            throw new AssertionError("F3 should show Luxium's line with shaders on");
+        }
+        context.takeScreenshot("menu-8-f3");
+        context.runOnClient(mc -> mc.debugEntries.setOverlayVisible(false));
         System.out.println("[Luxium menus] all steps passed");
     }
 
