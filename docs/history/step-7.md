@@ -123,3 +123,18 @@ Step 7 (polish), agreed order with the user (2026-11-20): pack settings → Neth
     - Prime suspect: the pack's TAA, which smooths a per-frame shadow-edge pattern using the previous frame. With TAA off, the flicker in the glass-box test disappears.
     - Still open: whether Luxium feeds TAA something slightly wrong (previous-frame matrices, camera position), or Complementary looks the same under Iris. Use the Iris runner (`iris-compare/`) to settle it.
   - Checks at the time: 0 validation messages, 95 unit tests, scoreboard 90/90, the five flicker clips pass.
+
+- **Playtest and fixes (2026-11-21 to 23, consolidated into main on 2026-11-23).**
+  - **The playtest.** `PlaytestTour` played a generated world under validation (70 shots, 26 flicker clips), and every suspect was compared against the same tour without the pack. Confirmed bugs and their fixes:
+    - **Crash with many entity types** (commit 5f712fc): per-draw uniform buffers were shared across program variants of different block sizes. The `finally` that closes the window hid the real exception behind "debug groups left open". Each variant now owns its buffers, and `inWindow`/`closeWindowAfter` keep the original failure.
+    - **Enchantment glint** (5f712fc): `TextureMat` is the glint scroll in vanilla GLINT pipelines (applied to the item's texture only under `APPLY_TEXTURE_MATRIX`). Glint draws now use `mat4(1.0)`, plus the pack's inline glint (`IRIS_INLINE_GLINT`). Left open: the separate `pipeline/glint` pass (trimmed armor, patterned shields) isn't served yet. Glint pipelines aren't in `PREWARM` yet.
+    - **Invisible nether portals** (2af8033): gbuffer fragment stages read `gl_FragCoord.z` reversed. Non-shadow fragment stages now read `1 - z`, as Iris's DepthTransformer does. This also corrects forward fog and every distance-based term in the gbuffers. Left open: `gl_FragDepth` writes aren't inverted, and composites aren't rewritten.
+    - **White banners, invisible held maps, glowing bell and enchanting book** (366c78a): `banner_pattern` is served by new translucent block/entity families; the map's text pipeline by `HAND_TEXT`; block-entity ids are kept per submit and draws split where ids change. Left open: maps in the hand use a default normal; sign and other text submits still get ids by render type.
+  - **Not bugs** (same in vanilla): dark triangles on sand steps, the inventory preview's black background and helmet top, the blocky fire overlay, invisible mining cracks at that stage.
+  - **Still to check with the Iris runner:** blindness/darkness (water and glowing mobs stayed visible; the depth fix probably covers it), underwater looking up (dark sky with stars at noon, neon seagrass, white blotches on the sea floor), vertical smears in fog near the horizon, and the sand flicker (TAA).
+  - The grey band seen from high platforms was fixed separately, in c6b989c.
+  - **Check after consolidation** (2026-11-23, `gametest.sh base` + `tour`, against `iris-compare` on the same stops):
+    - 0 validation messages; still-camera regression clips pass.
+    - Against Iris, the portal, glinted items in frames and hand, banners, block-entity glow, held map and blindness now match.
+    - **New difference: Iris shows Complementary's clouds; Luxium shows none** (Luxium skips `CloudRenderer` because the pack says `clouds=off`, and the pack's own clouds don't appear). Next to investigate.
+    - The End portal's starfield is a little dimmer than under Iris.

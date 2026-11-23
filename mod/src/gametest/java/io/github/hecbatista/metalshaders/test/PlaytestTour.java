@@ -334,6 +334,7 @@ public class PlaytestTour implements FabricClientGameTest {
     }
 
     private void lightningAndFireworks() {
+        spectator();
         cmd("gamemode spectator @a");
         hud(false);
         cmd("tp @a 0 " + (Y + 5) + " -18 0 15");
@@ -352,6 +353,7 @@ public class PlaytestTour implements FabricClientGameTest {
     }
 
     private void night() {
+        spectator();
         // A stone-brick hut with lights at the platform's corner.
         cmd(fill(-21, Y + 1, 12, -14, Y + 5, 20, "stone_bricks hollow"));
         cmd(fill(-18, Y + 1, 12, -17, Y + 2, 12, "air"));
@@ -390,6 +392,7 @@ public class PlaytestTour implements FabricClientGameTest {
 
     /** Plains (or forest) near spawn through the day. Yaw -90 faces east (+x), 90 west. */
     private void dayCycle() {
+        spectator();
         BlockPos at = findBiome(Biomes.PLAINS, Biomes.FOREST);
         // Load the chunk first: the heightmap of a chunk that isn't generated yet reads the world's bottom.
         cmd("tp @a " + at.getX() + " 200 " + at.getZ());
@@ -416,6 +419,7 @@ public class PlaytestTour implements FabricClientGameTest {
     }
 
     private void biomes() {
+        spectator();
         biome(Biomes.DESERT, "47-desert", true);
         biome(Biomes.JUNGLE, "48-jungle", true);
         biome(Biomes.SWAMP, "49-swamp", true);
@@ -460,6 +464,7 @@ public class PlaytestTour implements FabricClientGameTest {
 
     /** A carved cave 60 blocks under spawn: torches, glow lichen, lava, ores. No sky light. */
     private void cave() {
+        spectator();
         cmd("tp @a 0 -30 0 0 10");
         settle(20);
         cmd(fill(-10, -36, -10, 10, -28, 10, "deepslate"));
@@ -488,6 +493,7 @@ public class PlaytestTour implements FabricClientGameTest {
 
     /** Spectator flight, sprinting forward over new terrain (chunk loading, shadows, LOD of distance). */
     private void fastFlight() {
+        spectator();
         cmd("tp @a 400 130 400 -45 20");
         settle(20);
         context.runOnClient(mc -> mc.player.getAbilities().setFlyingSpeed(0.15f));
@@ -551,6 +557,12 @@ public class PlaytestTour implements FabricClientGameTest {
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /** Spectator with the HUD hidden: a stop that teleports high must not start in survival. */
+    private void spectator() {
+        cmd("gamemode spectator @a");
+        hud(false);
+    }
 
     private void giveKit() {
         cmd("clear @a");
