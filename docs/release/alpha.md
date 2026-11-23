@@ -56,7 +56,7 @@ Facts as of 2026-11-23:
   - how to report: `logs/latest.log`, F2 screenshots, pack and settings.
 - [ ] **Push and pre-release** (needs the user's go): push `main`, tag `v0.1.0-alpha.1`, GitHub pre-release with the jar and the README's install notes. Channel: GitHub pre-release first (user's decision); Modrinth later.
 
-## Benchmarking (in progress)
+## Benchmarking (first results 2026-11-23: `docs/release/benchmarks.md`; more scenes and machines still to come)
 What we can say honestly, measured the same way each time:
 - **FPS and frame time, Luxium vs Iris** on the same Mac, scene, resolution and pack settings: average, 1% low, worst frame.
   - Validation off, window in front, vsync and frame cap off (7f: the tests otherwise sit at the 120 Hz cap).

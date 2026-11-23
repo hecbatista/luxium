@@ -47,7 +47,16 @@ Colored lighting stays off on macOS, as it does for Complementary under Iris on 
 
 ## ⚡ Performance
 
-Benchmarks are in progress.
+First measurements, with Complementary Unbound at default settings on an M1 Max, in a 1708×960 window. Vsync is off and nothing is capped. Each figure is the average of two runs, in fps:
+
+| Scene | Render distance | Luxium (Metal) | Iris (OpenGL) |
+|---|---|---|---|
+| Beach, facing the sea | 12 | **90** (1% low 76) | 81 (1% low 67) |
+| Overlook of terrain | 12 | **96** (1% low 82) | 88 (1% low 70) |
+| 360° spin | 12 | **95** (1% low 74) | 86 (1% low 65) |
+| Beach, facing the sea | 5 | **137** (1% low 113) | 96 (1% low 68) |
+
+Frame pacing is steadier too: Luxium's worst frame was 20 ms, against 85 ms for Iris. These are early numbers from one Mac; the method and every run are in [`docs/release/benchmarks.md`](docs/release/benchmarks.md).
 
 ## 🧰 Requirements
 

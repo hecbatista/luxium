@@ -5,7 +5,7 @@ GitHub repo: `hecbatista/luxium` (renamed from `metal-shaders` on 2026-11-20; Gi
 ## Goal
 Load and run Iris/OptiFine-format shader packs (the `shaderpacks/` format) on Minecraft's **Metal** backend provided by the Metallum mod, on Apple Silicon macOS.
 
-Status (2026-11-23): steps 1–7 done; step 8, the first public alpha, in progress (**benchmarking in progress**). The pack draws the sky, terrain, water, entities, block entities, particles, weather, the hand and the shadow map through its own programs, with the user's pack settings, in all three worlds. The user's first play sessions found no remaining visible differences from Iris in normal play.
+Status (2026-11-23): steps 1–7 done; step 8, the first public alpha, in progress (**benchmarking in progress**: first Luxium-vs-Iris results in `docs/release/benchmarks.md`). The pack draws the sky, terrain, water, entities, block entities, particles, weather, the hand and the shadow map through its own programs, with the user's pack settings, in all three worlds. The user's first play sessions found no remaining visible differences from Iris in normal play.
 
 Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor ✅ · 4 translator ✅ · 5 uniforms ✅ · 6 render pipeline ✅ · 7 polish ✅ (7a–7i) · 8 alpha release (in progress: benchmarking; checklist in `docs/release/alpha.md`).
 

@@ -7,7 +7,10 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.TestServerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.fabricmc.fabric.api.client.gametest.v1.screenshot.TestScreenshotOptions;
 import net.fabricmc.loader.api.FabricLoader;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.minecraft.client.CameraType;
+import net.minecraft.client.InactivityFpsLimit;
+import net.minecraft.resources.Identifier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.tags.BiomeTags;
@@ -45,7 +48,15 @@ public class PlaytestTour implements FabricClientGameTest {
             return;
         }
         copyShaderPacks();
+        addFrameClock();
         this.context = context;
+        // LUXIUM_BENCH_RD=<chunks>: the render distance, set before the world exists so the
+        // integrated server sends that many chunks (setting it later left chunks never arriving).
+        // The test framework's own default is 5.
+        String rd = System.getenv("LUXIUM_BENCH_RD");
+        if (rd != null) {
+            context.runOnClient(mc -> mc.options.renderDistance().set(Integer.parseInt(rd)));
+        }
         var builder = context.worldBuilder().setUseConsistentSettings(false)
                 .adjustSettings(state -> state.setSeed("20261121"));
         try (TestSingleplayerContext sp = builder.create()) {
@@ -81,6 +92,10 @@ public class PlaytestTour implements FabricClientGameTest {
             stop("fast flight", this::fastFlight);
             stop("portal trip", this::portalTrip);
             stop("window resize", this::windowResize);
+            // LUXIUM_BENCH=1: the benchmark (docs/release/alpha.md). Not part of the normal tour.
+            if (System.getenv("LUXIUM_BENCH") != null) {
+                stop("benchmark", this::benchmark);
+            }
         }
     }
 
@@ -566,6 +581,102 @@ public class PlaytestTour implements FabricClientGameTest {
         hud(false);
     }
 
+    // ---------------------------------------------------------------- benchmark
+
+    /**
+     * Frame timestamps: a HUD element that draws nothing runs once per rendered frame, the same
+     * under Luxium and Iris (Fabric API HudElementRegistry; no Luxium code), so the interval
+     * between two stamps is the real frame time, presenting and pacing included.
+     */
+    private static final long[] STAMPS = new long[60_000];
+    private static volatile int stampCount;
+    private static volatile boolean recording;
+    private static boolean clockAdded;
+
+    private static void addFrameClock() {
+        if (clockAdded) {
+            return;
+        }
+        clockAdded = true;
+        HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("luxium_test", "bench_clock"), (graphics, delta) -> {
+            if (recording && stampCount < STAMPS.length) {
+                STAMPS[stampCount++] = System.nanoTime();
+            }
+        });
+    }
+
+    /**
+     * Three fixed scenes, same settings for both runtimes: vsync off, no frame limit, no AFK
+     * limiter, the test world's render distance, a 1708x960 window. Each: 3 s warm-up, 10 s measured. Logs
+     * "[Luxium tour] bench <scene>: ..." lines. Run it alone on the machine, validation off.
+     */
+    private void benchmark() {
+        spectator();
+        hud(true);
+        cmd("time set noon");
+        cmd("weather clear");
+        context.runOnClient(mc -> {
+            mc.options.enableVsync().set(false);
+            mc.options.framerateLimit().set(260);
+            mc.options.inactivityFpsLimit().set(InactivityFpsLimit.MINIMIZED);
+            // Render distance stays the test world's own (the same for both runtimes): changing it
+            // here left waitForChunksRender waiting for chunks the integrated server never sent.
+        });
+        context.getInput().resizeWindow(1708, 960);
+        context.waitTicks(10);
+        context.runOnClient(mc -> log("bench window: " + mc.getWindow().getWidth() + "x" + mc.getWindow().getHeight()
+                + " framebuffer, render distance " + mc.options.renderDistance().get()));
+        BlockPos at = findBiome(Biomes.BEACH);
+        if (at != null) {
+            cmd("tp @a " + at.getX() + " 200 " + at.getZ());
+            settle(10);
+            BlockPos ground = surface(at.getX(), at.getZ());
+            cmd("tp @a " + (at.getX() + 0.5) + " " + ground.getY() + " " + (at.getZ() + 0.5) + " 135 5");
+            settle(60);
+            measure("beach", null);
+        }
+        BlockPos spawn = surface(8, 8);
+        cmd("tp @a 8.5 " + (spawn.getY() + 30) + " 8.5 30 20");
+        settle(60);
+        measure("overlook", null);
+        float[] yaw = {0f};
+        measure("spin", () -> {
+            yaw[0] += 1.8f;   // 360 degrees over the 10 s measured
+            cmd("tp @a 8.5 " + (spawn.getY() + 30) + " 8.5 " + yaw[0] + " 10");
+        });
+    }
+
+    private void measure(String scene, Runnable perTick) {
+        context.waitTicks(60);   // warm-up: pipelines, chunk uploads
+        stampCount = 0;
+        recording = true;
+        for (int i = 0; i < 200; i++) {
+            if (perTick != null) {
+                perTick.run();
+            }
+            context.waitTick();
+        }
+        recording = false;
+        int n = stampCount;
+        if (n < 3) {
+            log("bench " + scene + ": only " + n + " frames recorded");
+            return;
+        }
+        double[] ms = new double[n - 1];
+        for (int i = 1; i < n; i++) {
+            ms[i - 1] = (STAMPS[i] - STAMPS[i - 1]) / 1e6;
+        }
+        double seconds = (STAMPS[n - 1] - STAMPS[0]) / 1e9;
+        double[] sorted = ms.clone();
+        java.util.Arrays.sort(sorted);
+        double median = sorted[sorted.length / 2];
+        double p99 = sorted[(int) Math.min(sorted.length - 1, Math.floor(sorted.length * 0.99))];
+        double max = sorted[sorted.length - 1];
+        log(String.format(java.util.Locale.ROOT,
+                "bench %s: %d frames in %.1f s, avg %.1f fps, median %.2f ms, 1%% low %.1f fps (p99 %.2f ms), worst %.1f ms",
+                scene, n, seconds, (n - 1) / seconds, median, 1000.0 / p99, p99, max));
+    }
+
     /** A carved cave 60 blocks under spawn: torches, glow lichen, lava, ores. No sky light. */
     private void cave() {
         spectator();
@@ -758,6 +869,13 @@ public class PlaytestTour implements FabricClientGameTest {
 
     private void settle(int ticks) {
         context.waitTicks(Math.max(ticks / 2, 1));
+        if (System.getenv("LUXIUM_BENCH_RD") != null) {
+            // With a render distance other than the framework's, waitForChunksRender never
+            // completes (it times out even right after the world is created), so wait instead.
+            context.waitTicks(400);
+            context.waitTicks(Math.max(ticks - ticks / 2, 1));
+            return;
+        }
         singleplayer.getConnection().waitForChunksRender();
         context.waitTicks(Math.max(ticks - ticks / 2, 1));
     }
