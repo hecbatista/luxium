@@ -464,6 +464,63 @@ public final class Formula {
                 }
                 yield (float) Math.pow(num(v[0]), num(v[1]));
             }
+            // The rest of Iris's scalar functions (net.irisshaders.iris.parsing.IrisFunctions; see NOTICE).
+            case "frac" -> {
+                float x = num(one(v, c));
+                yield (float) (x - Math.floor(x));
+            }
+            case "sign" -> Math.signum(num(one(v, c)));
+            case "tan" -> (float) Math.tan(num(one(v, c)));
+            case "asin" -> (float) Math.asin(num(one(v, c)));
+            case "acos" -> (float) Math.acos(num(one(v, c)));
+            case "atan" -> n == 2 ? (float) Math.atan2(num(v[0]), num(v[1])) : (float) Math.atan(num(one(v, c)));
+            case "atan2" -> (float) Math.atan2(num(two(v, c)[0]), num(v[1]));
+            case "torad", "radians" -> (float) Math.toRadians(num(one(v, c)));
+            case "todeg", "degrees" -> (float) Math.toDegrees(num(one(v, c)));
+            case "exp2" -> (float) Math.pow(2, num(one(v, c)));
+            case "exp10" -> (float) Math.pow(10, num(one(v, c)));
+            case "log2" -> (float) (Math.log(num(one(v, c))) / Math.log(2));
+            case "log10" -> (float) Math.log10(num(one(v, c)));
+            case "fmod" -> {
+                two(v, c);
+                if (allInts) {
+                    int b = (Integer) v[1];
+                    yield b == 0 ? 0 : Math.floorMod((Integer) v[0], b);
+                }
+                float a = num(v[0]);
+                float b = num(v[1]);
+                yield (a % b + b) % b;
+            }
+            case "remainder" -> {
+                two(v, c);
+                if (allInts) {
+                    int b = (Integer) v[1];
+                    yield b == 0 ? 0 : (Integer) v[0] % b;
+                }
+                yield num(v[0]) % num(v[1]);
+            }
+            case "mix" -> {
+                if (n != 3) {
+                    throw new FormulaException("mix() takes 3 arguments");
+                }
+                float x = num(v[0]);
+                yield x + (num(v[1]) - x) * num(v[2]);
+            }
+            case "edge" -> allInts ? (Object) ((Integer) two(v, c)[1] < (Integer) v[0] ? 0 : 1)
+                    : (Object) (num(two(v, c)[1]) < num(v[0]) ? 0f : 1f);
+            case "between" -> {
+                if (n != 3) {
+                    throw new FormulaException("between() takes 3 arguments");
+                }
+                float x = num(v[0]);
+                yield x >= num(v[1]) && x <= num(v[2]);
+            }
+            case "equals" -> {
+                if (n != 3) {
+                    throw new FormulaException("equals() takes 3 arguments (a, b, epsilon)");
+                }
+                yield Math.abs(num(v[0]) - num(v[1])) <= num(v[2]);
+            }
             default -> throw new FormulaException("Unknown function " + c.name() + "()");
         };
     }
@@ -473,6 +530,13 @@ public final class Formula {
             throw new FormulaException(c.name() + "() takes 1 argument");
         }
         return v[0];
+    }
+
+    private static Object[] two(Object[] v, Call c) throws FormulaException {
+        if (v.length != 2) {
+            throw new FormulaException(c.name() + "() takes 2 arguments");
+        }
+        return v;
     }
 
     private static float num(Object v) throws FormulaException {

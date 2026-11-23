@@ -158,7 +158,9 @@ public final class GameUniforms {
         values.put("nightVision", nightVision(mc, living, partialTick));
         values.put("is_invisible", mc.player != null && mc.player.isInvisible());
         values.put("playerMood", viewer instanceof LocalPlayer p ? clamp01(p.getCurrentMood()) : 0f);
-        values.put("eyeBrightness", eyeBrightness(level, viewer));
+        int[] eyes = eyeBrightness(level, viewer);
+        values.put("eyeBrightness", eyes);
+        values.put("eyeBrightnessSmooth", eyeBrightnessSmooth(eyes));
 
         // IrisExclusiveUniforms
         if (viewer != null) {
@@ -173,6 +175,8 @@ public final class GameUniforms {
         } else {
             values.put("playerLookVector", new float[]{0, 0, 0});
         }
+        // IrisExclusiveUniforms.WorldInfoUniforms: the dimension's lowest block height.
+        values.put("bedrockLevel", level.dimensionType().minY());
         values.put("cloudHeight", cam.attributeProbe().getValue(EnvironmentAttributes.CLOUD_HEIGHT, partialTick));
         values.put("isElytraFlying", mc.player != null && mc.player.isFallFlying());
         values.put("heavyFog", mc.gui.hud.getBossOverlay().shouldCreateWorldFog());
@@ -248,6 +252,29 @@ public final class GameUniforms {
             }
         }
         return new float[]{0, 0, 0, 0};
+    }
+
+    // ---- eyeBrightnessSmooth: eyeBrightness smoothed per axis (Iris SmoothedVec2f) -----------
+
+    /** Iris's default eyeBrightnessHalflife (PackDirectives.java:65); the pack's directive isn't read yet. */
+    private static final float EYE_BRIGHTNESS_HALF_LIFE = 10.0f;
+    private final float[] eyeSmooth = new float[2];
+    private boolean eyeSmoothStarted;
+
+    /** Each axis smoothed as Iris's SmoothedFloat does (half-life x 0.1 s), then cut to int as Iris does. */
+    private int[] eyeBrightnessSmooth(int[] eyes) {
+        if (!eyeSmoothStarted) {
+            eyeSmoothStarted = true;
+            eyeSmooth[0] = eyes[0];
+            eyeSmooth[1] = eyes[1];
+        } else {
+            float k = (float) (1.0f / (EYE_BRIGHTNESS_HALF_LIFE * 0.1f / Math.log(2.0)));
+            float factor = 1.0f - (float) Math.exp(-k * frameTime);
+            for (int i = 0; i < 2; i++) {
+                eyeSmooth[i] = (1 - factor) * eyeSmooth[i] + factor * eyes[i];
+            }
+        }
+        return new int[]{(int) eyeSmooth[0], (int) eyeSmooth[1]};
     }
 
     // ---- wetness: rainStrength smoothed, as Iris's SmoothedFloat does it ----------------------

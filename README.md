@@ -39,7 +39,7 @@ Status as of 2026-11-23, with each pack at its default settings:
 | Complementary Reimagined r5.9.3 | ✅ Loads and renders | No errors; not yet compared with Iris in detail. |
 | Bliss v2.1.2 (Chocapic13 edit) | ❌ Falls back to vanilla | One program doesn't compile yet (missing `MC_HAND_DEPTH`, `texelFetch2D`). |
 | Solas v3.9 | ❌ Falls back to vanilla | One program doesn't compile yet (missing `MC_RENDER_QUALITY`). |
-| BSL v10.1.8 | ⚠️ Renders, looks wrong | Loads and draws (shadows, water, clouds), but the light is always sunset-orange: one time-of-day formula uses a function Luxium doesn't support yet (`frac`). |
+| BSL v10.1.8 | ✅ Loads and renders | Matches Iris on the zoo and beach test scenes (sky, light, shadows, water, clouds, entities, block entities, portals, glass). Night, caves, weather, Nether and End not compared yet. |
 | Other packs | ❔ Untested | They may work, fall back, or look wrong. Reports welcome. |
 
 Per-pack test notes: [docs/release/compatibility.md](docs/release/compatibility.md).

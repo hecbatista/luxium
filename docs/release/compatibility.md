@@ -9,6 +9,23 @@ one at a time with the flow in `mod/scripts/PACK-TESTING.md`:
 Earlier results (Complementary Unbound r5.10, Complementary Reimagined r5.9.3, Bliss v2.1.2,
 Solas v3.9) are in `docs/release/alpha.md`, "Fails safe".
 
+## BSL v10.1.8, after the formula fix (2026-11-23): renders, matches Iris
+
+- Fixes: `uniform/Formula.java` gains Iris's remaining scalar functions (`frac`, `fmod`,
+  `remainder`, `sign`, `tan`/`asin`/`acos`/`atan`/`atan2`, `torad`/`todeg`/`radians`/`degrees`,
+  `exp2`/`exp10`/`log2`/`log10`, `mix`, `edge`, `between`, 3-argument `equals`).
+  `uniform/GameUniforms.java` supplies `eyeBrightnessSmooth` (Iris's smoothing, default half-life
+  10; the pack's `eyeBrightnessHalflife` directive isn't read yet) and `bedrockLevel`.
+- BSL: 27 formulas loaded, **0 dropped** (8 before); every block value supplied except the
+  matrices that are filled in per draw.
+- Game test: 0 validation messages, no crash. Side by side with Iris, the zoo and beach shots now
+  match: midday sky and light, shadows, water, clouds, entities, block entities, portals and
+  glass. Unit tests 111 pass; Complementary Unbound still 90/90.
+- The beach-sprint shot differs (Luxium over water, Iris on the sand runway) because the
+  Luxium player is about 10 ticks further along the sprint (Luxium frame 20 ≈ Iris frame 30),
+  not because sand is missing. A tour timing difference between the two runners, not rendering.
+- Not compared yet: night, caves, rain/snow, the Nether and the End.
+
 ## BSL v10.1.8, after the translator fixes (2026-11-23): renders, light wrong
 
 - Fixes (`glsl/NameFixes.java`, `ProgramTranslator.FUNCTION_RENAMES`): a sampler named `texture`

@@ -42,6 +42,37 @@ class FormulaTest {
     }
 
     @Test
+    void irisScalarFunctions() throws Exception {
+        assertEquals(0.25f, (float) eval("frac(2.25)"), 1e-6f);
+        assertEquals(0.75f, (float) eval("frac(-0.25)"), 1e-6f);      // x - floor(x), as Iris
+        assertEquals(1, eval("fmod(-3, 4)"));                          // floorMod for whole numbers
+        assertEquals(1.0f, (float) eval("fmod(-3.0, 4.0)"), 1e-6f);
+        assertEquals(-3, eval("remainder(-3, 4)"));
+        assertEquals(-1.0f, eval("sign(-2.5)"));
+        assertEquals(8.0f, (float) eval("exp2(3)"), 1e-5f);
+        assertEquals(3.0f, (float) eval("log2(8.0)"), 1e-5f);
+        assertEquals(2.0f, (float) eval("log10(100.0)"), 1e-5f);
+        assertEquals((float) Math.PI, (float) eval("torad(180.0)"), 1e-5f);
+        assertEquals(90.0f, (float) eval("degrees(atan2(1.0, 0.0))"), 1e-4f);
+        assertEquals(1.5f, (float) eval("mix(1.0, 2.0, 0.5)"), 1e-6f);
+        assertEquals(1, eval("edge(2, 3)"));
+        assertEquals(true, eval("between(biome, 5, 7)"));
+        assertEquals(true, eval("equals(0.1, 0.11, 0.02)"));
+    }
+
+    /** BSL v10.1.8's time-of-day chain (shaders.properties), at noon: sunAngle 0.25. */
+    @Test
+    void bslTimeAngleAtNoon() throws Exception {
+        Map<String, Object> noon = new java.util.HashMap<>(GAME);
+        noon.put("sunAngle", 0.25f);
+        float tAmin = (float) Formula.parse("frac(sunAngle - 0.033333333)").evaluate(noon::get, 0.016f);
+        noon.put("tAmin", tAmin);
+        float tAlin = (float) Formula.parse("if(tAmin < 0.433333333, tAmin * 1.15384615385, tAmin * 0.882352941176 + 0.117647058824)")
+                .evaluate(noon::get, 0.016f);
+        assertEquals(0.25f, tAlin, 1e-4f);   // noon maps to a quarter of the day
+    }
+
+    @Test
     void precedenceIsTheUsualOne() throws Exception {
         assertEquals(7, eval("1 + 2 * 3"));
         assertEquals(9, eval("(1 + 2) * 3"));

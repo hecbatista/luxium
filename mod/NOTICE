@@ -88,10 +88,12 @@ GNU Lesser General Public License version 3
   GameUniforms.java also reproduces wetness from net.irisshaders.iris.uniforms.transforms
   .SmoothedFloat and PackDirectives (defaults 600/200, the 0.1 factor, and the bug where
   drynessHalflife sets the rising half-life), and biome / biome_precipitation from
-  net.irisshaders.iris.uniforms.BiomeUniforms.
+  net.irisshaders.iris.uniforms.BiomeUniforms. eyeBrightnessSmooth follows
+  net.irisshaders.iris.uniforms.CommonUniforms (SmoothedVec2f over eyeBrightness, the default
+  half-life of 10, cut to int). Changed: the pack's eyeBrightnessHalflife directive isn't read.
 
   GameUniforms.java also follows net.irisshaders.iris.uniforms.IrisExclusiveUniforms
-  (eyePosition, relativeEyePosition, playerLookVector, cloudHeight, isElytraFlying, heavyFog,
+  (eyePosition, relativeEyePosition, playerLookVector, bedrockLevel, cloudHeight, isElytraFlying, heavyFog,
   lightningBoltPosition, endFlashIntensity via EndFlashStorage) and IdMapUniforms (heldItemId,
   heldBlockLightValue for both hands, with the item light rule of
   net.irisshaders.iris.api.v0.item.IrisItemLightProvider). Changed: old hand light isn't applied
@@ -149,8 +151,9 @@ GNU Lesser General Public License version 3
   src/main/java/io/github/hecbatista/metalshaders/uniform/Formula.java and CustomUniforms.java
   are our own parser and evaluator for custom uniforms. They follow the behavior of Iris's
   net.irisshaders.iris.uniforms.custom.CustomUniforms, net.irisshaders.iris.parsing.IrisFunctions
-  and net.irisshaders.iris.parsing.SmoothFloat: int/float typing, if/in/smooth and the math
-  functions, smooth's 0.1 factor and unsmoothed first value, dependency ordering, and dropping
+  and net.irisshaders.iris.parsing.SmoothFloat: int/float typing, if/in/smooth and the scalar
+  math functions (frac, fmod, remainder, sign, the trig and log/exp families, mix, edge,
+  between, equals; vector forms and random aren't supported), smooth's 0.1 factor and unsmoothed first value, dependency ordering, and dropping
   broken formulas with their dependents. Iris's expression library (kroppeb.stareval) was not
   copied; the operator precedence is the usual C one.
 
