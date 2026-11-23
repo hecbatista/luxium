@@ -53,7 +53,10 @@ Facts as of 2026-11-23:
   - choosing a pack and turning shaders off; pack settings;
   - known issues; how to report a bug (log, pack and settings, F2 screenshots or a recording, Mac model);
   - building from source; credits; license.
-- [x] **Push and pre-release** (2026-11-23, user's go): `main` pushed (`9ad6e93`), tag `v0.1.0-alpha.1`, [GitHub pre-release](https://github.com/hecbatista/luxium/releases/tag/v0.1.0-alpha.1) with `luxium-0.1.0-alpha.1.jar` (467,919 bytes, SHA-256 `5a8b015f…4586`, downloaded back and checked). Not yet done: a smoke test of the released jar installed in a real launcher (dev runs load classes, not the jar).
+- [x] **Push and pre-release** (2026-11-23, user's go): `main` pushed (`9ad6e93`), tag `v0.1.0-alpha.1`, [GitHub pre-release](https://github.com/hecbatista/luxium/releases/tag/v0.1.0-alpha.1) with `luxium-0.1.0-alpha.1.jar` (467,919 bytes, SHA-256 `5a8b015f…4586`, downloaded back and checked). Smoke test of the released jar (2026-11-23): a throwaway Loom project with no Luxium sources, only the jar downloaded from the release, Modrinth's Metallum 0.0.25 and Modrinth's Sodium.
+  - Fabric listed `luxium 0.1.0-alpha.1` with `\-- org_anarres_jcpp 1.4.14` nested, `metallum 0.0.25` and `sodium 0.9.2+mc26.3`.
+  - Under Metal validation (0 messages), the zoo and beach tour stops ran with Complementary Unbound, and the shots match Iris's.
+  - Not covered: a real launcher's install flow (Prism or Modrinth App) and a world on disk; worth a player-style check by the user.
 
 ## Benchmarking (first results 2026-11-23: `docs/release/benchmarks.md`; more scenes and machines still to come)
 What we can say honestly, measured the same way each time:
