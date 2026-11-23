@@ -29,10 +29,14 @@ import java.util.WeakHashMap;
  * builds the draws later, one draw per PreparedRenderType (pipeline + textures,
  * RenderTypeFeatureRenderer.Group). So the id travels as: the thing being submitted (a window
  * around the dispatcher's submit) -> the RenderType it submits with -> the PreparedRenderType
- * made from that type when the draw list is built -> the draw. Different entity types have
- * different textures and so different render types, which is what makes one value per draw
- * right; two types sharing one texture would share the last one's id (Vitrail carries the ids on
- * the vertex instead, docs/internals/entities.md, and never meets that).
+ * made from that type when the draw list is built -> the draw.
+ * <p>
+ * One render type is often shared by different things: the bell, the enchanting table's book,
+ * the lectern's book and the conduit all draw entity_solid on the blocks atlas, and dropped items
+ * share the item atlas. So model, custom-geometry and item submits keep the ids current when they
+ * were made, those ids apply while each is built ({@link #buildSubmit}), and the game's draw list
+ * starts a new draw wherever they change (RenderTypeFeatureRendererGroupMixin), so each draw has
+ * one set of ids. Vitrail carries the ids on the vertex instead (docs/internals/entities.md).
  * <p>
  * Values follow Iris: 0 outside any entity, -1 for one the pack's file doesn't list.
  */
@@ -49,6 +53,8 @@ public final class DrawIds {
     private static volatile ItemIds itemIds = ItemIds.EMPTY;
     /** The ids an item's draws get while ItemFeatureRenderer builds them (null otherwise). */
     private static Ids building;
+    /** Whether {@link #building} is authoritative (even when null) for the draw being built. */
+    private static boolean buildingKnown;
 
     private static volatile ItemIds entityIds = ItemIds.EMPTY;
     private static Ids current;
@@ -123,6 +129,26 @@ public final class DrawIds {
     /** ItemFeatureRenderer builds one item's draws with these ids (null: done). */
     public static void buildWith(Ids ids) {
         building = ids;
+        buildingKnown = ids != null;
+    }
+
+    /**
+     * A model or custom-geometry submit is being built into a draw: the ids it was submitted with
+     * (kept on the submit, null outside any entity) decide the draw's ids, not its render type.
+     */
+    public static void buildSubmit(Ids ids) {
+        building = ids;
+        buildingKnown = true;
+    }
+
+    public static void endSubmit() {
+        building = null;
+        buildingKnown = false;
+    }
+
+    /** The ids the geometry being built now belongs to (draws are split where these differ). */
+    public static Ids buildingIds(RenderType type) {
+        return buildingKnown ? building : byRenderType.get(type);
     }
 
     public static void enterBlockEntity(BlockState state) {
@@ -143,7 +169,7 @@ public final class DrawIds {
 
     /** From RenderTypeFeatureRendererGroupMixin: a draw is being built for {@code prepared}. */
     public static void notePrepared(RenderType type, PreparedRenderType prepared) {
-        Ids ids = building != null ? building : byRenderType.get(type);
+        Ids ids = buildingIds(type);
         if (ids != null) {
             byPrepared.put(prepared, ids);
         }

@@ -176,6 +176,11 @@ public final class EntityTakeover {
         Float alphaOverride;
         /** Iris's default blend override for the program (ProgramId), used where the pack sets none. */
         Optional<BlendFunction> blendOverride;
+        /**
+         * Blended, but drawn before the deferred cut over geometry the pack already drew (banner
+         * patterns): it writes the coverage mask too, so it shares the solid families' pass.
+         */
+        boolean coverageAlways;
         boolean prepared;
         int served;
 
@@ -195,7 +200,7 @@ public final class EntityTakeover {
 
         boolean coverage() {
             // translucents are drawn after the seed, which is all the mask is for; the shadow map has none
-            return !translucent && !shadow;
+            return (!translucent || coverageAlways) && !shadow;
         }
 
         Program program(float alpha) throws ProgramTranslator.TranslationException {
@@ -270,6 +275,23 @@ public final class EntityTakeover {
     private static final Family LIGHTNING = new Family("gbuffers_lightning", true, 11, DefaultVertexFormat.POSITION_COLOR,
             Set.of("Position", "Color"), false);
     private static final List<Family> BY_PIPELINE = List.of(SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING);
+    /**
+     * Banner and shield patterns: 26.3 draws them in the solid phase (RenderTypes.bannerPattern:
+     * withForcedSolidModelPhase), blended over the pack's white flag, so they must be drawn by the
+     * pack too, or final paints over them. Iris IrisPipelines: BANNER_PATTERN -> getTranslucent,
+     * i.e. ShaderKey BE_TRANSLUCENT (ProgramId.BlockTrans, block_translucent -> block) for a block
+     * entity and ENTITIES_TRANSLUCENT otherwise, both one tenth.
+     */
+    private static final String BANNER_PATTERN = "pipeline/banner_pattern";
+    private static final Family BLOCK_TRANSLUCENT = new Family("gbuffers_block_translucent", true, 12, DefaultVertexFormat.ENTITY, ELEMENTS, true);
+    private static final Family ENTITY_PATTERNS = new Family("gbuffers_entities_translucent", true, 11, DefaultVertexFormat.ENTITY, ELEMENTS, true);
+    /**
+     * Text-format draws in the hand: a held map (FirstPersonHandsAndItemsRenderer.renderMap draws
+     * its background and contents with RenderTypes.text, POSITION_TEX_LIGHTMAP_COLOR). Iris
+     * IrisPipelines.getText: HAND_TEXT in its solid hand pass (ProgramId.Hand, NON_ZERO_ALPHA).
+     */
+    private static final Family HAND_TEXT = new Family("gbuffers_hand", false, 16, DefaultVertexFormat.POSITION_TEX_LIGHTMAP_COLOR,
+            Set.of("Position", "UV0", "UV2", "Color"), false);
     /** Entities and block entities in the shadow map (Iris ShaderKey SHADOW_ENTITIES_CUTOUT: ProgramId.ShadowEntities -> Shadow, one tenth). */
     private static final Family SHADOW_ENTITIES = new Family("shadow", false, 11, DefaultVertexFormat.ENTITY, ELEMENTS, true);
 
@@ -279,11 +301,16 @@ public final class EntityTakeover {
     }
     /** Every family (declared after all of them: static fields initialise in order). */
     private static final List<Family> ALL = List.of(SOLID, BLOCK, TRANSLUCENT, PARTICLES, PARTICLES_TRANSLUCENT, WEATHER, HAND, HAND_TRANSLUCENT,
-            SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING, SHADOW_ENTITIES);
+            SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING, SHADOW_ENTITIES, BLOCK_TRANSLUCENT, ENTITY_PATTERNS, HAND_TEXT);
 
     static {
         HAND.hand = true;
         HAND_TRANSLUCENT.hand = true;
+        HAND_TEXT.hand = true;
+        HAND_TEXT.anyBlend = true;   // the text pipelines are blended; Iris draws them in its solid hand pass
+        HAND_TEXT.alphaOverride = 0.0001f;   // Iris AlphaTests.NON_ZERO_ALPHA
+        BLOCK_TRANSLUCENT.coverageAlways = true;
+        ENTITY_PATTERNS.coverageAlways = true;
         SPIDEREYES.pipelinePath = "pipeline/eyes";
         // Iris ProgramId.SpiderEyes: SRC_ALPHA ONE ZERO ONE.
         SPIDEREYES.blendOverride = Optional.of(new BlendFunction(com.mojang.renderpearl.api.pipeline.BlendFactor.SRC_ALPHA,
@@ -332,9 +359,19 @@ public final class EntityTakeover {
     public static void prepare(String[] solid, String[] translucent, String[] block, Properties properties) {
         prepareFamily(SOLID, solid, properties);
         prepareFamily(TRANSLUCENT, translucent != null ? translucent : solid, properties);
+        prepareFamily(ENTITY_PATTERNS, translucent != null ? translucent : solid, properties,
+                translucent != null ? "gbuffers_entities_translucent" : "gbuffers_entities");
         if (block != null) {
             prepareFamily(BLOCK, block, properties);
         }
+    }
+
+    /**
+     * The program for block entities' banner patterns, already resolved through Iris's fallbacks
+     * (block_translucent -> block; Luxium then falls back to entities, as for gbuffers_block).
+     */
+    public static void prepareBlockTranslucent(String name, String[] glsl, Properties properties) {
+        prepareFamily(BLOCK_TRANSLUCENT, glsl, properties, name);
     }
 
     /**
@@ -353,6 +390,7 @@ public final class EntityTakeover {
     public static void prepareHand(String name, String[] hand, String translucentName, String[] translucent, Properties properties) {
         prepareFamily(HAND, hand, properties, name);
         prepareFamily(HAND_TRANSLUCENT, translucent, properties, translucentName);
+        prepareFamily(HAND_TEXT, hand, properties, name);
     }
 
     /** A program Iris gives one vanilla pipeline (eyes, beacon beam, lightning), resolved through its fallbacks. */
@@ -379,7 +417,7 @@ public final class EntityTakeover {
     public static void openHandWindow(Function<String, Object> values, Matrix4f projection, GpuTextureView depth) {
         handProjection = projection;
         holdDepth = depth;
-        open(Phase.HAND, values, List.of(HAND, HAND_TRANSLUCENT));
+        open(Phase.HAND, values, List.of(HAND, HAND_TRANSLUCENT, HAND_TEXT));
     }
 
     /** The shadow program for entities and block entities in the shadow map. */
@@ -480,11 +518,17 @@ public final class EntityTakeover {
             }
         }
         if (window == Phase.HAND) {
+            if (HAND_TEXT.format.equals(pipeline.getVertexFormatBinding(0))) {
+                return HAND_TEXT;
+            }
             boolean blended = pipeline.getColorTargetStates().size() == 1 && pipeline.getColorTargetStates().getFirst().blendFunction().isPresent();
             return blended ? HAND_TRANSLUCENT : HAND;
         }
         if (window == Phase.TRANSLUCENT) {
             return TRANSLUCENT;
+        }
+        if (window == Phase.SOLID && BANNER_PATTERN.equals(pipeline.getLocation().getPath())) {
+            return ids != null && ids.blockEntity() ? BLOCK_TRANSLUCENT : ENTITY_PATTERNS;
         }
         if (window == Phase.SOLID) {
             return ids != null && ids.blockEntity() && BLOCK.prepared ? BLOCK : SOLID;
@@ -718,7 +762,8 @@ public final class EntityTakeover {
 
     /** Before the level's solid features. */
     public static void openWindow(Function<String, Object> values) {
-        open(Phase.SOLID, values, List.of(SOLID, BLOCK, PARTICLES, SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING));
+        open(Phase.SOLID, values, List.of(SOLID, BLOCK, PARTICLES, SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING,
+                BLOCK_TRANSLUCENT, ENTITY_PATTERNS));
     }
 
     /** Before the level's translucent features, and its "after terrain" ones (after the deferred cut). */

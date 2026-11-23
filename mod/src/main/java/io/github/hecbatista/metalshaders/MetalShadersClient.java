@@ -489,6 +489,12 @@ public final class MetalShadersClient implements ClientModInitializer {
         String[] entitiesTranslucent = program(pack, folder, "gbuffers_entities_translucent", defines, props);
         if (PackChain.ready() && entities != null) {
             io.github.hecbatista.metalshaders.render.EntityTakeover.prepare(entities, entitiesTranslucent, block, props);
+            // Banner patterns on block entities (Iris ProgramId.BlockTrans: block_translucent -> block).
+            var blockTranslucent = firstOf(pack, folder, defines, props, "gbuffers_block_translucent", "gbuffers_block", "gbuffers_entities");
+            if (blockTranslucent != null) {
+                LOGGER.info("Block entity patterns: {}", blockTranslucent.getKey());
+                io.github.hecbatista.metalshaders.render.EntityTakeover.prepareBlockTranslucent(blockTranslucent.getKey(), blockTranslucent.getValue(), props);
+            }
         } else {
             LOGGER.warn("Entity takeover skipped (the pack lacks gbuffers_entities, or the chain isn't ready)");
         }

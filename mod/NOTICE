@@ -218,7 +218,9 @@ GNU Lesser General Public License version 3
   current while a layer is submitted (a block item other than a solid bucket uses its block's
   block.properties id and sets blockEntityId to 1; other items item.properties under the model
   component's name or their own; 0 when unlisted), and an item submit keeps the ids for when its
-  draws are built. Changed: Iris writes the ids on each vertex; Luxium keeps one value per draw.
+  draws are built. Changed: Iris writes the ids on each vertex; Luxium keeps one value per draw,
+  and model and custom-geometry submits keep their ids the same way, with the game's draw list
+  split wherever the ids change (mixin/ModelSubmitIdsMixin.java and friends, our own design).
 
   Particles (render/EntityTakeover.java, mixin/QuadParticleFeatureRendererMixin.java) follow Iris
   for the program chain (shaderpack.loading.ProgramId: particles -> textured_lit -> textured ->
@@ -255,6 +257,13 @@ GNU Lesser General Public License version 3
   program serves which pipeline and its fallbacks (shaderpack.loading.ProgramId SpiderEyes,
   BeaconBeam, Lightning; pipeline.programs.ShaderKey EMISSIVE_ENTITIES, BEACON, LIGHTNING), their
   alpha tests (beacon and lightning off) and SpiderEyes' default blend (SRC_ALPHA ONE ZERO ONE).
+
+  Banner and shield patterns and text in the hand (render/EntityTakeover.java) follow
+  net.irisshaders.iris.pipeline.IrisPipelines: BANNER_PATTERN goes through getTranslucent
+  (ShaderKey BE_TRANSLUCENT, ProgramId.BlockTrans: block_translucent -> block, for a block entity;
+  ENTITIES_TRANSLUCENT otherwise; alpha one tenth), and the text pipelines in the hand (a held
+  map) through getText (ShaderKey HAND_TEXT: ProgramId.Hand, AlphaTests.NON_ZERO_ALPHA).
+  Changed: Luxium draws patterns in the level's solid-feature window, where 26.3 puts them.
 
   src/main/java/io/github/hecbatista/metalshaders/uniform/ShadowMatrices.java follows
   net.irisshaders.iris.shadows.ShadowMatrices (createBaselineModelViewMatrix, snapModelViewToGrid,
