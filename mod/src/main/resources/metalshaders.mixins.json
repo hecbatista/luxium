@@ -30,6 +30,8 @@
     "SkyRendererMixin",
     "SubmitNodeCollectionMixin",
     "WeatherEffectRendererMixin",
+    "metallum.MetalCrossShaderCompilerMixin",
+    "metallum.MetallumCompiledAccessor",
     "sodium.BlockRendererMixin",
     "sodium.ChunkMeshFormatsMixin",
     "sodium.ChunkVertexMixin",

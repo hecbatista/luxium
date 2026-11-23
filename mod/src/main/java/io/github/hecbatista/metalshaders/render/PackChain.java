@@ -107,6 +107,25 @@ public final class PackChain {
         return cloudsOff && ready();
     }
 
+    /** A pass whose compile was started on the pool (step 7g). */
+    private record StartedPass(String name, float scale, ProgramTranslator.Result result, List<Integer> writes,
+                               java.util.concurrent.CompletableFuture<CompiledRenderPipeline.Pending> compile) {
+    }
+
+    /** Finishes and closes started compiles that won't be used (the chain failed part way). */
+    private static void discard(List<StartedPass> started) {
+        for (StartedPass sp : started) {
+            try {
+                CompiledRenderPipeline c = PipelineCompiler.finish(sp.compile());
+                if (c != null) {
+                    c.close();
+                }
+            } catch (RuntimeException ignored) {
+                // it failed on its own; the chain's failure is reported already
+            }
+        }
+    }
+
     /**
      * Translates and compiles every pass. {@code programs} is name -> (vertex, fragment) GLSL,
      * already preprocessed, in run order; final last.
@@ -115,6 +134,9 @@ public final class PackChain {
                                Map<String, Float> scales, NativeImage noiseImage) {
         plan = targetPlan;
         GpuDevice device = RenderSystem.getDevice();
+        // Step 7g: every pass's compile is started on PipelineCompiler's pool in this first loop and
+        // finished in the second, in run order, so the passes compile side by side.
+        List<StartedPass> started = new java.util.ArrayList<>();
         for (Map.Entry<String, String[]> p : programs) {
             String name = p.getKey();
             float scale = scales.getOrDefault(name, 1.0f);
@@ -122,6 +144,7 @@ public final class PackChain {
             try {
                 r = ProgramTranslator.translate(p.getValue()[0], p.getValue()[1], ProgramTranslator.Mode.FULLSCREEN, scale);
             } catch (ProgramTranslator.TranslationException e) {
+                discard(started);
                 fail(name + ": translation failed: " + e.getMessage(), null);
                 return;
             }
@@ -154,14 +177,30 @@ public final class PackChain {
             LuxiumShaderSource source = new LuxiumShaderSource()
                     .put(shader, ShaderType.VERTEX, r.vertex())
                     .put(shader, ShaderType.FRAGMENT, r.fragment());
+            try {
+                started.add(new StartedPass(name, scale, r, writes, PipelineCompiler.start(builder.build(), source)));
+            } catch (RuntimeException e) {
+                discard(started);
+                fail(name + ": compile threw", e);
+                return;
+            }
+        }
+        for (int i = 0; i < started.size(); i++) {
+            StartedPass sp = started.get(i);
+            String name = sp.name();
+            float scale = sp.scale();
+            ProgramTranslator.Result r = sp.result();
+            List<Integer> writes = sp.writes();
             CompiledRenderPipeline compiled;
             try {
-                compiled = device.compilePipeline(builder.build(), source, Runnable::run).join().finishCompile();
+                compiled = PipelineCompiler.finish(sp.compile());
             } catch (RuntimeException e) {
+                discard(started.subList(i + 1, started.size()));
                 fail(name + ": compile threw", e);
                 return;
             }
             if (compiled == null) {
+                discard(started.subList(i + 1, started.size()));
                 fail(name + ": the device returned no pipeline (reason logged above)", null);
                 return;
             }

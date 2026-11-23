@@ -111,16 +111,42 @@ public final class TerrainTakeover {
      * shaders.properties, for the {@code alphaTest.*} and {@code blend.*} directives.
      */
     public static void prepare(String[] terrain, String[] water, java.util.Properties properties) {
+        // Step 7g: the three compiles are started together on the pool, then finished in order.
+        Started solid = null;
+        Started cutout = null;
         try {
             // Iris ShaderKey: SODIUM_TERRAIN_SOLID is AlphaTests.OFF, SODIUM_TERRAIN_CUTOUT is HALF_ALPHA.
-            add(DefaultTerrainRenderPasses.SOLID, "gbuffers_terrain", "solid", terrain, Float.NaN, 8, true, properties);   // TERRAIN_SOLID
-            add(DefaultTerrainRenderPasses.CUTOUT, "gbuffers_terrain", "cutout", terrain, 0.5f, 10, true, properties);     // TERRAIN_CUTOUT
+            solid = start(DefaultTerrainRenderPasses.SOLID, "gbuffers_terrain", "solid", terrain, Float.NaN, 8, true, properties, false);   // TERRAIN_SOLID
+            cutout = start(DefaultTerrainRenderPasses.CUTOUT, "gbuffers_terrain", "cutout", terrain, 0.5f, 10, true, properties, false);   // TERRAIN_CUTOUT
+        } catch (Exception e) {
+            discard(solid);
+            MetalShadersClient.LOGGER.error("Terrain takeover disabled: {}", e.getMessage(), e);
+            return;
+        }
+        Started translucent = null;
+        Exception translucentError = null;
+        if (water != null) {
+            try {
+                // Iris ShaderKey: SODIUM_TERRAIN_TRANSLUCENT is ONE_TENTH_ALPHA unless the pack says otherwise.
+                float alpha = alphaTest(properties, "gbuffers_water", 0.1f);
+                translucent = start(DefaultTerrainRenderPasses.TRANSLUCENT, "gbuffers_water", "translucent", water, alpha, 17, false, properties, false); // TERRAIN_TRANSLUCENT
+            } catch (Exception e) {
+                translucentError = e;
+            }
+        }
+        try {
+            finish(solid);
+            solid = null;
+            finish(cutout);
+            cutout = null;
             atlasSampler = atlasSampler != null ? atlasSampler : RenderSystem.getDevice().createSampler(AddressMode.CLAMP_TO_EDGE, AddressMode.CLAMP_TO_EDGE,
                     FilterMode.NEAREST, FilterMode.NEAREST, 1, OptionalDouble.empty());
             prepared = true;
             MetalShadersClient.LOGGER.info("Terrain takeover ready: gbuffers_terrain writes colortex{} plus the coverage mask",
                     programs.get(DefaultTerrainRenderPasses.SOLID).writes());
         } catch (Exception e) {
+            discard(solid, cutout, translucent);
+            programs.values().forEach(p -> p.compiled().close());
             programs.clear();
             MetalShadersClient.LOGGER.error("Terrain takeover disabled: {}", e.getMessage(), e);
             return;
@@ -130,9 +156,10 @@ public final class TerrainTakeover {
             return;
         }
         try {
-            // Iris ShaderKey: SODIUM_TERRAIN_TRANSLUCENT is ONE_TENTH_ALPHA unless the pack says otherwise.
-            float alpha = alphaTest(properties, "gbuffers_water", 0.1f);
-            add(DefaultTerrainRenderPasses.TRANSLUCENT, "gbuffers_water", "translucent", water, alpha, 17, false, properties); // TERRAIN_TRANSLUCENT
+            if (translucentError != null) {
+                throw translucentError;
+            }
+            finish(translucent);
         } catch (Exception e) {
             programs.remove(DefaultTerrainRenderPasses.TRANSLUCENT);
             MetalShadersClient.LOGGER.error("Translucent terrain stays the game's: {}", e.getMessage(), e);
@@ -148,10 +175,21 @@ public final class TerrainTakeover {
             return;
         }
         try {
-            add(DefaultTerrainRenderPasses.SOLID, "shadow", "shadow_solid", shadow, Float.NaN, 8, false, properties, true);
-            add(DefaultTerrainRenderPasses.CUTOUT, "shadow", "shadow_cutout", shadow, 0.5f, 10, false, properties, true);
-            // Iris ShaderKey SHADOW_SODIUM_TERRAIN_TRANSLUCENT (ProgramId.ShadowWater -> Shadow): one tenth.
-            add(DefaultTerrainRenderPasses.TRANSLUCENT, "shadow", "shadow_translucent", shadow, 0.1f, 17, false, properties, true);
+            // Step 7g: started together on the pool, then finished in order.
+            Started[] started = new Started[3];
+            try {
+                started[0] = start(DefaultTerrainRenderPasses.SOLID, "shadow", "shadow_solid", shadow, Float.NaN, 8, false, properties, true);
+                started[1] = start(DefaultTerrainRenderPasses.CUTOUT, "shadow", "shadow_cutout", shadow, 0.5f, 10, false, properties, true);
+                // Iris ShaderKey SHADOW_SODIUM_TERRAIN_TRANSLUCENT (ProgramId.ShadowWater -> Shadow): one tenth.
+                started[2] = start(DefaultTerrainRenderPasses.TRANSLUCENT, "shadow", "shadow_translucent", shadow, 0.1f, 17, false, properties, true);
+                for (int i = 0; i < started.length; i++) {
+                    finish(started[i]);
+                    started[i] = null;
+                }
+            } catch (Exception e) {
+                discard(started);
+                throw e;
+            }
             MetalShadersClient.LOGGER.info("Shadow pass ready: shadow writes shadowcolor{} at {}x{}",
                     shadowPrograms.get(DefaultTerrainRenderPasses.SOLID).writes(),
                     io.github.hecbatista.metalshaders.uniform.ShadowMatrices.directives().resolution(),
@@ -281,13 +319,15 @@ public final class TerrainTakeover {
     private static final Map<Integer, String> LEGACY_NAMES = Map.of(
             0, "gcolor", 1, "gdepth", 2, "gnormal", 3, "composite", 4, "gaux1", 5, "gaux2", 6, "gaux3", 7, "gaux4");
 
-    private static void add(TerrainRenderPass pass, String program, String name, String[] glsl, float alphaTest, int stage,
-                            boolean coverage, java.util.Properties properties) throws Exception {
-        add(pass, program, name, glsl, alphaTest, stage, coverage, properties, false);
+    /** A terrain pipeline whose compile was started on the pool (step 7g); {@link #finish} records it. */
+    private record Started(TerrainRenderPass pass, String program, String name, float alphaTest, int stage, boolean coverage,
+                           boolean shadow, ProgramTranslator.Result result, List<Integer> writes, List<String> blends,
+                           java.util.concurrent.CompletableFuture<CompiledRenderPipeline.Pending> compile) {
     }
 
-    private static void add(TerrainRenderPass pass, String program, String name, String[] glsl, float alphaTest, int stage,
-                            boolean coverage, java.util.Properties properties, boolean shadow) throws Exception {
+    /** Translates and builds one terrain pipeline, and starts its compile on {@link PipelineCompiler}'s pool. */
+    private static Started start(TerrainRenderPass pass, String program, String name, String[] glsl, float alphaTest, int stage,
+                                 boolean coverage, java.util.Properties properties, boolean shadow) throws Exception {
         ProgramTranslator.Result r = ProgramTranslator.translateForTerrain(glsl[0], glsl[1], new ProgramTranslator.Terrain(alphaTest, coverage, shadow));
         List<Integer> writes = r.drawBuffers().isEmpty() ? List.of(0) : r.drawBuffers();
         if (coverage) {
@@ -335,9 +375,18 @@ public final class TerrainTakeover {
             bindings.withUniform(s.name(), UniformType.COMBINED_IMAGE_SAMPLER);
         }
         b.withBindGroupLayout(bindings.build());
-        CompiledRenderPipeline compiled = RenderSystem.getDevice().compilePipeline(b.build(),
-                new LuxiumShaderSource().put(shader, ShaderType.VERTEX, r.vertex()).put(shader, ShaderType.FRAGMENT, r.fragment()),
-                Runnable::run).join().finishCompile();
+        return new Started(pass, program, name, alphaTest, stage, coverage, shadow, r, writes, blends, PipelineCompiler.start(b.build(),
+                new LuxiumShaderSource().put(shader, ShaderType.VERTEX, r.vertex()).put(shader, ShaderType.FRAGMENT, r.fragment())));
+    }
+
+    /** Finishes a started terrain pipeline (render thread) and records it. */
+    private static void finish(Started st) {
+        TerrainRenderPass pass = st.pass();
+        String program = st.program();
+        String name = st.name();
+        ProgramTranslator.Result r = st.result();
+        List<Integer> writes = st.writes();
+        CompiledRenderPipeline compiled = PipelineCompiler.finish(st.compile());
         if (compiled == null) {
             throw new IllegalStateException(program + " (" + name + "): the device returned no pipeline");
         }
@@ -348,11 +397,28 @@ public final class TerrainTakeover {
                 defaults.put(u.name(), u.defaultValue());
             }
         });
-        (shadow ? shadowPrograms : programs).put(pass, new Program(pass, r, layout, defaults, compiled, new ArrayList<>(), stage, writes, coverage));
+        (st.shadow() ? shadowPrograms : programs).put(pass, new Program(pass, r, layout, defaults, compiled, new ArrayList<>(), st.stage(), writes, st.coverage()));
         MetalShadersClient.LOGGER.info("Terrain {} ({}): inputs {}, samplers {}, alpha test {}, {}", name, program,
                 r.vertexInputs().stream().map(ProgramTranslator.Slot::name).toList(),
                 r.samplers().stream().map(ProgramTranslator.Sampler::name).toList(),
-                Float.isNaN(alphaTest) ? "off" : "> " + alphaTest, blends);
+                Float.isNaN(st.alphaTest()) ? "off" : "> " + st.alphaTest(), st.blends());
+    }
+
+    /** Finishes and closes started compiles that won't be used (their takeover failed). */
+    private static void discard(Started... started) {
+        for (Started st : started) {
+            if (st == null) {
+                continue;
+            }
+            try {
+                CompiledRenderPipeline c = PipelineCompiler.finish(st.compile());
+                if (c != null) {
+                    c.close();
+                }
+            } catch (RuntimeException ignored) {
+                // its own failure; the takeover's is reported already
+            }
+        }
     }
 
     /** Forgets the pack's terrain and shadow programs (a new world folder is being loaded; see PackChain.unload). */

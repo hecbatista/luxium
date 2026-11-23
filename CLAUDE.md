@@ -7,7 +7,7 @@ Load and run Iris/OptiFine-format shader packs (the `shaderpacks/` format) on Mi
 
 Status (2026-11-23): steps 1–6 done, step 7 (polish) in progress. The pack draws the sky, terrain, water, entities, block entities, particles, weather, the hand and the shadow map through its own programs, with the user's pack settings, in all three worlds.
 
-Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor ✅ · 4 translator ✅ · 5 uniforms ✅ · 6 render pipeline ✅ · 7 polish (in progress: 7a–7f done, then housekeeping).
+Roadmap: 1 mod skeleton ✅ · 2 pack reader ✅ · 3 preprocessor ✅ · 4 translator ✅ · 5 uniforms ✅ · 6 render pipeline ✅ · 7 polish (in progress: 7a–7g done, then housekeeping).
 
 Target pack: **Complementary Unbound r5.10**. Its license (Complementary License Agreement 1.8) forbids redistributing or modifying it, so never commit any of its files. The mod must run it unmodified. Under Iris's `MC_OS_MAC` define, the pack forces `COLORED_LIGHTING 0`, which turns off its compute, SSBO and 3D-image features.
 
@@ -18,7 +18,7 @@ This file stays short because every session and every subagent loads it. The det
 |---|---|
 | `docs/history/steps-1-5.md` | pack reader, preprocessor (JCPP), translator (no glsl-transformer: it's AGPL), std140 layout, uniforms and pack formulas, test and scoreboard results, translator gaps |
 | `docs/history/step-6.md` | 6a first pixels, 6b final, 6c render targets and chain, 6d gbuffers (sky, Sodium terrain, water and the catch, entities, ids, particles, weather, hand, spider eyes and beams), 6e shadows, 6f correctness, plus "Facts for step 6" (binding by name, full-screen passes, Vitrail's 26.3 seam) |
-| `docs/history/step-7.md` | 7a pack settings, 7b Nether/End, 7c off-screen shadow casters, 7d OIT off, 7e ids, 7f performance |
+| `docs/history/step-7.md` | 7a pack settings, 7b Nether/End, 7c off-screen shadow casters, 7d OIT off, 7e ids, 7f performance, 7g compile pool and Metal cache warm-up |
 | `docs/history/testing.md` | full notes on the client game tests |
 
 When a slice is finished, append its result to the right `docs/history/` file, and add only a one-line pointer here if it changes how to work.
@@ -57,6 +57,7 @@ metal-shaders/
 | metallum | master | 467d312b | default branch |
 | iris | **26.3** | 671a5c87 | Iris's default branch is `26.1`, which is wrong for us. `26.3` matches Metallum: Iris `build.gradle.kts` has `MINECRAFT_VERSION "26.3"` and `sodium-fabric:0.9.2+mc26.3`. (`26.3-new` exists but moved to Sodium 0.9.3-beta.5.) |
 | vitrail | main | 7a3cdcbe | builds for 26.2 by default; use `-Pminecraft=26.3` (see `versions/26.3.properties`) |
+| gaelquinta-metal | main | 6e0a0af | GaelQuinta/minecraft-metal-shaders (Apache-2.0): own native Metal shaders on mcopt, not packs. Read for Apple-GPU measurements (`docs/research/apple-gpu.md`), compile and test tooling; not a visual reference (cloned 2026-11-23) |
 | axiom-graphics skill | main | ffafd3b3 | recorded in `.claude/skills/axiom-graphics/.source-commit` |
 
 ### Versions (from `references/metallum/gradle.properties` and `build.gradle`)

@@ -595,9 +595,14 @@ public final class EntityTakeover {
         PREWARM.put(WEATHER, List.of(RenderPipelines.WEATHER));
     }
 
-    /** Compiles the {@link #PREWARM} pipelines of every ready family; returns how many. */
+    /**
+     * Compiles the {@link #PREWARM} pipelines of every ready family; returns how many. Step 7g: all
+     * of them are started on {@link PipelineCompiler}'s pool first (the GLSL to MSL half, about 95%
+     * of a compile), then finished in order here, so they compile side by side instead of one by one.
+     */
     public static int prewarm() {
-        int compiled = 0;
+        List<Prepared> prepared = new java.util.ArrayList<>();
+        List<java.util.concurrent.CompletableFuture<CompiledRenderPipeline.Pending>> started = new java.util.ArrayList<>();
         for (Map.Entry<Family, List<RenderPipeline>> e : PREWARM.entrySet()) {
             Family f = e.getKey();
             if (!active(f)) {
@@ -612,12 +617,26 @@ public final class EntityTakeover {
                     continue;
                 }
                 try {
-                    f.compiled.put(p, compile(f, p));
-                    compiled++;
+                    Prepared prep = prepare(f, p);
+                    started.add(PipelineCompiler.start(prep.pipeline(), prep.source()));
+                    prepared.add(prep);
                 } catch (Exception ex) {
                     f.refused.add(p);
                     MetalShadersClient.LOGGER.warn("Entity takeover ({}): {} stays the game's: {}", f.program, p.getLocation(), ex.getMessage());
                 }
+            }
+        }
+        int compiled = 0;
+        for (int i = 0; i < prepared.size(); i++) {
+            Prepared prep = prepared.get(i);
+            try {
+                long t0 = System.nanoTime();
+                CompiledRenderPipeline c = PipelineCompiler.finish(started.get(i));
+                prep.f().compiled.put(prep.vanilla(), done(prep, c, "waited and finished in " + (System.nanoTime() - t0) / 1_000_000 + " ms"));
+                compiled++;
+            } catch (Exception ex) {
+                prep.f().refused.add(prep.vanilla());
+                MetalShadersClient.LOGGER.warn("Entity takeover ({}): {} stays the game's: {}", prep.f().program, prep.vanilla().getLocation(), ex.getMessage());
             }
         }
         return compiled;
@@ -668,6 +687,17 @@ public final class EntityTakeover {
     }
 
     private static CompiledRenderPipeline compileTimed(Family f, RenderPipeline vanilla) throws Exception {
+        Prepared prep = prepare(f, vanilla);
+        CompiledRenderPipeline c = PipelineCompiler.compileNow(prep.pipeline(), prep.source());
+        return done(prep, c, "translate " + prep.translateMs() + " ms + " + PipelineCompiler.lastSplit());
+    }
+
+    /** A pipeline ready to compile: the pack's program with the vanilla pipeline's state. */
+    private record Prepared(Family f, RenderPipeline vanilla, Program program, RenderPipeline pipeline,
+                            LuxiumShaderSource source, long started, long translateMs) {
+    }
+
+    private static Prepared prepare(Family f, RenderPipeline vanilla) throws Exception {
         long started = System.nanoTime();
         float alpha = f.alphaFor(vanilla);
         Set<String> declared = new HashSet<>();
@@ -712,16 +742,22 @@ public final class EntityTakeover {
             bindings.withUniform(s.name(), UniformType.COMBINED_IMAGE_SAMPLER);
         }
         b.withBindGroupLayout(bindings.build());
-        CompiledRenderPipeline c = RenderSystem.getDevice().compilePipeline(b.build(),
+        return new Prepared(f, vanilla, p, b.build(),
                 new LuxiumShaderSource().put(shader, ShaderType.VERTEX, r.vertex()).put(shader, ShaderType.FRAGMENT, r.fragment()),
-                Runnable::run).join().finishCompile();
+                started, (System.nanoTime() - started) / 1_000_000);
+    }
+
+    /** Records a compiled pipeline (throws if the device returned none). */
+    private static CompiledRenderPipeline done(Prepared prep, @org.jspecify.annotations.Nullable CompiledRenderPipeline c, String how) {
         if (c == null) {
             throw new IllegalStateException("the device returned no pipeline");
         }
-        programOf.put(c, p);
+        programOf.put(c, prep.program());
         compiledCount++;
-        MetalShadersClient.LOGGER.info("Entity takeover: {} -> {} ({}), {} pipelines so far, compiled in {} ms", vanilla.getLocation(), f.program,
-                Float.isNaN(alpha) ? "no alpha test" : "alpha > " + alpha, compiledCount, (System.nanoTime() - started) / 1_000_000);
+        float alpha = prep.f().alphaFor(prep.vanilla());
+        MetalShadersClient.LOGGER.info("Entity takeover: {} -> {} ({}), {} pipelines so far, {} ms since prepared ({})",
+                prep.vanilla().getLocation(), prep.f().program, Float.isNaN(alpha) ? "no alpha test" : "alpha > " + alpha, compiledCount,
+                (System.nanoTime() - prep.started()) / 1_000_000, how);
         return c;
     }
 

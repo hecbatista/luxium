@@ -19,6 +19,9 @@ dependencies {
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	implementation "maven.modrinth:sodium:${project.sodium_version}"
 	implementation files(metallumJar)
+	// Metallum's Metal bindings (nested in its jar, so present at run time). Step 7g calls
+	// MTLDevice.newLibraryWithSource on the compile pool to warm Metal's shader cache.
+	compileOnly "io.github.kokodio:metal-jvm:${project.metal_jvm_version}"
 
 	// JCPP evaluates #if/#define. Its own dependencies (Ant, jopt-simple, annotations) are only
 	// for its command-line tool; slf4j, which it does need, already comes with Minecraft.

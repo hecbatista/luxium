@@ -305,8 +305,10 @@ public final class MetalShadersClient implements ClientModInitializer {
             List<Map.Entry<String, Float>> halfLives = PackDirectives.wetnessHalfLives(packPath, folder, defines, packOptions);
             GAME_UNIFORMS.setWetnessDirectives(halfLives);
             prepareChain(packPath, folder, defines, packProperties);
+            LOGGER.info("World {}: chain compiles, {}", worldId, io.github.hecbatista.metalshaders.render.PipelineCompiler.drainSummary());
             long prewarmStart = System.nanoTime();
             int prewarmed = io.github.hecbatista.metalshaders.render.EntityTakeover.prewarm();
+            LOGGER.info("World {}: prewarm compiles, {}", worldId, io.github.hecbatista.metalshaders.render.PipelineCompiler.drainSummary());
             LOGGER.info("World {}: {}/ loaded in {} ms, of which {} ms compiling {} entity/particle pipelines ahead "
                             + "(wetness half-lives from pack: {})", worldId, folder, (System.nanoTime() - start) / 1_000_000,
                     (System.nanoTime() - prewarmStart) / 1_000_000, prewarmed, halfLives);

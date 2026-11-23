@@ -138,3 +138,23 @@ Step 7 (polish), agreed order with the user (2026-11-20): pack settings → Neth
     - Against Iris, the portal, glinted items in frames and hand, banners, block-entity glow, held map and blindness now match.
     - **New difference: Iris shows Complementary's clouds; Luxium shows none** (Luxium skips `CloudRenderer` because the pack says `clouds=off`, and the pack's own clouds don't appear). Next to investigate.
     - The End portal's starfield is a little dimmer than under Iris.
+
+- **7g result (2026-11-23, ✅): compile pool and Metal cache warm-up.** Ideas from GaelQuinta/minecraft-metal-shaders (Apache-2.0, cloned read-only to `references/gaelquinta-metal`; `ShadeCompile`, `mccompile.m`); no code taken.
+  - Measured first (`PipelineCompiler` times every compile in two halves):
+    - **cross** = `GpuDevice.compilePipeline`'s future: GLSL→SPIR-V (shaderc) in the game's `PipelineBuilder` plus SPIR-V→MSL in Metallum.
+    - **metal** = `Pending.finishCompile`: Metallum's MTLLibrary (behind the lock in `getOrCompileFunction`) and pipeline state.
+    - Warm Metal cache: cross is ~95% (entity program: cross 84 ms, metal 3 ms). Our translation is ~0 ms (cached per variant).
+    - Cold Metal cache: metal dominates (7–8 s per world without validation, 22–30 s with GPU validation, about 1.5–2 s per program under validation).
+  - Fix 1, the pool (`render/PipelineCompiler`): 8 daemon workers (cores − 2). Vanilla runs the cross half on its background executor (`ShaderManager.compilePipelines`), so off-thread is the API's intended use. `finishCompile` stays on the render thread, so the 7f concern about public Metallum 0.0.25 (`getOrCompileFunction` not synchronized) doesn't apply.
+    - Batched: the composite passes (`PackChain.prepare`), terrain and shadow terrain (`TerrainTakeover.prepare`/`prepareShadow`, `start`/`finish`) and entity prewarm (`EntityTakeover.prewarm`, `prepare`/`done`). First-use compiles still run on the render thread (`compileNow`).
+  - Fix 2, Metal warm-up (`mixin/metallum/MetalCrossShaderCompilerMixin` + `MetallumCompiledAccessor`): when Metallum returns the MSL for a `metalshaders:` pipeline on a pool thread, the worker compiles it into a throwaway MTLLibrary (`newLibraryWithSource(source, null)`, Metallum's options). Metal's disk cache then makes the render thread's compile a hit. It also sets `shouldMaximizeConcurrentCompilation` (M1 Max: 10 at once). `LUXIUM_NO_METAL_WARM=1` turns it off. metal-jvm is `compileOnly` (nested in Metallum's jar at run time).
+  - Results, Complementary, per world on first visit:
+
+    | Case | Before | Pool | Pool + warm-up |
+    |---|---|---|---|
+    | Warm cache, validation on | 3.0–3.9 s (prewarm 1.2–1.4 s) | 1.8–2.4 s (prewarm 0.22–0.31 s) | ~1.7 s |
+    | Cold cache, no validation | — | 8.7–10.9 s | 5.0–6.8 s |
+    | Cold cache, validation on | — | 22–30 s | 17–25 s |
+  - Left on the render thread when cold: building pipeline states (AIR→GPU), about 0.9 s chain + 2.2 s entities per world without validation, and first-use compiles (spider eyes, beacons: 0.1–0.2 s cold, 10–20 ms warm). Warming pipeline states would need Metallum's descriptor building off-thread.
+  - How to test cold: Metal's cache for the dev game is `$(getconf DARWIN_USER_CACHE_DIR)net.java.openjdk.java/com.apple.metal/` (validation uses its own `*_ShaderValidation` folders). Move it aside, run, then delete the new one and move it back. The game tests otherwise always run warm.
+  - Checks: 0 validation messages (warm and cold runs), 98 unit tests, pictures unchanged (before/after compare sheet), flicker unchanged (walk clip 0.14–0.16% before and after, the known open shimmer; others pass).
