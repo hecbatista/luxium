@@ -10,7 +10,7 @@ Everything needed to create the project at modrinth.com/dashboard/projects. Noth
 | Slug | `luxium` (free as of 2026-11-23) |
 | Summary (≤ 256 chars) | Run Iris / OptiFine shader packs on Apple Silicon Macs, on Minecraft's Metal backend (Metallum). Packs run unmodified. Alpha. |
 | Project type | Mod |
-| Categories | Decoration (primary), Utility. Pick on the form; these are the closest fits Modrinth offers. |
+| Categories | Decoration, Optimization: the same tags Iris and Oculus use (Modrinth API, 2026-11-23). |
 | Environment | Client: required. Server: unsupported. |
 | License | LGPL-3.0-only |
 | Icon | `branding/icon-512.png` |
