@@ -13,7 +13,13 @@ Facts as of 2026-11-23:
 
 ## Must, before anyone else gets the jar
 - [x] **License**: LGPL-3.0-only (user's decision, 2026-11-23). `LICENSE` at the repo root and in the jar, `"license"` in `fabric.mod.json`. Still to do: the header line in README.
-- [ ] **Runs on the Metallum players can download.** Test with Modrinth's `metallum-mc` 0.0.25 jar, not our local build. Our mixins into Metallum (`MetalCrossShaderCompilerMixin`, `MetallumCompiledAccessor`) are `require`d, so a mismatch crashes at startup. Then pin `"metallum"` in `depends` to what was tested.
+- [x] **Runs on the Metallum players can download** (2026-11-23):
+  - Modrinth's `metallum-mc` 0.0.25 (`metallum-0.0.25.jar`, 1,341,858 bytes, SHA-512 checked) differs from our local build in one class, `MetalDevice`, and only by the `synchronized` on `getOrCompileFunction` (javap). Luxium's Metallum mixins target `MetalCrossShaderCompiler` and its `Compiled` record, which are byte-identical, and Luxium never calls `getOrCompileFunction` off the render thread (7g).
+  - Game tests on it (`LUXIUM_METALLUM_JAR=<jar>` in `mod/build.gradle` swaps the jar; `lsof` confirmed the game used it):
+    - regression and the zoo and beach tour stops: 0 validation messages, no new exceptions;
+    - still clips pass; the moving sprint clip (5.7%) and the animated portal clip (0.25%) flag as on the local build;
+    - shots match the local-Metallum run within run-to-run noise (mean |Δ| 1.0–2.9).
+  - `fabric.mod.json` now requires `"metallum": "0.0.25"`, so a newer Metallum gets a clear dependency message instead of a mixin crash. Re-test and widen it when Metallum updates.
 - [ ] **Choosing the pack and switching it off.** Today Luxium takes the first pack in `shaderpacks/`, and the only off switch is removing it. Minimum: a config line (`config/luxium.properties`: `shaderPack=`, `enabled=`), or read Iris's `config/iris.properties` `shaderPack=`.
 - [ ] **Fails safe.** No pack, a broken pack, or an untested pack must give vanilla rendering and a clear log line, never a crash. Check with no pack, a zip with garbage, and two or three popular packs (the `multi-pack-testing` worktree has a start on this).
 - [x] **Version and metadata**: `0.1.0-alpha.1`; mod id renamed `metalshaders` → `luxium` before any release (user's decision; the Java package stays `io.github.hecbatista.metalshaders`). The log tag is now `(luxium)`, and `fabric.mod.json` has license and issues links.

@@ -11,7 +11,11 @@ repositories {
 }
 
 // The Metallum jar we built and tested locally (see gradle.properties).
-def metallumJar = file("../references/metallum/build/libs/metallum-${project.metallum_version}.jar")
+// LUXIUM_METALLUM_JAR=<path> runs against another one instead, e.g. Modrinth's metallum-mc
+// release, which is what players install (docs/release/alpha.md).
+def metallumJar = System.getenv("LUXIUM_METALLUM_JAR") != null
+		? file(System.getenv("LUXIUM_METALLUM_JAR"))
+		: file("../references/metallum/build/libs/metallum-${project.metallum_version}.jar")
 
 dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
