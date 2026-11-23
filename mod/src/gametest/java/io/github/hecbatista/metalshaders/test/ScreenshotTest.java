@@ -27,7 +27,11 @@ import java.util.stream.Stream;
 public class ScreenshotTest implements FabricClientGameTest {
     @Override
     public void runTest(ClientGameTestContext context) {
-        copyShaderPacks();
+        PlaytestTour.copyShaderPacks();
+        // LUXIUM_TOUR=1 runs PlaytestTour instead.
+        if (System.getenv("LUXIUM_TOUR") != null) {
+            return;
+        }
 
         boolean walkOnly = System.getenv("LUXIUM_TEST_WALK_ONLY") != null;
         // The usual test world is flat (Fabric's consistent settings); the walk-only run uses a
@@ -385,34 +389,6 @@ public class ScreenshotTest implements FabricClientGameTest {
             context.takeScreenshot(TestScreenshotOptions.of(String.format("%02d", i))
                     .disableCounterPrefix().withDestinationDir(dir));
             context.waitTick();
-        }
-    }
-
-    /**
-     * The test run's game folder (build/run/clientGameTest) is cleared before each run, so copy
-     * the developer's packs from mod/run/shaderpacks/ into it.
-     */
-    private static void copyShaderPacks() {
-        Path gameDir = FabricLoader.getInstance().getGameDir();
-        Path source = gameDir.resolve("../../../run/shaderpacks").normalize();
-        Path target = gameDir.resolve("shaderpacks");
-        // LUXIUM_TEST_NO_PACK=1: no pack, for a baseline of the game on Metallum alone.
-        if (!Files.isDirectory(source) || System.getenv("LUXIUM_TEST_NO_PACK") != null) {
-            return;
-        }
-        try (Stream<Path> packs = Files.list(source)) {
-            Files.createDirectories(target);
-            for (Path pack : packs.filter(Files::isRegularFile).toList()) {
-                Files.copy(pack, target.resolve(pack.getFileName()), StandardCopyOption.REPLACE_EXISTING);
-                // LUXIUM_TEST_SETTINGS="NAME=value;NAME2=value2" writes the pack's settings file
-                // (shaderpacks/<pack>.txt, as Iris names it), to check that changed settings apply.
-                String settings = System.getenv("LUXIUM_TEST_SETTINGS");
-                if (settings != null && pack.getFileName().toString().endsWith(".zip")) {
-                    Files.writeString(target.resolve(pack.getFileName() + ".txt"), settings.replace(';', '\n') + "\n");
-                }
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
         }
     }
 }
