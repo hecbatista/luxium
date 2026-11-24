@@ -137,9 +137,14 @@ public final class EntityTakeover {
         }
     }
 
-    /** Pack albedo names -> the game's skin sampler; lightmap -> the game's lightmap sampler. */
+    /**
+     * Pack albedo names -> the game's skin sampler; lightmap -> the game's lightmap sampler.
+     * Not "texture": NameFixes already renames a sampler declared as texture to gtexture, and the
+     * rename hits every identifier, so it turned GLSL's texture() calls into Sampler0() (Solas's
+     * shadow program, 2026-11-23).
+     */
     private static final Map<String, String> RENAMES = Map.of(
-            "tex", "Sampler0", "texture", "Sampler0", "gtexture", "Sampler0", "gcolor", "Sampler0", "lightmap", "Sampler2");
+            "tex", "Sampler0", "gtexture", "Sampler0", "gcolor", "Sampler0", "lightmap", "Sampler2");
     private static final Set<String> GAME_BOUND = Set.of("Sampler0", "Sampler1", "Sampler2", ProgramTranslator.GLINT_SAMPLER);
     private static final Matrix4f LIGHTMAP_MATRIX = new Matrix4f(
             0.00390625f, 0, 0, 0, 0, 0.00390625f, 0, 0, 0, 0, 0.00390625f, 0, 0.03125f, 0.03125f, 0.03125f, 1);

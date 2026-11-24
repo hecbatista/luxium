@@ -48,9 +48,17 @@ public final class GameUniforms {
      * colortex0's clear colour (Iris ClearPassCreator).
      */
     private static volatile float[] fogColor = {0, 0, 0};
+    /**
+     * gl_Fog as Iris fills it (CommonTransformer's iris_FogParameters from IrisInternalUniforms):
+     * color (rgba; white before the first fog, Sodium's FogParameters.NONE), density, start, end,
+     * scale = 1 / (end - start). Start and end are FogData's environmental ones (Sodium).
+     */
+    private static volatile float[] glFog = {1, 1, 1, 1, 0, 0, 1, 1};
 
-    public static void setFogColor(float r, float g, float b) {
+    /** {@code density} below 0 means no legacy fog density (Iris: -1 outside water, read as 0). */
+    public static void setFog(float r, float g, float b, float a, float start, float end, float density) {
         fogColor = new float[]{r, g, b};
+        glFog = new float[]{r, g, b, a, Math.max(0.0f, density), start, end, 1.0f / (end - start)};
     }
 
     public static float[] fogColor() {
@@ -135,6 +143,12 @@ public final class GameUniforms {
         values.put("far", (float) (mc.options.getEffectiveRenderDistance() * 16));
         values.put("cameraPosition", toFloats(camera.current));
         values.put("fogColor", fogColor);
+        // Iris FogUniforms: fogStart, fogEnd, fogDensity; gl_Fog (the translator's luxium_Fog).
+        float[] fog = glFog;
+        values.put("fogDensity", fog[4]);
+        values.put("fogStart", fog[5]);
+        values.put("fogEnd", fog[6]);
+        values.put("luxium_Fog", fog);
         values.put("eyeAltitude", (float) camera.current[1]);
         values.put("previousCameraPosition", toFloats(camera.previous));
         values.put("cameraPositionInt", floorInts(camera.currentUnshifted));
