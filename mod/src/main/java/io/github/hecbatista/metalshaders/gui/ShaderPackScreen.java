@@ -39,7 +39,7 @@ public class ShaderPackScreen extends Screen {
     private static final int OFF_COLOR = 0xFFA2A2A2;
 
     private final @Nullable Screen lastScreen;
-    private final HeaderAndFooterLayout layout = new HeaderAndFooterLayout(this, 33, 60);
+    private HeaderAndFooterLayout layout = new HeaderAndFooterLayout(this, 33, 60);
     private @Nullable PackList list;
 
     /** What config/luxium.properties says now, and what the player has picked but not applied. */
@@ -70,12 +70,16 @@ public class ShaderPackScreen extends Screen {
 
     @Override
     protected void init() {
+        layout = new HeaderAndFooterLayout(this, 33, 60);   // init runs again when the window is resized
         layout.addTitleHeader(TITLE, font);
         list = layout.addToContents(new PackList(minecraft));
         LinearLayout footer = layout.addToFooter(LinearLayout.vertical().spacing(4));
         footer.defaultCellSetting().alignHorizontallyCenter();
-        footer.addChild(Button.builder(Component.translatable("luxium.shaderPacks.openFolder"), b -> openFolder())
-                .width(200).build());
+        LinearLayout top = footer.addChild(LinearLayout.horizontal().spacing(4));
+        top.addChild(Button.builder(Component.translatable("luxium.shaderPacks.openFolder"), b -> openFolder())
+                .width(152).build());
+        top.addChild(Button.builder(Component.translatable("luxium.shaderPacks.settings"), b -> openSettings())
+                .width(152).build());
         LinearLayout buttons = footer.addChild(LinearLayout.horizontal().spacing(4));
         buttons.addChild(Button.builder(CommonComponents.GUI_CANCEL, b -> cancel()).width(100).build());
         buttons.addChild(Button.builder(Component.translatable("luxium.shaderPacks.apply"), b -> apply()).width(100).build());
@@ -98,6 +102,9 @@ public class ShaderPackScreen extends Screen {
         if (pendingEnabled == appliedEnabled && pack.equals(appliedPack)) {
             return;
         }
+        if (!pack.equals(appliedPack)) {
+            PackSettings.clearPending();   // picked values belong to the old pack (as Iris)
+        }
         try {
             LuxiumConfig.write(MetalShadersClient.shaderpacksDir(), MetalShadersClient.configFile(), pendingEnabled, pack);
             MetalShadersClient.LOGGER.info("Shader Packs screen: shaders {}, pack {}", pendingEnabled ? "on" : "off",
@@ -111,7 +118,38 @@ public class ShaderPackScreen extends Screen {
     }
 
     private void cancel() {
+        PackSettings.clearPending();
         minecraft.gui.setScreen(lastScreen);
+    }
+
+    /**
+     * The pack's own option screens. As Iris, the selection is applied first, so the settings
+     * opened are the selected pack's. Needs shaders on and a pack.
+     */
+    public void openSettings() {
+        apply();
+        if (!appliedEnabled) {
+            return;
+        }
+        Path pack = packPath(appliedPack);
+        if (pack == null) {
+            return;
+        }
+        try {
+            PackSettings settings = PackSettings.load(pack, minecraft.options.languageCode);
+            minecraft.gui.setScreen(new ShaderOptionsScreen(this, lastScreen, settings));
+        } catch (IOException | RuntimeException e) {
+            MetalShadersClient.LOGGER.error("Couldn't read the settings of {}", pack.getFileName(), e);
+        }
+    }
+
+    private @Nullable Path packPath(String name) {
+        try {
+            List<Path> packs = PackReader.findPacks(MetalShadersClient.shaderpacksDir());
+            return packs.stream().filter(p -> name.isEmpty() || p.getFileName().toString().equals(name)).findFirst().orElse(null);
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     @Override

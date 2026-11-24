@@ -579,6 +579,86 @@ public final class PackOptions {
         return option == null || option.defaultValue();
     }
 
+    /** Whether the pack has this option (on/off or value, const ones included). */
+    public boolean has(String name) {
+        return booleans.containsKey(name) || strings.containsKey(name);
+    }
+
+    /** An option's default as text ("true"/"false" for on/off options), or null if it isn't one. */
+    public @org.jspecify.annotations.Nullable String defaultValue(String name) {
+        BooleanOption b = booleans.get(name);
+        if (b != null) {
+            return Boolean.toString(b.defaultValue());
+        }
+        StringOption s = strings.get(name);
+        return s == null ? null : s.defaultValue();
+    }
+
+    /** An option's value in use (the settings file's, else the default), or null if it isn't one. */
+    public @org.jspecify.annotations.Nullable String value(String name) {
+        Boolean b = changedBooleans.get(name);
+        if (b != null) {
+            return b.toString();
+        }
+        String s = changedStrings.get(name);
+        return s != null ? s : defaultValue(name);
+    }
+
+    /**
+     * The settings file's contents for these values: only options of this pack, and only values
+     * that differ from the default (Iris writes the pack's changed values the same way, so the file
+     * moves between Iris and Luxium). On/off values must be "true" or "false".
+     */
+    public Map<String, String> nonDefault(Map<String, String> values) {
+        Map<String, String> out = new TreeMap<>();
+        values.forEach((name, value) -> {
+            String def = defaultValue(name);
+            if (def == null) {
+                return;
+            }
+            if (booleans.containsKey(name) && !value.equals("true") && !value.equals("false")) {
+                return;
+            }
+            if (!value.equals(def)) {
+                out.put(name, value);
+            }
+        });
+        return out;
+    }
+
+    /**
+     * Writes {@code shaderpacks/<pack>.txt} with {@code values} (as {@link #nonDefault} keeps them),
+     * ISO-8859-1 properties as Iris and OptiFine read them; deletes the file when nothing differs.
+     *
+     * @return what was written
+     */
+    public Map<String, String> writeSettings(Path pack, Map<String, String> values) throws IOException {
+        Map<String, String> keep = nonDefault(values);
+        Path file = settingsFile(pack);
+        if (keep.isEmpty()) {
+            Files.deleteIfExists(file);
+            return keep;
+        }
+        Properties p = new Properties() {
+            @Override
+            public synchronized java.util.Enumeration<Object> keys() {   // sorted, so the file is stable
+                return Collections.enumeration(new java.util.TreeSet<>(super.keySet()));
+            }
+
+            @Override
+            public java.util.Set<Map.Entry<Object, Object>> entrySet() {
+                java.util.Set<Map.Entry<Object, Object>> sorted = new java.util.TreeSet<>(java.util.Comparator.comparing(e -> e.getKey().toString()));
+                sorted.addAll(super.entrySet());
+                return sorted;
+            }
+        };
+        p.putAll(keep);
+        try (java.io.OutputStream out = Files.newOutputStream(file)) {
+            p.store(out, "Shader pack settings, written by Luxium (only values that differ from the pack's defaults)");
+        }
+        return keep;
+    }
+
     /** Settings that weren't applied, NAME -> reason. */
     public Map<String, String> ignored() {
         return Collections.unmodifiableMap(ignored);
@@ -717,7 +797,8 @@ public final class PackOptions {
         StringBuilder sb = new StringBuilder();
         sb.append("# Settings of ").append(packFileName).append(", listed by Luxium. This file is rewritten at every start.\n")
                 .append("# To change a setting, put NAME=value lines in ").append(packFileName).append(".txt\n")
-                .append("# (the same file Iris uses), then restart the game.\n")
+                .append("# (the same file Iris uses), then restart the game; or change them in the game:\n")
+                .append("# Video Settings > Shader Packs... (or the I key) > Shader Pack Settings...\n")
                 .append("# On/off settings take true or false.\n\n");
         Map<String, String> changed = changed();
         Map<String, Object> all = new TreeMap<>();

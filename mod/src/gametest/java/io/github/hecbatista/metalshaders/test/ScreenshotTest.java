@@ -1,5 +1,6 @@
 package io.github.hecbatista.metalshaders.test;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestServerContext;
@@ -127,6 +128,10 @@ public class ScreenshotTest implements FabricClientGameTest {
             }
             if (System.getenv("LUXIUM_TEST_TOGGLE") != null) {
                 toggleTest(context, singleplayer, server);
+                return;
+            }
+            if (System.getenv("LUXIUM_TEST_OPTIONS") != null) {
+                optionsTest(context, singleplayer, server);
                 return;
             }
             if (System.getenv("LUXIUM_TEST_MENUS") != null) {
@@ -570,6 +575,150 @@ public class ScreenshotTest implements FabricClientGameTest {
         context.takeScreenshot("menu-8-f3");
         context.runOnClient(mc -> mc.debugEntries.setOverlayVisible(false));
         System.out.println("[Luxium menus] all steps passed");
+    }
+
+    /**
+     * LUXIUM_TEST_OPTIONS=1 (menus slice C): the pack's own option screens through the Shader Packs
+     * screen, with real clicks: a sub-screen, the profile row, a slider dragged with the mouse, a
+     * value cycled with right clicks, Shift-click to one default, Apply (the settings file and the
+     * picture change), Esc back, Shift + Reset (the file goes away), and Done.
+     */
+    private static void optionsTest(ClientGameTestContext context, TestSingleplayerContext singleplayer, TestServerContext server) {
+        stillScene(context, singleplayer, server);
+        Path settingsFile = context.computeOnClient(mc -> io.github.hecbatista.metalshaders.pack.PackOptions.settingsFile(firstPack()));
+        context.setScreen(() -> new io.github.hecbatista.metalshaders.gui.ShaderPackScreen(null));
+        context.waitTicks(3);
+        context.clickScreenButton("luxium.shaderPacks.settings");
+        context.waitForScreen(io.github.hecbatista.metalshaders.gui.ShaderOptionsScreen.class);
+        context.waitTicks(5);
+        context.takeScreenshot("options-1-main");
+
+        clickCell(context, "[PERFORMANCE_SETTINGS]", false);
+        context.waitTicks(5);
+        String before = profileName(context);
+        clickCell(context, "<profile>", false);
+        context.waitTicks(3);
+        String after = profileName(context);
+        System.out.println("[Luxium options] profile " + before + " -> " + after);
+        if (before.equals(after)) {
+            throw new AssertionError("Clicking the profile row should change the profile");
+        }
+        // Hover a cell with a comment until its tooltip shows.
+        hover(context, "SHADOW_QUALITY");
+        context.waitTicks(15);
+        context.takeScreenshot("options-2-performance-profile-tooltip");
+
+        // Esc goes back to the main screen; then into the tone map screen.
+        context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+        context.waitTicks(3);
+        if (context.computeOnClient(mc -> options(mc).screenId()) != null) {
+            throw new AssertionError("Esc should go back to the main option screen");
+        }
+        clickCell(context, "[CAMERA_SETTINGS]", false);
+        clickCell(context, "[TONEMAP_SETTINGS]", false);
+        context.waitTicks(5);
+        // Drag T_SATURATION's slider to the far left with the real mouse.
+        int[] b = context.computeOnClient(mc -> options(mc).cellBounds("T_SATURATION"));
+        if (b == null) {
+            throw new AssertionError("T_SATURATION isn't drawn on the tone map screen");
+        }
+        moveTo(context, b[0] + b[2] / 2.0, b[1] + 10);
+        context.getInput().holdMouse(InputConstants.MOUSE_BUTTON_LEFT);
+        context.waitTicks(2);
+        moveTo(context, b[0] + 1, b[1] + 10);
+        context.waitTicks(2);
+        context.getInput().releaseMouse(InputConstants.MOUSE_BUTTON_LEFT);
+        context.waitTicks(2);
+        assertValue(context, "T_SATURATION", "0.00");
+        // TM_EXPOSURE: two right clicks, then Shift-click back to the default.
+        clickCell(context, "TM_EXPOSURE", true);
+        clickCell(context, "TM_EXPOSURE", true);
+        String exposureDefault = context.computeOnClient(mc -> options(mc).settings().options.defaultValue("TM_EXPOSURE"));
+        if (context.computeOnClient(mc -> options(mc).settings().current("TM_EXPOSURE")).equals(exposureDefault)) {
+            throw new AssertionError("Right clicks should change TM_EXPOSURE");
+        }
+        context.getInput().holdKey(InputConstants.KEY_LSHIFT);
+        clickCell(context, "TM_EXPOSURE", false);
+        context.getInput().releaseKey(InputConstants.KEY_LSHIFT);
+        assertValue(context, "TM_EXPOSURE", exposureDefault);
+        moveTo(context, 2, 2);
+        context.waitTicks(2);
+        context.takeScreenshot("options-3-tonemap-pending");
+
+        context.clickScreenButton("luxium.shaderPacks.apply");
+        context.waitTicks(5);
+        singleplayer.getConnection().waitForChunksRender();
+        context.waitTicks(30);
+        java.util.Map<String, String> written;
+        try {
+            written = io.github.hecbatista.metalshaders.pack.PackOptions.readSettings(settingsFile);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        System.out.println("[Luxium options] settings file after Apply: " + written);
+        if (!"0.00".equals(written.get("T_SATURATION")) || written.containsKey("TM_EXPOSURE")) {
+            throw new AssertionError("The settings file should hold T_SATURATION=0.00 and no TM_EXPOSURE: " + written);
+        }
+        assertActive(context, true);
+        context.takeScreenshot("options-4-applied-grey");
+
+        // Shift + Reset: every option back to its default, applied; the file goes away.
+        context.getInput().holdKey(InputConstants.KEY_LSHIFT);
+        context.waitTicks(2);
+        context.clickScreenButton("luxium.options.reset");
+        context.getInput().releaseKey(InputConstants.KEY_LSHIFT);
+        context.waitTicks(5);
+        singleplayer.getConnection().waitForChunksRender();
+        context.waitTicks(30);
+        if (Files.exists(settingsFile)) {
+            throw new AssertionError("Shift + Reset should delete " + settingsFile);
+        }
+        context.takeScreenshot("options-5-reset");
+        context.clickScreenButton("gui.done");
+        context.waitTicks(5);
+        if (context.computeOnClient(mc -> mc.gui.screen() != null)) {
+            throw new AssertionError("Done should close the option screens");
+        }
+        context.takeScreenshot("options-6-world");
+        System.out.println("[Luxium options] all steps passed");
+    }
+
+    private static io.github.hecbatista.metalshaders.gui.ShaderOptionsScreen options(net.minecraft.client.Minecraft mc) {
+        return (io.github.hecbatista.metalshaders.gui.ShaderOptionsScreen) mc.gui.screen();
+    }
+
+    private static void clickCell(ClientGameTestContext context, String key, boolean right) {
+        if (!context.computeOnClient(mc -> options(mc).clickCell(key, right))) {
+            throw new AssertionError("No " + key + " on the option screen " + context.computeOnClient(mc -> options(mc).screenId()));
+        }
+        context.waitTick();
+    }
+
+    private static String profileName(ClientGameTestContext context) {
+        return context.computeOnClient(mc -> options(mc).settings().profile().current().map(p -> p.name()).orElse("Custom"));
+    }
+
+    private static void assertValue(ClientGameTestContext context, String name, String value) {
+        String now = context.computeOnClient(mc -> options(mc).settings().current(name));
+        if (!now.equals(value)) {
+            throw new AssertionError(name + " should be " + value + ", is " + now);
+        }
+    }
+
+    /** Moves the real cursor to GUI coordinates (MouseHandler scales window coordinates by gui/screen). */
+    private static void moveTo(ClientGameTestContext context, double guiX, double guiY) {
+        double[] p = context.computeOnClient(mc -> new double[]{
+                guiX * mc.getWindow().getScreenWidth() / mc.getWindow().getGuiScaledWidth(),
+                guiY * mc.getWindow().getScreenHeight() / mc.getWindow().getGuiScaledHeight()});
+        context.getInput().setCursorPos(p[0], p[1]);
+    }
+
+    private static void hover(ClientGameTestContext context, String key) {
+        int[] b = context.computeOnClient(mc -> options(mc).cellBounds(key));
+        if (b == null) {
+            throw new AssertionError(key + " isn't drawn");
+        }
+        moveTo(context, b[0] + b[2] / 2.0, b[1] + 10);
     }
 
     /** The button showing {@code key}'s text anywhere in the screen's widget tree. */

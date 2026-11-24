@@ -336,6 +336,38 @@ GNU Lesser General Public License version 3
   of Iris's own widgets and textures, no transitions, a single footer layout, and no Download,
   drag-and-drop or settings button yet.
 
+  src/main/java/io/github/hecbatista/metalshaders/pack/PackMenus.java follows Iris's grammar for
+  a pack's option menus and profiles (net.irisshaders.iris.shaderpack.properties.ShaderProperties:
+  screen, screen.<NAME>, screen.columns, screen.<NAME>.columns, sliders and profile.<NAME>, read
+  from the unpreprocessed file in file order, OrderBackedProperties; values split on spaces;
+  shaderpack.option.menu.OptionMenuContainer, OptionMenuElementScreen and OptionMenuElement:
+  <empty>, <profile> dropped without profiles, [NAME] links, "*" for unused options, unknown
+  names as empty slots, no screen line meaning "*", 2 columns or 3 past 18 elements;
+  shaderpack.option.ProfileSet and Profile: !program.X, profile.X includes with cycle errors,
+  !OPT, OPT=value and OPT:value, bare on/off names, matching by most entries first, cycling with
+  wrap-around). Changed: "*" on several screens fills the first in file order, and a profile
+  included by two siblings isn't taken for a cycle.
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/PackLang.java follows how Iris reads a
+  pack's lang files (shaders/lang/<language>.lang, the player's language over en_us).
+  Changed: file names matched without regard to case.
+
+  src/main/java/io/github/hecbatista/metalshaders/gui/ShaderOptionsScreen.java and
+  gui/PackSettings.java follow the behaviour of Iris's option screens
+  (net.irisshaders.iris.gui.element.ShaderPackOptionList, gui.NavigationController,
+  gui.element.widget.BaseOptionElementWidget, BooleanElementWidget, StringElementWidget,
+  SliderElementWidget, LinkElementWidget, ProfileElementWidget, and Iris's option queue,
+  net.irisshaders.iris.Iris.getShaderPackOptionQueue): label left and value box right; On/Off
+  coloured only when not the default; value options cycling with left and right clicks, shown
+  as prefix + value label (or value + suffix) in 0xFF6688FF; sliders taking one step per allowed
+  value under the mouse; links with ">"; the profile row with "Custom" in yellow; labels in
+  0xFFFFC94A while changed; Shift-click to one default; Shift + Reset to reset everything and
+  apply; Back and Esc through the sub-screens; pending values kept until Apply or Cancel and
+  dropped when the pack changes; the settings file holding only values that differ from the
+  defaults, deleted when none do (Iris.tryUpdateConfigPropertiesFile). Changed: vanilla sprites
+  instead of Iris's textures, comments as a tooltip instead of a panel, no keyboard navigation
+  between cells yet, no Import/Export.
+
   src/main/java/io/github/hecbatista/metalshaders/gui/LuxiumKeys.java takes Iris 26.3's default
   key for the screen, I (net.irisshaders.iris.Iris, shaderpackScreenKeybind).
 

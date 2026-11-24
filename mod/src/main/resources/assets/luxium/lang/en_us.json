@@ -7,5 +7,14 @@
   "luxium.shaderPacks.apply": "Apply",
   "luxium.shaderPacks.openFolder": "Open Shader Pack Folder...",
   "key.category.luxium.luxium": "Luxium",
-  "key.luxium.shaderPacks": "Shader Packs"
+  "key.luxium.shaderPacks": "Shader Packs",
+  "luxium.shaderPacks.settings": "Shader Pack Settings...",
+  "luxium.options.back": "Back",
+  "luxium.options.reset": "Reset",
+  "luxium.options.reset.tooltip": "Hold SHIFT and click to reset ALL options to the pack's defaults and apply",
+  "luxium.options.setToDefault": "Set option to default value?",
+  "luxium.options.on": "On",
+  "luxium.options.off": "Off",
+  "luxium.options.profile": "Profile",
+  "luxium.options.profile.custom": "Custom"
 }
