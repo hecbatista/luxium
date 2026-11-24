@@ -99,6 +99,33 @@ class NameFixesTest {
         assertTrue(f.contains("textureSize(gtexture"), f);
     }
 
+    @Test
+    void blissPatternsAreRenamed() throws Exception {
+        String frag = """
+                #version 120
+                uniform sampler2D colortex4;
+                varying vec2 texCoord;
+                float bias() { return 0.5; }
+                float tanh(float x) { return (exp(x) - exp(-x)) / (exp(x) + exp(-x)); }
+                vec3 skyFromTex(vec2 p, sampler2D sampler) { return texture2D(sampler, p, bias()).rgb; }
+                void main() {
+                    gl_FragData[0] = vec4(skyFromTex(texCoord, colortex4) * tanh(1.0), 1.0);
+                }
+                """;
+        String f = ProgramTranslator.translate(VERT, frag).fragment();
+        assertTrue(f.contains("sampler2D luxium_sampler)") && f.contains("texture(luxium_sampler, p, luxium_bias())"), f);
+        assertTrue(f.contains("float luxium_bias()"), f);
+        assertTrue(f.contains("float luxium_tanh(float x)") && f.contains("* luxium_tanh(1.0)"), f);
+        // exp is a built-in the pack only calls: untouched.
+        assertTrue(f.contains("(exp(x) - exp(-x))"), f);
+    }
+
+    @Test
+    void builtinNamedFunctionIsKeptFromGlsl130On() {
+        String src = "#version 330\nvec3 fract(vec3 a, float b) { return a; }\nfloat f = fract(1.5);";
+        assertEquals(src, join(NameFixes.apply(GlslTokenizer.tokenize(src))));
+    }
+
     private static String join(List<GlslTokenizer.Token> tokens) {
         StringBuilder b = new StringBuilder();
         tokens.forEach(t -> b.append(t.text()));

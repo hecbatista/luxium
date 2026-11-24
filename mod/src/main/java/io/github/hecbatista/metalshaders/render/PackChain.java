@@ -987,6 +987,14 @@ public final class PackChain {
         if (name.startsWith("shadowtex")) {
             return solid(device, encoder, 0xFFFFFFFF);
         }
+        // No PBR resource pack: the atlas's normal and specular maps are Iris's defaults
+        // (PBRType: NORMAL 0x7F7FFFFF, a flat normal; SPECULAR 0, both written as RGBA).
+        if (name.equals("normals")) {
+            return solid(device, encoder, 0xFF7F7FFF);
+        }
+        if (name.equals("specular")) {
+            return solid(device, encoder, 0x00000000);
+        }
         return solid(device, encoder, 0xFF000000);
     }
 

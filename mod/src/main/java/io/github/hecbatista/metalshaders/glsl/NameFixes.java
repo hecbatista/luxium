@@ -23,6 +23,14 @@ import java.util.regex.Pattern;
  *   spirv-cross passes them through to MSL, where Apple's compiler rejects them. They become
  *   {@code luxium_<name>}. The list was measured with this machine's glslang, spirv-cross and
  *   {@code xcrun metal}: each word as a local, a global and a function name.</li>
+ *   <li><b>Vulkan GLSL type words</b> that OpenGL GLSL leaves free (Bliss's
+ *   {@code vec3 skyFromTex(vec3 pos, sampler2D sampler)}). The translated stage is compiled as
+ *   Vulkan GLSL, where glslang rejects them as names; they become {@code luxium_<name>} too.</li>
+ *   <li><b>A pack function named like a built-in</b> in a stage written for GLSL 1.20 or older
+ *   (Bliss's {@code float tanh(float x)} under {@code #version 120}). There a user function hides
+ *   every built-in of that name (tanh wasn't even a built-in before 1.30); from 1.30 on, and so
+ *   under the translator's {@code #version 450}, redefining one is an error. The function and
+ *   every use of its name in the stage become {@code luxium_<name>}, which keeps 1.20's meaning.</li>
  * </ul>
  * Our own code; the {@code texture} rule follows Iris's behaviour.
  */
@@ -46,11 +54,38 @@ public final class NameFixes {
             "metal", "simd", "mesh", "uint8_t", "int8_t", "uint16_t", "int16_t", "uint32_t", "int32_t",
             "uint64_t", "int64_t", "atomic", "fast", "texture1d", "texture1d_array", "texture2d",
             "texture2d_array", "texture2d_ms", "texture3d", "texturecube", "texturecube_array",
-            "texture_buffer", "depth2d", "depth2d_array", "depth2d_ms", "depthcube", "depthcube_array");
+            "texture_buffer", "depth2d", "depth2d_array", "depth2d_ms", "depthcube", "depthcube_array",
+            // Sampling options spirv-cross writes as calls (sample(s, uv, bias(b))): a pack function
+            // of the same name is ambiguous with metal::bias (Bliss's float bias()).
+            "bias", "level", "gradient2d", "gradient3d", "gradientcube", "min_lod_clamp");
+
+    /**
+     * Type words of Vulkan GLSL (GL_KHR_vulkan_glsl) that OpenGL GLSL doesn't reserve, so packs use
+     * them as names. Measured with this machine's glslang as a global name. Vulkan's texture types
+     * (texture2D, textureCube...) are left out: in OpenGL GLSL those names are calls, which the
+     * translator renames.
+     */
+    private static final Set<String> VULKAN_WORDS = Set.of("sampler", "samplerShadow", "subpassInput", "subpassInputMS");
 
     /** Metal's vector and matrix type names (float2, half3x3, uchar4...). */
     private static final Pattern METAL_VECTOR = Pattern.compile(
             "(float|half|int|uint|short|ushort|char|uchar|bool|long|ulong)[234](x[234])?");
+
+    /** GLSL 4.50's built-in non-texture functions (GLSL 4.60 spec, chapter 8.1-8.8 and 8.13). */
+    private static final Set<String> BUILTIN_FUNCTIONS = Set.of(
+            "radians", "degrees", "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh",
+            "asinh", "acosh", "atanh", "pow", "exp", "log", "exp2", "log2", "sqrt", "inversesqrt",
+            "abs", "sign", "floor", "trunc", "round", "roundEven", "ceil", "fract", "mod", "modf", "min",
+            "max", "clamp", "mix", "step", "smoothstep", "isnan", "isinf", "floatBitsToInt",
+            "floatBitsToUint", "intBitsToFloat", "uintBitsToFloat", "fma", "frexp", "ldexp",
+            "packUnorm2x16", "packSnorm2x16", "packUnorm4x8", "packSnorm4x8", "unpackUnorm2x16",
+            "unpackSnorm2x16", "unpackUnorm4x8", "unpackSnorm4x8", "packHalf2x16", "unpackHalf2x16",
+            "packDouble2x32", "unpackDouble2x32", "length", "distance", "dot", "cross", "normalize",
+            "faceforward", "reflect", "refract", "matrixCompMult", "outerProduct", "transpose",
+            "determinant", "inverse", "lessThan", "lessThanEqual", "greaterThan", "greaterThanEqual",
+            "equal", "notEqual", "any", "all", "not", "uaddCarry", "usubBorrow", "umulExtended",
+            "imulExtended", "bitfieldExtract", "bitfieldInsert", "bitfieldReverse", "bitCount",
+            "findLSB", "findMSB", "dFdx", "dFdy", "fwidth", "noise1", "noise2", "noise3", "noise4");
 
     static final String PREFIX = "luxium_";
 
@@ -73,6 +108,7 @@ public final class NameFixes {
             }
         }
         renameTexture &= !hasGtexture;
+        Set<String> hidden = declaredVersion(t) < 130 ? definedBuiltins(t) : Set.of();
         for (int i = 0; i < t.size(); i++) {
             Token tok = t.get(i);
             if (tok.kind() != Kind.IDENT) {
@@ -81,7 +117,7 @@ public final class NameFixes {
             String name = tok.text();
             if (renameTexture && name.equals("texture") && !isCall(t, i)) {
                 t.set(i, new Token(Kind.IDENT, "gtexture"));
-            } else if (isReserved(name)) {
+            } else if (isReserved(name) || hidden.contains(name)) {
                 t.set(i, new Token(Kind.IDENT, PREFIX + name));
             }
         }
@@ -100,7 +136,44 @@ public final class NameFixes {
     }
 
     static boolean isReserved(String name) {
-        return CPP_WORDS.contains(name) || METAL_WORDS.contains(name) || METAL_VECTOR.matcher(name).matches();
+        return CPP_WORDS.contains(name) || METAL_WORDS.contains(name) || VULKAN_WORDS.contains(name) || METAL_VECTOR.matcher(name).matches();
+    }
+
+    /** The number in the stage's {@code #version} line; 110 (GLSL's default) without one. */
+    static int declaredVersion(List<Token> t) {
+        for (Token tok : t) {
+            if (tok.kind() == Kind.DIRECTIVE && tok.text().startsWith("#version")) {
+                java.util.regex.Matcher m = Pattern.compile("#version\\s+(\\d+)").matcher(tok.text());
+                return m.find() ? Integer.parseInt(m.group(1)) : 110;
+            }
+        }
+        return 110;
+    }
+
+    /**
+     * Built-in names the stage defines as functions at file scope: a type name, the name, then
+     * "(", outside any braces.
+     */
+    private static Set<String> definedBuiltins(List<Token> t) {
+        Set<String> out = new java.util.HashSet<>();
+        int depth = 0;
+        Token previous = null;
+        for (int i = 0; i < t.size(); i++) {
+            Token tok = t.get(i);
+            if (tok.trivia() || tok.kind() == Kind.DIRECTIVE) {
+                continue;
+            }
+            if (tok.is("{")) {
+                depth++;
+            } else if (tok.is("}")) {
+                depth = Math.max(0, depth - 1);
+            } else if (depth == 0 && tok.kind() == Kind.IDENT && BUILTIN_FUNCTIONS.contains(tok.text())
+                    && previous != null && previous.kind() == Kind.IDENT && isCall(t, i)) {
+                out.add(tok.text());
+            }
+            previous = tok;
+        }
+        return out;
     }
 
     /** Whether the name at {@code i} is followed by "(" (comments and whitespace skipped). */

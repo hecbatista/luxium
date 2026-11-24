@@ -168,6 +168,28 @@ class ProgramTranslatorTest {
     }
 
     @Test
+    void uniformNamedLikeTheOtherStagesGlobalGetsAPlaceholderThere() throws Exception {
+        // Bliss v2.1.2's deferred: a global sunVec in the vertex stage, a uniform in the fragment.
+        ProgramTranslator.Result r = ProgramTranslator.translate("""
+                #version 120
+                uniform vec3 sunPosition;
+                vec3 sunVec = normalize(sunPosition), other;
+                void main() { gl_Position = vec4(sunVec, 1.0); }
+                """, """
+                #version 120
+                uniform vec3 sunVec;
+                void main() { gl_FragData[0] = vec4(sunVec, 1.0); }
+                """);
+        assertTrue(r.vertex().contains("    vec3 luxium_other_sunVec;") && r.vertex().contains("vec3 sunVec = normalize(sunPosition)"),
+                r.vertex());
+        assertTrue(r.fragment().contains("    vec3 sunVec;"), r.fragment());
+        assertTrue(r.uniforms().stream().anyMatch(u -> u.name().equals("sunVec")));
+        assertEquals(java.util.Set.of("sunPosition", "vec3", "sunVec", "other", "main"),
+                ProgramTranslator.fileScopeNames(GlslTokenizer.tokenize(
+                        "uniform vec3 sunPosition; vec3 sunVec = normalize(sunPosition), other; void main() { float local; }")));
+    }
+
+    @Test
     void uniformWithDifferentTypesInTheTwoStagesIsAnError() {
         assertThrows(ProgramTranslator.TranslationException.class, () -> ProgramTranslator.translate(
                 "uniform float x;\nvoid main() {}", "uniform int x;\nvoid main() {}"));

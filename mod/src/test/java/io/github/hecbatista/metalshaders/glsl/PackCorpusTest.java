@@ -2,10 +2,14 @@ package io.github.hecbatista.metalshaders.glsl;
 
 import io.github.hecbatista.metalshaders.pack.PackDirectives;
 import io.github.hecbatista.metalshaders.pack.PackInfo;
+import io.github.hecbatista.metalshaders.pack.PackOptions;
 import io.github.hecbatista.metalshaders.pack.PackPreprocessor;
 import io.github.hecbatista.metalshaders.pack.PackReader;
+import io.github.hecbatista.metalshaders.pack.ProgramSwitches;
+import io.github.hecbatista.metalshaders.pack.PropertiesPreprocessor;
 import io.github.hecbatista.metalshaders.pack.RenderTargetPlan;
 import io.github.hecbatista.metalshaders.pack.StandardDefines;
+import io.github.hecbatista.metalshaders.uniform.BiomeIds;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
@@ -145,14 +149,30 @@ class PackCorpusTest {
         }
 
         // Stages 3-6: translate each vertex+fragment pair and compile it to Metal.
+        // Programs shaders.properties switches off with the default options are skipped, as the
+        // game skips them (MetalShadersClient.program, ProgramSwitches).
+        PackOptions defaults = loadOptions(pack, detail);
+        java.util.Properties switches = defaults == null ? new java.util.Properties() : programSwitches(pack, defaults, detail);
         List<String> programs = new ArrayList<>();
+        int switchedOff = 0;
         for (String path : sources.keySet()) {
             if (path.endsWith(".vsh") && sources.containsKey(path.replaceFirst("\\.vsh$", ".fsh"))) {
                 String program = path.substring(0, path.length() - 4);
-                if (!TranslateRealPackTest.needsMissingMod(program.substring(program.lastIndexOf('/') + 1))) {
-                    programs.add(program);
+                String file = program.substring(program.lastIndexOf('/') + 1);
+                String folder = program.substring(1, program.lastIndexOf('/') + 1).replaceFirst("/$", "");
+                if (TranslateRealPackTest.needsMissingMod(file)) {
+                    continue;
                 }
+                if (defaults != null && !ProgramSwitches.enabled(switches, folder, file, defaults::booleanValue)) {
+                    detail.add("switched-off " + program);
+                    switchedOff++;
+                    continue;
+                }
+                programs.add(program);
             }
+        }
+        if (switchedOff > 0) {
+            unsupported = (unsupported.equals("none") ? "" : unsupported + ", ") + switchedOff + " switched off";
         }
         List<TranslateRealPackTest.Outcome> outcomes = Collections.synchronizedList(new ArrayList<>());
         programs.parallelStream().forEach(program -> outcomes.add(TranslateRealPackTest.run(program, sources, out)));
@@ -176,11 +196,36 @@ class PackCorpusTest {
                 unsupported, topError);
     }
 
+    /** shaders.properties preprocessed as the game does (MetalShadersClient), with the pack's default options. */
+    private static java.util.Properties programSwitches(Path pack, PackOptions options, List<String> detail) {
+        java.util.Properties props = new java.util.Properties();
+        try {
+            String text = PackReader.open(pack, (name, root, shaders) ->
+                    PackReader.readText(shaders, "/shaders.properties").orElse(""));
+            Map<String, String> defines = new java.util.LinkedHashMap<>(StandardDefines.forMac());
+            defines.putAll(BiomeIds.defines());
+            props.load(new java.io.StringReader(PropertiesPreprocessor.preprocess(text, options.propertyDefines(defines))));
+        } catch (Exception e) {
+            detail.add("properties-failed " + e);
+        }
+        return props;
+    }
+
+    private static PackOptions loadOptions(Path pack, List<String> detail) {
+        try {
+            return PackOptions.load(pack);
+        } catch (Exception e) {
+            detail.add("options-failed " + e);
+            return null;
+        }
+    }
+
     private static String table(List<Row> rows) {
         StringBuilder sb = new StringBuilder();
         sb.append("# Pack corpus scoreboard\n\n");
         sb.append("Stages that run without the game. \"Metal ok\" = translated, through glslang, spirv-cross and ")
-                .append("`xcrun metal`. Programs for mods we don't have (dh_, clrwl_, voxy) are left out. ")
+                .append("`xcrun metal`. Programs for mods we don't have (dh_, clrwl_, voxy) are left out, and so are programs ")
+                .append("shaders.properties switches off with the default options (\"Not translated\"). ")
                 .append("Details per pack: build/corpus/<pack>.txt.\n\n");
         sb.append("| Pack | Preprocess | Metal ok | Translate fail | glslang fail | spirv-cross fail | metal fail "
                 + "| In-game entry | Buffer plan | Not translated | Folders | Most common error |\n");

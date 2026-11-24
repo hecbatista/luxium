@@ -24,7 +24,9 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>Both stages get the <b>same</b> uniform block: every loose uniform either stage
  *       declares, sorted by name. Vulkan doesn't allow loose uniforms, and the two stages must
- *       agree on the block's layout.</li>
+ *       agree on the block's layout. A stage that declares its own global (not a uniform) under
+ *       a uniform's name from the other stage gets that member under a placeholder name
+ *       ({@code luxium_other_<name>}): same layout, no redefinition.</li>
  *   <li>Each value passed from the vertex to the fragment stage gets a location number from one
  *       shared table, by name, so both sides agree.</li>
  * </ul>
@@ -201,6 +203,10 @@ public final class ProgramTranslator {
         final Set<String> identifiers = new LinkedHashSet<>();
         final Set<String> declaredNames = new LinkedHashSet<>();
         final Map<String, Integer> identifierCount = new java.util.HashMap<>();
+        /** Every name declared at file scope (variables, functions, types), with or without a storage word. */
+        final Set<String> globalNames;
+        /** Names this stage declares as loose (non-opaque) uniforms. */
+        final Set<String> uniformNames = new LinkedHashSet<>();
 
         StageScan(Stage stage, String source) {
             this.stage = stage;
@@ -217,8 +223,21 @@ public final class ProgramTranslator {
             for (Declaration d : declarations) {
                 for (Declarator x : d.declarators()) {
                     declaredNames.add(x.name());
+                    if (d.storage().equals("uniform")) {
+                        uniformNames.add(x.name());
+                    }
                 }
             }
+            this.globalNames = fileScopeNames(tokens);
+        }
+
+        /**
+         * The block member name for uniform {@code name} in this stage: the name itself, or a
+         * placeholder when this stage declares its own global of that name (Bliss's deferred:
+         * {@code vec3 sunVec = ...} in the vertex stage, {@code uniform vec3 sunVec} in the fragment).
+         */
+        String memberName(String name) {
+            return globalNames.contains(name) && !uniformNames.contains(name) ? "luxium_other_" + name : name;
         }
 
         /**
@@ -232,6 +251,38 @@ public final class ProgramTranslator {
                     .filter(x -> x.name().equals(sampler)).count();
             return identifierCount.getOrDefault(sampler, 0) > declaredHere;
         }
+    }
+
+    /**
+     * Names declared at file scope: outside braces and parentheses, a name that follows a type name
+     * ({@code vec3 sunVec}, {@code float f(}), an array suffix ({@code float[2] w}) or a comma
+     * ({@code vec3 a, b}). Over-collects harmlessly (a type after a qualifier, a block or struct
+     * name): only names that are also uniforms matter.
+     */
+    static Set<String> fileScopeNames(List<Token> tokens) {
+        Set<String> names = new LinkedHashSet<>();
+        int braces = 0;
+        int parens = 0;
+        Token previous = null;
+        for (Token t : tokens) {
+            if (t.trivia() || t.kind() == Kind.DIRECTIVE) {
+                continue;
+            }
+            if (t.is("{")) {
+                braces++;
+            } else if (t.is("}")) {
+                braces = Math.max(0, braces - 1);
+            } else if (t.is("(")) {
+                parens++;
+            } else if (t.is(")")) {
+                parens = Math.max(0, parens - 1);
+            } else if (t.kind() == Kind.IDENT && braces == 0 && parens == 0 && previous != null
+                    && (previous.kind() == Kind.IDENT || previous.is("]") || previous.is(","))) {
+                names.add(t.text());
+            }
+            previous = t;
+        }
+        return names;
     }
 
     /** Metal's sampler slots per stage ([[sampler(0..15)]]). */
@@ -950,7 +1001,7 @@ public final class ProgramTranslator {
         if (!uniforms.isEmpty()) {
             h.append("layout(std140) uniform ").append(UNIFORM_BLOCK).append(" {\n");
             for (Uniform u : uniforms.values()) {
-                h.append("    ").append(u.type()).append(' ').append(u.name()).append(u.array()).append(";\n");
+                h.append("    ").append(u.type()).append(' ').append(s.memberName(u.name())).append(u.array()).append(";\n");
             }
             h.append("};\n");
         }
