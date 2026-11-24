@@ -292,6 +292,16 @@ public final class EntityTakeover {
      */
     private static final Family HAND_TEXT = new Family("gbuffers_hand", false, 16, DefaultVertexFormat.POSITION_TEX_LIGHTMAP_COLOR,
             Set.of("Position", "UV0", "UV2", "Color"), false);
+    /**
+     * Text in the world: signs, name tags, text displays (RenderTypes.text and textPolygonOffset,
+     * POSITION_TEX_LIGHTMAP_COLOR, blended). Iris IrisPipelines.getText: ShaderKey TEXT
+     * (ProgramId.EntitiesTrans) or, for a block entity, TEXT_BE (ProgramId.BlockTrans), both one
+     * tenth. Left to the game, text lands in a buffer only some packs read (Bliss's signs were blank).
+     */
+    private static final Family TEXT = new Family("gbuffers_entities_translucent", true, 11, DefaultVertexFormat.POSITION_TEX_LIGHTMAP_COLOR,
+            Set.of("Position", "UV0", "UV2", "Color"), true);
+    private static final Family TEXT_BE = new Family("gbuffers_block_translucent", true, 12, DefaultVertexFormat.POSITION_TEX_LIGHTMAP_COLOR,
+            Set.of("Position", "UV0", "UV2", "Color"), true);
     /** Entities and block entities in the shadow map (Iris ShaderKey SHADOW_ENTITIES_CUTOUT: ProgramId.ShadowEntities -> Shadow, one tenth). */
     private static final Family SHADOW_ENTITIES = new Family("shadow", false, 11, DefaultVertexFormat.ENTITY, ELEMENTS, true);
 
@@ -301,7 +311,8 @@ public final class EntityTakeover {
     }
     /** Every family (declared after all of them: static fields initialise in order). */
     private static final List<Family> ALL = List.of(SOLID, BLOCK, TRANSLUCENT, PARTICLES, PARTICLES_TRANSLUCENT, WEATHER, HAND, HAND_TRANSLUCENT,
-            SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING, SHADOW_ENTITIES, BLOCK_TRANSLUCENT, ENTITY_PATTERNS, HAND_TEXT);
+            SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING, SHADOW_ENTITIES, BLOCK_TRANSLUCENT, ENTITY_PATTERNS, HAND_TEXT,
+            TEXT, TEXT_BE);
 
     static {
         HAND.hand = true;
@@ -361,6 +372,8 @@ public final class EntityTakeover {
         prepareFamily(TRANSLUCENT, translucent != null ? translucent : solid, properties);
         prepareFamily(ENTITY_PATTERNS, translucent != null ? translucent : solid, properties,
                 translucent != null ? "gbuffers_entities_translucent" : "gbuffers_entities");
+        prepareFamily(TEXT, translucent != null ? translucent : solid, properties,
+                translucent != null ? "gbuffers_entities_translucent" : "gbuffers_entities");
         if (block != null) {
             prepareFamily(BLOCK, block, properties);
         }
@@ -372,6 +385,7 @@ public final class EntityTakeover {
      */
     public static void prepareBlockTranslucent(String name, String[] glsl, Properties properties) {
         prepareFamily(BLOCK_TRANSLUCENT, glsl, properties, name);
+        prepareFamily(TEXT_BE, glsl, properties, name);
     }
 
     /**
@@ -523,6 +537,9 @@ public final class EntityTakeover {
             }
             boolean blended = pipeline.getColorTargetStates().size() == 1 && pipeline.getColorTargetStates().getFirst().blendFunction().isPresent();
             return blended ? HAND_TRANSLUCENT : HAND;
+        }
+        if ((window == Phase.SOLID || window == Phase.TRANSLUCENT) && TEXT.format.equals(pipeline.getVertexFormatBinding(0))) {
+            return ids != null && ids.blockEntity() && TEXT_BE.prepared ? TEXT_BE : TEXT;
         }
         if (window == Phase.TRANSLUCENT) {
             return TRANSLUCENT;
@@ -825,7 +842,7 @@ public final class EntityTakeover {
             for (Program p : f.byAlpha.values()) {
                 for (ProgramTranslator.Sampler s : p.result().samplers()) {
                     if (!GAME_BOUND.contains(s.name())) {
-                        f.inputs.put(s.name(), PackChain.inputView(s.name()));
+                        f.inputs.put(s.name(), PackChain.inputView(s.name(), p.result().samplers()));
                     }
                 }
             }

@@ -9,6 +9,7 @@
     "BlockEntityRenderDispatcherMixin",
     "BlockEntityRenderStateAccessor",
     "CustomFeatureRendererIdsMixin",
+    "EndPortalRendererMixin",
     "EntityRenderDispatcherMixin",
     "FogRendererMixin",
     "GameRendererHandMixin",

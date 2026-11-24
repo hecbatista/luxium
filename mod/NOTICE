@@ -398,6 +398,39 @@ GNU Lesser General Public License version 3
   the map and dropping what the shadow program doesn't serve follows the same document ("What
   moves is submitted a second time, for the light"; "inside the light's walk a refusal is a drop").
 
+  Added for Bliss v2.1.2 (2026-11-23):
+  - pack/StandardDefines.java defines MC_HAND_DEPTH as net.irisshaders.iris.pathways
+    .HandRenderer.DEPTH (0.125), and MC_NORMAL_MAP, MC_SPECULAR_MAP, MC_RENDER_QUALITY and
+    MC_SHADOW_QUALITY as net.irisshaders.iris.gl.shader.StandardMacros does.
+  - render/PackChain.java gives the normals and specular samplers the default colours of
+    net.irisshaders.iris.pbr.texture.PBRType (NORMAL 0x7F7FFFFF, SPECULAR 0, read as RGBA by
+    NativeImageBackedSingleColorTexture).
+  - uniform/RenderMatrices.java computes sunPosition, moonPosition, shadowLightPosition and
+    upPosition as net.irisshaders.iris.uniforms.CelestialUniforms does (the -90 degree Y turn,
+    sunPathRotation about Z, the body's angle about X, (0, 100, 0, 1) for both bodies, isDay
+    from the sun angle). Changed: the End flash isn't used for shadowLightPosition.
+  - uniform/GameUniforms.java supplies thunderStrength, currentPlayerHealth and maxPlayerHealth
+    as net.irisshaders.iris.uniforms.IrisExclusiveUniforms does (clamped thunder; -1 outside
+    survival), and is_hurt as CommonUniforms.isHurt (hurtTime > 0).
+  - uniform/Formula.java and CustomUniforms.java follow Iris's accessors in
+    net.irisshaders.iris.parsing.IrisFunctions (.0-.3, .stpq, a matrix's .N is its column N),
+    its VectorConstructor (vec2/vec3/vec4 from scalars) and vecN uniform types, and
+    kroppeb.stareval.resolver.ExpressionResolver.resolveNumber (a whole number too big for an
+    int is a float). Still not supported: vector arithmetic and Iris's vectorized functions.
+  - render/TerrainTakeover.java reads alphaTest.<program>=false as "off", as
+    net.irisshaders.iris.shaderpack.properties.ShaderProperties does.
+  - mixin/EndPortalRendererMixin.java draws End portals and gateways the way Iris's
+    mixin.MixinTheEndPortalRenderer and MixinTheEndGatewayRenderer do while a pack runs: an
+    entity_solid draw with the End portal texture, the colour (0.075, 0.15, 0.2), full light, the
+    overlay off and UVs (0..0.2 per face) scrolling with a 100 second period; outline draws stay
+    the game's. Changed: one wrap of AbstractEndPortalRenderer.submitCube covers both blocks.
+  - render/EntityTakeover.java draws world text (pipeline/text, text_polygon_offset) with
+    gbuffers_entities_translucent, or gbuffers_block_translucent for a block entity, one tenth, as
+    net.irisshaders.iris.pipeline.IrisPipelines.getText and ShaderKey TEXT / TEXT_BE do.
+  - render/ShadowTargets.java binds the shadow sampler as net.irisshaders.iris.samplers
+    .IrisSamplers.addShadowSamplers does: shadowtex0, or shadowtex1 when the same program
+    declares watershadow.
+
 JCPP, https://github.com/shevek/jcpp (org.anarres:jcpp 1.4.14)
 Apache License 2.0
   Used as a library dependency, unmodified.

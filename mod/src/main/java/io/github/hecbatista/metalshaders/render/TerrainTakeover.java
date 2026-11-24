@@ -268,14 +268,18 @@ public final class TerrainTakeover {
         }
     }
 
-    /** {@code alphaTest.<program>=GREATER 0.1} (Iris AlphaTest syntax); only GREATER and off are read. */
+    /**
+     * {@code alphaTest.<program>=GREATER 0.1} (Iris AlphaTest syntax); only GREATER and off are read.
+     * "off" and "false" both turn the test off, as Iris's ShaderProperties reads them (Bliss writes
+     * {@code alphaTest.gbuffers_water=false}: its near water has alpha 1/255).
+     */
     static float alphaTest(java.util.Properties properties, String program, float fallback) {
         String v = properties.getProperty("alphaTest." + program);
         if (v == null) {
             return fallback;
         }
         String[] parts = v.strip().split("\\s+");
-        if (parts[0].equalsIgnoreCase("off")) {
+        if (parts[0].equalsIgnoreCase("off") || parts[0].equalsIgnoreCase("false")) {
             return Float.NaN;
         }
         if (parts.length == 2 && parts[0].equals("GREATER")) {
@@ -460,7 +464,7 @@ public final class TerrainTakeover {
         inputs.clear();
         for (ProgramTranslator.Sampler s : p.result().samplers()) {
             if (!ALBEDO.contains(s.name())) {
-                inputs.put(s.name(), PackChain.inputView(s.name()));
+                inputs.put(s.name(), PackChain.inputView(s.name(), p.result().samplers()));
             }
         }
     }

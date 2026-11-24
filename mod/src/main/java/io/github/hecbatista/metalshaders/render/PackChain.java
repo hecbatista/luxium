@@ -632,7 +632,7 @@ public final class PackChain {
             Map<String, GpuTextureView> inputs = new HashMap<>();
             for (ProgramTranslator.Sampler s : pass.program().samplers()) {
                 GpuTextureView custom = CustomTextures.override(stage, s.name(), writtenThisStage);
-                inputs.put(s.name(), custom != null ? custom : input(device, encoder, s.name()));
+                inputs.put(s.name(), custom != null ? custom : input(device, encoder, s.name(), readsWaterShadow(pass.program().samplers())));
             }
             if (pass.ubo() != null) {
                 try (GpuBufferSlice.MappedView v = pass.ubo().currentBuffer().map(false, true)) {
@@ -823,7 +823,7 @@ public final class PackChain {
         }
         GpuTextureView view = altIndex != null && halves.containsKey(altIndex) ? view(altIndex, false)
                 : show.equals("rawdepth") ? depthCopyView
-                : show.equals("maindepth") ? target.getDepthTextureView() : input(device, encoder, name);
+                : show.equals("maindepth") ? target.getDepthTextureView() : input(device, encoder, name, false);
         try (RenderPass rp = encoder.createRenderPass(() -> "Luxium debug show " + show, target.getColorTextureView(), Optional.empty())) {
             rp.setPipeline(showPipeline);
             rp.setUniform("shown", view, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
@@ -954,20 +954,29 @@ public final class PackChain {
         return plan.target(index).promoted();
     }
 
-    /** What a sampler name reads. Creates placeholders, so call it outside any render pass. */
-    public static GpuTextureView inputView(String name) {
+    /** Whether a program declares watershadow, which changes what its {@code shadow} reads. */
+    public static boolean readsWaterShadow(List<ProgramTranslator.Sampler> samplers) {
+        return samplers.stream().anyMatch(s -> s.name().equals("watershadow"));
+    }
+
+    /**
+     * What a sampler name reads. Creates placeholders, so call it outside any render pass.
+     *
+     * @param programSamplers every sampler of the program that reads it
+     */
+    public static GpuTextureView inputView(String name, List<ProgramTranslator.Sampler> programSamplers) {
         // Every caller is a gbuffers or shadow program: Iris's GBUFFERS_AND_SHADOW texture stage.
         GpuTextureView custom = CustomTextures.override(CustomTextures.Stage.GBUFFERS, name, java.util.Set.of());
         if (custom != null) {
             return custom;
         }
         GpuDevice device = RenderSystem.getDevice();
-        return input(device, device.createCommandEncoder(), name);
+        return input(device, device.createCommandEncoder(), name, readsWaterShadow(programSamplers));
     }
 
     /** What a sampler name reads. */
-    private static GpuTextureView input(GpuDevice device, CommandEncoder encoder, String name) {
-        GpuTextureView shadow = ShadowTargets.input(name);
+    private static GpuTextureView input(GpuDevice device, CommandEncoder encoder, String name, boolean waterShadow) {
+        GpuTextureView shadow = ShadowTargets.input(name, waterShadow);
         if (shadow != null) {
             return shadow;
         }

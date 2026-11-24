@@ -175,7 +175,7 @@ public final class SkyTakeover {
             for (ProgramTranslator.Sampler s : p.result().samplers()) {
                 if (!ALBEDO.contains(s.name())) {
                     inputs.computeIfAbsent(s.name(), n -> null);
-                    inputs.put(s.name(), PackChain.inputView(s.name()));
+                    inputs.put(s.name(), PackChain.inputView(s.name(), p.result().samplers()));
                 }
             }
         }
