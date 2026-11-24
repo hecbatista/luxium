@@ -99,6 +99,13 @@ public class ShaderPackScreen extends Screen {
     /** Writes the choice and reloads, if anything changed. Then the list shows it as applied. */
     public void apply() {
         String pack = pendingPack != null ? pendingPack : appliedPack;
+        if (pack.equals(appliedPack)) {
+            try {
+                PackSettings.applyPending();   // values picked in the option screens (Esc back here)
+            } catch (IOException | RuntimeException e) {
+                MetalShadersClient.LOGGER.error("Couldn't apply the pack settings", e);
+            }
+        }
         if (pendingEnabled == appliedEnabled && pack.equals(appliedPack)) {
             return;
         }

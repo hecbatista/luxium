@@ -118,6 +118,10 @@ public final class MetalShadersClient implements ClientModInitializer {
         }
     }
 
+    /** The pack's mesh directives were read for this load; waiting for the format if it changes. */
+    private static boolean meshDirectivesRead;
+    private static boolean wantedMeshFormatAsked;
+
     /** Set by {@link #requestReload}; acted on at the next frame, on the render thread. */
     private static volatile boolean reloadRequested;
 
@@ -161,6 +165,8 @@ public final class MetalShadersClient implements ClientModInitializer {
         customUniforms = null;
         packOptions = null;
         packLoaded = false;
+        meshDirectivesRead = false;
+        wantedMeshFormatAsked = false;
         chosenName = null;
         reportedFailure = null;
         lastChoice = null;
@@ -351,22 +357,42 @@ public final class MetalShadersClient implements ClientModInitializer {
             reloadRequested = false;
             LOGGER.info("Reloading the shader pack");
             unloadPack();
+            if (mc.level == null) {
+                // No world, so no chunks: decide the format now, and the next world's first
+                // section manager is built with it (no second rebuild once the world is in).
+                readMeshDirectives(shaderpacksDir());
+                wantedMeshFormat = packPresent;
+                meshDirectivesRead = true;
+            }
         }
         if (mc.level == null) {
             return;
         }
         if (!packLoaded) {
-            packLoaded = true;
-            boolean meshChanged = readMeshDirectives(FabricLoader.getInstance().getGameDir().resolve("shaderpacks"));
-            if (meshChanged || luxiumMeshFormat != packPresent) {
-                // Sodium builds a new section manager next frame and applies the format then.
-                wantedMeshFormat = packPresent;
-                LOGGER.info("Chunk meshes change ({}): rebuilding all chunks",
-                        packPresent ? "pack " + chosenName : "no pack, Sodium's own format");
-                mc.levelExtractor.allChanged();
+            if (!meshDirectivesRead) {
+                meshDirectivesRead = true;
+                boolean meshChanged = readMeshDirectives(shaderpacksDir());
+                if (meshChanged || luxiumMeshFormat != packPresent) {
+                    // Sodium builds a new section manager next frame and applies the format then.
+                    wantedMeshFormat = packPresent;
+                    LOGGER.info("Chunk meshes change ({}): rebuilding all chunks",
+                            packPresent ? "pack " + chosenName : "no pack, Sodium's own format");
+                    mc.levelExtractor.allChanged();
+                }
             }
-            loadPackValues();
-            keepImprovedTransparencyOff();
+            // The pack's programs read Luxium's vertex: load them only once Sodium meshes with it,
+            // or the frame in between would draw Sodium's 20-byte meshes through 36-byte pipelines.
+            if (luxiumMeshFormat == packPresent) {
+                packLoaded = true;
+                loadPackValues();
+                keepImprovedTransparencyOff();
+            } else if (!wantedMeshFormatAsked) {
+                wantedMeshFormatAsked = true;
+                if (wantedMeshFormat != packPresent) {   // read at the title screen for another world
+                    wantedMeshFormat = packPresent;
+                    mc.levelExtractor.allChanged();
+                }
+            }
         }
         // Step 7b: the folder whose programs draw this world; a different one is loaded in place
         // of the last (Iris keeps one pipeline per world; we keep only the current one).

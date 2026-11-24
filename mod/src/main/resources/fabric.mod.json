@@ -17,6 +17,9 @@
     ],
     "modmenu": [
       "io.github.hecbatista.metalshaders.compat.ModMenuEntry"
+    ],
+    "sodium:config_api_user": [
+      "io.github.hecbatista.metalshaders.compat.SodiumOptionsEntry"
     ]
   },
   "mixins": [

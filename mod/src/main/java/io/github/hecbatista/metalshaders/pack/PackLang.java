@@ -64,15 +64,27 @@ public final class PackLang {
                 for (Path file : (Iterable<Path>) files::iterator) {
                     String fileName = file.getFileName().toString().toLowerCase(Locale.ROOT);
                     if (fileName.equals(languageCode.toLowerCase(Locale.ROOT) + ".lang")) {
-                        player = Files.readString(file, java.nio.charset.StandardCharsets.UTF_8);
+                        player = readLenient(file);
                     }
                     if (fileName.equals("en_us.lang")) {
-                        english = Files.readString(file, java.nio.charset.StandardCharsets.UTF_8);
+                        english = readLenient(file);
                     }
                 }
             }
             return of(player, english);
         });
+    }
+
+    /**
+     * UTF-8, with bad bytes replaced rather than failing (Iris reads them through an
+     * InputStreamReader, which does the same), so one stray Latin-1 byte can't hide the menus.
+     */
+    private static @Nullable String readLenient(Path file) {
+        try {
+            return new String(Files.readAllBytes(file), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     public Optional<String> get(String key) {

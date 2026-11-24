@@ -430,7 +430,10 @@ public class ScreenshotTest implements FabricClientGameTest {
         assertActive(context, false);
         context.takeScreenshot("toggle-2b-off-later");
 
-        setShaders(context, singleplayer, true);
+        context.runOnClient(mc -> write(true));
+        captureFrames(context, "toggle-turning-on", 30);
+        singleplayer.getConnection().waitForChunksRender();
+        context.waitTicks(40);
         assertActive(context, true);
         context.takeScreenshot("toggle-3-on");
 
@@ -499,6 +502,30 @@ public class ScreenshotTest implements FabricClientGameTest {
             }
         });
         assertActive(context, true);
+        // The real path: Options > Video Settings is Sodium's screen (Sodium replaces the game's),
+        // where Luxium adds a "Shader Packs" page; click it with the real mouse.
+        context.setScreen(() -> new net.minecraft.client.gui.screens.options.OptionsScreen(null, net.minecraft.client.Minecraft.getInstance().options));
+        context.waitTicks(3);
+        context.clickScreenButton("options.video");
+        context.waitTicks(5);
+        String videoScreen = context.computeOnClient(mc -> mc.gui.screen().getClass().getName());
+        System.out.println("[Luxium menus] Options > Video Settings opens " + videoScreen);
+        context.takeScreenshot("menu-0-sodium-video-settings");
+        net.minecraft.client.gui.navigation.ScreenRectangle page = context.computeOnClient(mc -> findSodiumPage(mc.gui.screen()));
+        if (page == null) {
+            throw new AssertionError("No Luxium page in Sodium's Video Settings");
+        }
+        moveTo(context, page.position().x() + page.width() / 2.0, page.position().y() + page.height() / 2.0);
+        context.waitTick();
+        context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+        context.waitForScreen(io.github.hecbatista.metalshaders.gui.ShaderPackScreen.class);
+        context.waitTicks(3);
+        context.clickScreenButton("gui.cancel");
+        context.waitTicks(3);
+        System.out.println("[Luxium menus] Sodium's Shader Packs page opens the screen; back to " + context.computeOnClient(mc -> mc.gui.screen().getClass().getSimpleName()));
+        moveTo(context, 2, 2);
+
+        // The game's own Video Settings screen (if Sodium's isn't used) has the button too.
         context.setScreen(() -> {
             var mc = net.minecraft.client.Minecraft.getInstance();
             return new net.minecraft.client.gui.screens.options.VideoSettingsScreen(null, mc, mc.options);
@@ -694,10 +721,27 @@ public class ScreenshotTest implements FabricClientGameTest {
             throw new AssertionError("Shift + Reset should delete " + settingsFile);
         }
         context.takeScreenshot("options-5-reset");
+        // A value picked, then Esc up to the pack list and Done there: the value is applied.
+        clickCell(context, "TM_EXPOSURE", true);   // a slider: right click steps back one value
+        String exposure = context.computeOnClient(mc -> options(mc).settings().current("TM_EXPOSURE"));
+        context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+        context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+        context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+        context.waitForScreen(io.github.hecbatista.metalshaders.gui.ShaderPackScreen.class);
         context.clickScreenButton("gui.done");
         context.waitTicks(5);
+        singleplayer.getConnection().waitForChunksRender();
+        context.waitTicks(20);
+        try {
+            written = io.github.hecbatista.metalshaders.pack.PackOptions.readSettings(settingsFile);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        if (!exposure.equals(written.get("TM_EXPOSURE"))) {
+            throw new AssertionError("Done on the pack list should apply TM_EXPOSURE=" + exposure + ": " + written);
+        }
         if (context.computeOnClient(mc -> mc.gui.screen() != null)) {
-            throw new AssertionError("Done should close the option screens");
+            throw new AssertionError("Done should close the screens");
         }
         context.takeScreenshot("options-6-world");
         System.out.println("[Luxium options] all steps passed");
@@ -739,6 +783,22 @@ public class ScreenshotTest implements FabricClientGameTest {
             throw new AssertionError(key + " isn't drawn");
         }
         moveTo(context, b[0] + b[2] / 2.0, b[1] + 10);
+    }
+
+    /** Where Sodium's page list shows Luxium's external page (Sodium 0.9.2's ExternalPageEntryWidget). */
+    private static net.minecraft.client.gui.navigation.ScreenRectangle findSodiumPage(net.minecraft.client.gui.components.events.GuiEventListener node) {
+        if (node.getClass().getName().endsWith("PageListWidget$ExternalPageEntryWidget")) {
+            return node.getRectangle();
+        }
+        if (node instanceof net.minecraft.client.gui.components.events.ContainerEventHandler c) {
+            for (var child : c.children()) {
+                var found = findSodiumPage(child);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
     }
 
     /** The button showing {@code key}'s text anywhere in the screen's widget tree. */

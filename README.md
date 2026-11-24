@@ -89,7 +89,7 @@ The first time you enter each world (Overworld, Nether, End) after installing or
 
 Open the **Shader Packs** screen in any of three ways:
 
-- **Options → Video Settings → Shader Packs...**
+- **Options → Video Settings → Luxium → Shader Packs** (in the left column of Sodium's settings screen);
 - the **I** key in game (change it in Controls, under "Luxium");
 - **Mod Menu → Luxium → Configure**, if you use [Mod Menu](https://modrinth.com/mod/modmenu) (optional).
 

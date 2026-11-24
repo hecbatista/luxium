@@ -22,6 +22,8 @@ public final class PackSettings {
     private static final Map<String, String> PENDING = new LinkedHashMap<>();
     private static boolean resetAll;
     private static String pendingPack;
+    /** The settings the pending values were picked in (for applying them from the pack list). */
+    private static PackSettings pendingOwner;
 
     public final Path pack;
     public final PackOptions options;
@@ -47,7 +49,9 @@ public final class PackSettings {
             clearPending();
             pendingPack = name;
         }
-        return new PackSettings(pack, options, menus, PackLang.load(pack, languageCode));
+        PackSettings loaded = new PackSettings(pack, options, menus, PackLang.load(pack, languageCode));
+        pendingOwner = loaded;
+        return loaded;
     }
 
     // ---- values ---------------------------------------------------------------------------
@@ -77,6 +81,16 @@ public final class PackSettings {
 
     public static boolean hasPending() {
         return !PENDING.isEmpty() || resetAll;
+    }
+
+    /**
+     * Applies values picked in the option screens, if any (from the pack list's Apply and Done,
+     * as Iris reloads when its option queue isn't empty).
+     */
+    public static void applyPending() throws IOException {
+        if (pendingOwner != null && hasPending()) {
+            pendingOwner.apply(false);
+        }
     }
 
     public static void clearPending() {

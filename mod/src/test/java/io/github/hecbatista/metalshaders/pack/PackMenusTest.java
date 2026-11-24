@@ -136,4 +136,18 @@ class PackMenusTest {
         assertEquals("X", other.scan(values::get, n -> !n.equals("GONE")).current().orElseThrow().name());
         assertNull(parse("screen=FOG\n").scan(values::get, n -> true).next());
     }
+
+    @Test
+    void langPrefersThePlayersLanguageAndSurvivesBadBytes(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws java.io.IOException {
+        java.nio.file.Path pack = dir.resolve("Pack");
+        java.nio.file.Path lang = java.nio.file.Files.createDirectories(pack.resolve("shaders/lang"));
+        java.nio.file.Files.writeString(pack.resolve("shaders/composite.fsh"), "void main() {}");
+        java.nio.file.Files.writeString(lang.resolve("en_US.lang"), "option.FOG=Fog\noption.BLOOM=Bloom\n");
+        // Latin-1 "é" (0xE9) is not valid UTF-8.
+        java.nio.file.Files.write(lang.resolve("fr_fr.lang"), new byte[]{'o', 'p', 't', 'i', 'o', 'n', '.', 'F', 'O', 'G', '=', 'B', 'r', 'o', 'u', 'i', 'l', 'l', 'a', 'r', 'd', ' ', (byte) 0xE9, '\n'});
+        PackLang fr = PackLang.load(pack, "fr_fr");
+        assertTrue(fr.get("option.FOG").orElseThrow().startsWith("Brouillard"));
+        assertEquals("Bloom", fr.get("option.BLOOM").orElseThrow());   // falls back to English
+        assertEquals("Fog", PackLang.load(pack, "de_de").get("option.FOG").orElseThrow());
+    }
 }

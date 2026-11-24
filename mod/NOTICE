@@ -371,6 +371,11 @@ GNU Lesser General Public License version 3
   src/main/java/io/github/hecbatista/metalshaders/gui/LuxiumKeys.java takes Iris 26.3's default
   key for the screen, I (net.irisshaders.iris.Iris, shaderpackScreenKeybind).
 
+  src/main/java/io/github/hecbatista/metalshaders/compat/SodiumOptionsEntry.java adds a
+  "Shader Packs" page to Sodium's Video Settings through Sodium's config API, as Iris does
+  (net.irisshaders.iris.compat.sodium.config.IrisConfig: registerOwnModOptions with an external
+  page that opens the Shader Packs screen). Changed: only that page, no option overlays.
+
   src/main/java/io/github/hecbatista/metalshaders/mixin/VideoSettingsScreenMixin.java puts a
   "Shader Packs..." button in Video Settings, where Iris puts its own
   (net.irisshaders.iris.mixin.gui.MixinVideoSettingsScreen). Changed: added with
