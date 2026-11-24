@@ -64,6 +64,19 @@ public final class GameUniforms {
     private long lastFrameStart = -1;
     private float frameTime;
     private float frameTimeCounter;
+    // The sun's and moon's angles in degrees as the game gives them, for RenderMatrices.celestial.
+    private float sunAngleDegrees;
+    private float moonAngleDegrees;
+
+    /** This frame's EnvironmentAttributes.SUN_ANGLE, in degrees (the sky's rotation). */
+    public float sunAngleDegrees() {
+        return sunAngleDegrees;
+    }
+
+    /** This frame's EnvironmentAttributes.MOON_ANGLE, in degrees. */
+    public float moonAngleDegrees() {
+        return moonAngleDegrees;
+    }
     private int frameCounter;
 
     /** The value for a name, or null if this engine doesn't supply it (yet). */
@@ -105,7 +118,9 @@ public final class GameUniforms {
         values.put("moonPhase", cam.attributeProbe().getValue(EnvironmentAttributes.MOON_PHASE, partialTick).index());
 
         // CelestialUniforms.getSunAngle: (angle + 90) wrapped into 0..360, then / 360.
-        float c = cam.attributeProbe().getValue(EnvironmentAttributes.SUN_ANGLE, partialTick) + 90.0f;
+        sunAngleDegrees = cam.attributeProbe().getValue(EnvironmentAttributes.SUN_ANGLE, partialTick);
+        moonAngleDegrees = cam.attributeProbe().getValue(EnvironmentAttributes.MOON_ANGLE, partialTick);
+        float c = sunAngleDegrees + 90.0f;
         if (c < 0) {
             c += 360;
         } else if (c > 360) {
@@ -113,7 +128,7 @@ public final class GameUniforms {
         }
         values.put("sunAngle", c / 360.0f);
         // CelestialUniforms.getShadowAngle: the sun's angle by day, the moon's by night.
-        float moon = cam.attributeProbe().getValue(EnvironmentAttributes.MOON_ANGLE, partialTick) + 90.0f;
+        float moon = moonAngleDegrees + 90.0f;
         if (moon < 0) {
             moon += 360;
         } else if (moon > 360) {
@@ -145,6 +160,8 @@ public final class GameUniforms {
         // CommonUniforms: weather and sky
         float rain = clamp01(level.getRainLevel(partialTick));
         values.put("rainStrength", rain);
+        // IrisExclusiveUniforms.getThunderStrength, clamped as Iris does (servers can send more).
+        values.put("thunderStrength", clamp01(level.getThunderLevel(partialTick)));
         values.put("wetness", wetness(rain));
         Vector3fc sky = cam.attributeProbe().getValue(EnvironmentAttributes.SKY_COLOR, partialTick);
         values.put("skyColor", new float[]{sky.x(), sky.y(), sky.z()});
@@ -157,6 +174,13 @@ public final class GameUniforms {
         values.put("darknessFactor", darkness(living, partialTick));
         values.put("nightVision", nightVision(mc, living, partialTick));
         values.put("is_invisible", mc.player != null && mc.player.isInvisible());
+        // CommonUniforms.isHurt: the player's hurt animation is running (hurtTime, not isHurt()).
+        values.put("is_hurt", mc.player != null && mc.player.hurtTime > 0);
+        // IrisExclusiveUniforms: health as a fraction of the maximum, and the maximum; -1 outside
+        // survival or without a player.
+        boolean survival = mc.player != null && mc.gameMode != null && mc.gameMode.getPlayerMode().isSurvival();
+        values.put("currentPlayerHealth", survival ? mc.player.getHealth() / mc.player.getMaxHealth() : -1f);
+        values.put("maxPlayerHealth", survival ? mc.player.getMaxHealth() : -1f);
         values.put("playerMood", viewer instanceof LocalPlayer p ? clamp01(p.getCurrentMood()) : 0f);
         int[] eyes = eyeBrightness(level, viewer);
         values.put("eyeBrightness", eyes);

@@ -291,12 +291,15 @@ public final class MetalShadersClient implements ClientModInitializer {
             }
         }
         if (customUniforms != null) {
-            customUniforms.update(GAME_UNIFORMS::get, (Float) GAME_UNIFORMS.get("frameTime"));
+            customUniforms.update(MetalShadersClient::gameValue, (Float) GAME_UNIFORMS.get("frameTime"));
         }
         io.github.hecbatista.metalshaders.render.PerfStats.end(io.github.hecbatista.metalshaders.render.PerfStats.Section.VALUES, valuesStart);
         if (now - lastLogNanos > 5_000_000_000L) {
             lastLogNanos = now;
             LOGGER.info("Values: {}", describe());
+            if (customUniforms != null && !customUniforms.failing().isEmpty()) {
+                LOGGER.warn("Pack formulas failing this frame: {}", customUniforms.failing());
+            }
         }
     }
 
@@ -312,10 +315,20 @@ public final class MetalShadersClient implements ClientModInitializer {
 
     private static final RenderMatrices RENDER_MATRICES = new RenderMatrices();
 
+    /** A value the game supplies (not the pack's formulas): the frame's matrices, then the rest. */
+    private static Object gameValue(String name) {
+        Object matrix = RENDER_MATRICES.get(name);
+        return matrix != null ? matrix : GAME_UNIFORMS.get(name);
+    }
+
     /** Called by GameRendererRenderMixin with this frame's camera rotation and projection. */
     public static void captureMatrices(org.joml.Matrix4fc viewRotation, org.joml.Matrix4fc projection) {
         RENDER_MATRICES.capture(viewRotation, projection,
                 com.mojang.blaze3d.systems.RenderSystem.getDevice().getDeviceInfo().isZZeroToOne());
+        Object sunAngle = GAME_UNIFORMS.get("sunAngle");
+        RENDER_MATRICES.celestial(GAME_UNIFORMS.sunAngleDegrees(), GAME_UNIFORMS.moonAngleDegrees(),
+                sunAngle instanceof Float f && f * 360f < 180f,
+                io.github.hecbatista.metalshaders.uniform.ShadowMatrices.directives().sunPathRotation());
     }
 
     /** The pack in use, its layout, and its preprocessed shaders.properties (null: no pack). */
@@ -357,11 +370,14 @@ public final class MetalShadersClient implements ClientModInitializer {
                     entityIds.of("minecraft:pig"), entityIds.of("minecraft:slime"));
             LOGGER.info("item.properties: {} items numbered, {} entries skipped (block states aren't supported, as in Iris)",
                     itemIds.size(), itemIds.skipped().size());
-            customUniforms = CustomUniforms.load(PropertiesPreprocessor.preprocess(properties, propertyDefines),
-                    GAME_UNIFORMS.snapshot().keySet());
-            customUniforms.update(GAME_UNIFORMS::get, (Float) GAME_UNIFORMS.get("frameTime"));
+            java.util.Set<String> gameNames = new java.util.HashSet<>(GAME_UNIFORMS.snapshot().keySet());
+            gameNames.addAll(RenderMatrices.NAMES);
+            customUniforms = CustomUniforms.load(PropertiesPreprocessor.preprocess(properties, propertyDefines), gameNames);
+            // Logged before the first run: formulas reading the frame's matrices can't run until
+            // a frame has been drawn, which isn't a reason to call them dropped.
             LOGGER.info("Pack formulas: {} loaded, {} dropped: {}",
                     customUniforms.size(), customUniforms.dropped().size(), customUniforms.dropped());
+            customUniforms.update(MetalShadersClient::gameValue, (Float) GAME_UNIFORMS.get("frameTime"));
             packProperties = PropertiesPreprocessor.preprocess(properties, propertyDefines);
             packInfo = PackReader.read(pack);
             packPath = pack;

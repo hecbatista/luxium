@@ -757,6 +757,14 @@ public final class ProgramTranslator {
                 }
             }
         }
+        // A fragment input the vertex stage never writes and the fragment stage never reads is
+        // dropped: OpenGL only rejects inputs that are used (Bliss's water declares a Flashing
+        // varying it never uses), but Metal won't link a fragment input with no vertex output.
+        for (String name : fragmentIn) {
+            if (!vertexOut.contains(name) && !fs.mentions(name)) {
+                varyingTypes.remove(name);
+            }
+        }
         Map<String, Slot> varyings = new LinkedHashMap<>();
         int nextVarying = 0;
         for (Slot v : varyingTypes.values()) {

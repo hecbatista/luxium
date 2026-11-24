@@ -9,8 +9,12 @@ import java.util.Set;
  * One custom-uniform formula from a pack, like {@code smooth(4, eyeBrightness.y / 240.0, 5, 5)}:
  * parsed once into a tree, then evaluated every frame.
  * <p>
- * Values are Integer, Float or Boolean, plus int[]/float[] for vector inputs, which can only be
- * read with {@code .x .y .z .w} (or {@code .r .g .b .a}). Arithmetic follows Iris's types:
+ * Values are Integer, Float or Boolean, plus int[]/float[] for vectors and JOML matrices for
+ * the game's mat4 values. A vector's components are read with {@code .x .y .z .w}, {@code .r .g .b .a},
+ * {@code .s .t .p .q} or {@code .0 .1 .2 .3}; a matrix's {@code .N} is its column N, so
+ * {@code gbufferProjection.1.1} is column 1, row 1 (Iris's accessors, IrisFunctions). Vectors are
+ * built with {@code vec2/vec3/vec4} from scalars, as Iris's VectorConstructor does; there's no
+ * vector arithmetic. Arithmetic follows Iris's types:
  * int with int stays int (so {@code 7 / 2} is 3 and {@code %} is whole-number), anything with a
  * float becomes float. Functions and their quirks follow Iris's IrisFunctions and SmoothFloat
  * (see NOTICE); only the ones packs commonly use are here.
@@ -163,12 +167,12 @@ public final class Formula {
         Node postfix(Node node, int depth) throws FormulaException {
             while (true) {
                 skipSpace();
-                if (pos < s.length() && s.charAt(pos) == '.' && pos + 1 < s.length() && Character.isLetter(s.charAt(pos + 1))) {
+                if (pos < s.length() && s.charAt(pos) == '.' && pos + 1 < s.length() && Character.isLetterOrDigit(s.charAt(pos + 1))) {
                     pos++;
                     String component = identifier();
-                    int index = "xyzw".indexOf(component);
-                    if (index < 0) {
-                        index = "rgba".indexOf(component);
+                    int index = -1;
+                    for (String set : new String[]{"xyzw", "rgba", "stpq", "0123"}) {
+                        index = index >= 0 ? index : set.indexOf(component);
                     }
                     if (component.length() != 1 || index < 0) {
                         throw new FormulaException("Unsupported component ." + component);
@@ -252,7 +256,12 @@ public final class Formula {
             try {
                 return new Num(isFloat ? (Object) Float.parseFloat(n) : (Object) Integer.parseInt(n));
             } catch (NumberFormatException e) {
-                throw new FormulaException("Bad number " + n);
+                // Iris's ExpressionResolver.resolveNumber: a whole number too big for an int is a float.
+                try {
+                    return new Num(Float.parseFloat(n));
+                } catch (NumberFormatException e2) {
+                    throw new FormulaException("Bad number " + n);
+                }
             }
         }
     }
@@ -284,6 +293,10 @@ public final class Formula {
                 }
                 if (v instanceof int[] i && m.index() < i.length) {
                     yield i[m.index()];
+                }
+                if (v instanceof org.joml.Matrix4fc mat) {
+                    org.joml.Vector4f col = mat.getColumn(m.index(), new org.joml.Vector4f());
+                    yield new float[]{col.x, col.y, col.z, col.w};
                 }
                 throw new FormulaException("Component of something that isn't a vector");
             }
@@ -424,6 +437,17 @@ public final class Formula {
             allInts &= v[i] instanceof Integer;
         }
         return switch (c.name()) {
+            case "vec2", "vec3", "vec4" -> {
+                int size = c.name().charAt(3) - '0';
+                if (n != size) {
+                    throw new FormulaException(c.name() + "() takes " + size + " numbers");
+                }
+                float[] out = new float[size];
+                for (int i = 0; i < size; i++) {
+                    out[i] = num(v[i]);
+                }
+                yield out;
+            }
             case "abs" -> one(v, c) instanceof Integer i ? (Object) Math.abs(i) : (Object) Math.abs(num(v[0]));
             case "min", "max" -> {
                 if (n < 2) {

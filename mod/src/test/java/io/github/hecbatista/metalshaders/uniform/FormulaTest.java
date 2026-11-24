@@ -114,6 +114,7 @@ class FormulaTest {
                 uniform.float.b = a
                 uniform.float.frameCounter = 1
                 uniform.vec2.v = vec2(1, 2)
+                uniform.ivec3.w = 1
                 """, Set.of("cameraPosition", "frameCounter", "biome", "rainStrength"));
         c.update(GAME::get, 0.016f);
 
@@ -124,7 +125,26 @@ class FormulaTest {
         assertTrue(dropped.get("inIceCaves").contains("BIOME_ICE_CAVES"), dropped.toString());
         assertTrue(dropped.get("a").contains("cycle"), dropped.toString());
         assertTrue(dropped.get("frameCounter").contains("hide"), dropped.toString());
-        assertTrue(dropped.get("v").contains("vec2"), dropped.toString());
-        assertEquals(4, c.size());   // starter, moved, difX, framemod8 (variables count too)
+        assertTrue(dropped.get("w").contains("ivec3"), dropped.toString());
+        assertEquals(new float[]{1f, 2f}[1], ((float[]) c.get("v"))[1]);
+        assertEquals(5, c.size());   // starter, moved, difX, framemod8, v (variables count too)
+    }
+
+    @Test
+    void blissFormulas() throws Exception {
+        // Column-major like JOML: m.col.row. Translation sits in column 3.
+        org.joml.Matrix4f m = new org.joml.Matrix4f().translation(4f, 5f, 6f).m11(2f);
+        Map<String, Object> game = Map.of("gbufferProjection", m, "gbufferModelViewInverse", m,
+                "sunPosition", new float[]{0f, 100f, 0f}, "viewWidth", 800f, "viewHeight", 400f);
+        Formula.Names names = game::get;
+        assertEquals(2f, Formula.parse("gbufferProjection.1.1").evaluate(names, 0f));
+        assertEquals(4f, Formula.parse("gbufferModelViewInverse.3.0").evaluate(names, 0f));
+        assertEquals(1f, Formula.parse("sunPosition.y / sqrt(sunPosition.x*sunPosition.x + sunPosition.1*sunPosition.1)")
+                .evaluate(names, 0f));
+        assertEquals(1f, Formula.parse("clamp(0.5 * 1000000000000000000, 0.0, 1.0)").evaluate(names, 0f));
+        float[] v = (float[]) Formula.parse("vec2(1.0/viewWidth, 1.0/viewHeight)").evaluate(names, 0f);
+        assertEquals(1f / 400f, v[1]);
+        assertEquals(6f, ((float[]) Formula.parse("gbufferProjection.3").evaluate(names, 0f))[2]);
+        assertThrows(Formula.FormulaException.class, () -> Formula.parse("vec3(1, 2)").evaluate(names, 0f));
     }
 }

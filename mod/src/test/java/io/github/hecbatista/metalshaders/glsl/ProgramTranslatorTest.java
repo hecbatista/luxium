@@ -190,6 +190,24 @@ class ProgramTranslatorTest {
     }
 
     @Test
+    void unusedFragmentInputTheVertexNeverWritesIsDropped() throws Exception {
+        // Bliss v2.1.2's gbuffers_water: flat varying float Flashing, declared and never used.
+        ProgramTranslator.Result r = ProgramTranslator.translate("""
+                #version 120
+                varying vec2 uv;
+                void main() { uv = vec2(0.0); gl_Position = vec4(0.0); }
+                """, """
+                #version 120
+                varying vec2 uv;
+                flat varying float Flashing;
+                varying float used;
+                void main() { gl_FragData[0] = vec4(uv, used, 1.0); }
+                """);
+        assertFalse(r.fragment().contains("Flashing"), r.fragment());
+        assertTrue(r.fragment().contains(" in vec2 uv;") && r.fragment().contains(" in float used;"), r.fragment());
+    }
+
+    @Test
     void uniformWithDifferentTypesInTheTwoStagesIsAnError() {
         assertThrows(ProgramTranslator.TranslationException.class, () -> ProgramTranslator.translate(
                 "uniform float x;\nvoid main() {}", "uniform int x;\nvoid main() {}"));
