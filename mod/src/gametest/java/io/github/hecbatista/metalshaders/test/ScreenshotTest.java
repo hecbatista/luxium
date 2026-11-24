@@ -34,6 +34,21 @@ public class ScreenshotTest implements FabricClientGameTest {
             return;
         }
 
+        // With Mod Menu (LUXIUM_TEST_MODMENU=1): Configure from the title screen, before any world,
+        // turning shaders off and on again there (a reload with no world loaded).
+        if (FabricLoader.getInstance().isModLoaded("modmenu")) {
+            context.waitForScreen(net.minecraft.client.gui.screens.TitleScreen.class);
+            ModMenuCheck.run(context, "modmenu-title");
+            context.setScreen(() -> new io.github.hecbatista.metalshaders.gui.ShaderPackScreen(null));
+            context.runOnClient(mc -> ((io.github.hecbatista.metalshaders.gui.ShaderPackScreen) mc.gui.screen()).clickToggle());
+            context.clickScreenButton("luxium.shaderPacks.apply");
+            context.waitTicks(5);
+            context.runOnClient(mc -> ((io.github.hecbatista.metalshaders.gui.ShaderPackScreen) mc.gui.screen()).clickToggle());
+            context.clickScreenButton("gui.done");
+            context.waitTicks(5);
+            context.setScreen(() -> new net.minecraft.client.gui.screens.TitleScreen());
+        }
+
         boolean walkOnly = System.getenv("LUXIUM_TEST_WALK_ONLY") != null;
         // The usual test world is flat (Fabric's consistent settings); the walk-only run uses a
         // normally generated world with a fixed seed, like a player's.
@@ -574,6 +589,11 @@ public class ScreenshotTest implements FabricClientGameTest {
         }
         context.takeScreenshot("menu-8-f3");
         context.runOnClient(mc -> mc.debugEntries.setOverlayVisible(false));
+        if (FabricLoader.getInstance().isModLoaded("modmenu")) {
+            context.setScreen(() -> null);
+            ModMenuCheck.run(context, "modmenu-world");
+            context.setScreen(() -> null);
+        }
         System.out.println("[Luxium menus] all steps passed");
     }
 

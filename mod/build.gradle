@@ -71,6 +71,11 @@ fabricApi {
 
 dependencies {
 	gametestImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	gametestCompileOnly("com.terraformersmc:modmenu:${project.modmenu_version}") { transitive = false }
+	// LUXIUM_TEST_MODMENU=1: run the game tests with Mod Menu installed (menus slice D).
+	if (System.getenv("LUXIUM_TEST_MODMENU") != null) {
+		gametestRuntimeOnly("com.terraformersmc:modmenu:${project.modmenu_version}") { transitive = false }
+	}
 }
 
 // Fail early, with a clear message, if Metallum hasn't been built yet.

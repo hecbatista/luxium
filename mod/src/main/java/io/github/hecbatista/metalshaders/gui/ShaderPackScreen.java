@@ -219,6 +219,10 @@ public class ShaderPackScreen extends Screen {
                 packs = List.of();
             }
             toggle.active = !packs.isEmpty();
+            // An empty shaderPack means the first pack found (LuxiumConfig): show that one as applied.
+            if (appliedPack.isEmpty() && !packs.isEmpty()) {
+                appliedPack = packs.getFirst().getFileName().toString();
+            }
             String chosen = pendingPack != null ? pendingPack : packs.isEmpty() ? "" : packs.getFirst().getFileName().toString();
             for (Path pack : packs) {
                 PackEntry entry = new PackEntry(pack.getFileName().toString());

@@ -79,15 +79,43 @@ Frame pacing is steadier too: Luxium's worst frame was 20 ms, against 85 ms for 
 
    Fabric API isn't needed.
 3. **Put a shader pack** (the `.zip`, unopened) in the `shaderpacks` folder next to `mods`. Complementary Unbound is the best-tested pack.
-4. **Start the game.** Metallum switches the game to Metal by itself; there's nothing to select. Luxium uses the first pack it finds, or the one named in `config/luxium.properties` (below).
+4. **Start the game.** Metallum switches the game to Metal by itself; there's nothing to select. Luxium uses the first pack it finds; pick another one in the Shader Packs screen (below).
 
 Don't install Iris or OptiFine next to Luxium: they need OpenGL, and Metallum replaces it.
 
 The first time you enter each world (Overworld, Nether, End) after installing or updating, loading takes a few extra seconds while macOS compiles the shaders. Later loads are quick.
 
-## ⚙️ Choosing a pack and turning shaders off
+## ⚙️ Shader menus
 
-At its first start, Luxium writes `config/luxium.properties`:
+Open the **Shader Packs** screen in any of three ways:
+
+- **Options → Video Settings → Shader Packs...**
+- the **I** key in game (change it in Controls, under "Luxium");
+- **Mod Menu → Luxium → Configure**, if you use [Mod Menu](https://modrinth.com/mod/modmenu) (optional).
+
+On that screen:
+
+- the top row turns shaders **on or off**;
+- click a pack to use it (that also turns shaders on). The pack in use is shown in yellow;
+- **Shader Pack Settings...** opens the pack's own settings menus;
+- **Apply** takes effect right away, without a restart (the world pauses for a second or two while the pack reloads); **Done** applies and closes; **Cancel** drops your changes.
+
+In a pack's settings menus, which work as they do in Iris:
+
+- **left click** a setting for its next value and **right click** for the previous one; drag **sliders**;
+- a setting's name turns **yellow** until you apply the change;
+- **Shift + click** puts one setting back to its default; hold **Shift** and click **Reset** to put the whole pack back to its defaults;
+- hover a setting for its description; **Esc** goes back up one menu;
+- the **Profile** row switches between the pack's presets (Complementary's run from Potato to Ultra and its own "Complementary").
+
+Settings are saved in `shaderpacks/<pack>.txt`, the same file Iris uses, so they carry over between Iris and Luxium. Only settings you changed from the pack's defaults are written there.
+
+Press **F3** to see Luxium's status: the version, and whether shaders are on and with which pack.
+
+<details>
+<summary>Changing settings in files instead</summary>
+
+Luxium keeps the screen's choices in `config/luxium.properties`:
 
 ```properties
 enableShaders=true
@@ -95,16 +123,15 @@ shaderPack=ComplementaryUnbound_r5.10.zip
 # Packs found: ComplementaryUnbound_r5.10.zip
 ```
 
-- `enableShaders=false` turns shaders off: the game renders as if Luxium weren't installed.
-- `shaderPack` is the pack to use, exactly as it's named in `shaderpacks/`.
-- Restart the game after changing either.
+`enableShaders=false` turns shaders off (the game renders as if Luxium weren't installed), and `shaderPack` is the pack to use, exactly as it's named in `shaderpacks/`. Pack settings are `NAME=value` lines in `shaderpacks/<pack>.txt`; Luxium lists every setting and its allowed values in `shaderpacks/<pack>.luxium-options.txt`. Changes made in these files apply the next time the game starts.
 
-Pack settings go in `shaderpacks/<pack>.txt`, the same file Iris uses, so settings carry over from Iris. Luxium lists every setting and its allowed values in `shaderpacks/<pack>.luxium-options.txt`. In-game shader menus are planned for the release after the alpha.
+</details>
 
 ## 🐞 Known issues
 
 - **Pack support:** Complementary Unbound is the only pack checked closely against Iris; see the compatibility table above. Packs that need features Luxium doesn't have yet fall back to vanilla rendering with a notice.
-- **No in-game shader menu yet.** Settings are changed in files and need a restart (see above). Menus are planned for the next release.
+- **Complementary's Very High, Ultra and Complementary profiles** turn on Colored Lighting, which the pack itself doesn't support on Macs: it then shows "Important Error: Colored Lighting is not supported on Apple devices". Turn **Advanced Color Tracing** off in the pack's Performance settings, or use the High profile (the default). Iris shows the same message on a Mac.
+- **Settings menus:** moving between individual settings with the keyboard isn't supported yet (use the mouse), and there's no import/export of settings.
 - **Not supported yet:**
   - chunk fade-in (new chunks pop in instead of fading through the fog);
   - packs' `customTexture.*` and raw custom textures;
