@@ -42,8 +42,12 @@ import java.util.Set;
  * target is off once an earlier pass of the same stage has written that target this frame
  * ({@code CompositeRenderer}'s flippedAtLeastOnce); filtering from {@code <png>.mcmeta}, nearest
  * and repeat unless it says {@code blur} or {@code clamp} ({@code NativeImageBackedCustomTexture}).
+ * {@code customTexture.<sampler>=<png>} (Solas: {@code milkyWayTex}) binds the image to that
+ * sampler name in every program, wherever the name isn't a render target (Iris
+ * {@code IrisSamplers.addCustomTextures}).
  * Iris's raw-texture form ({@code texture.<stage>.<name>=<file> TEXTURE_2D ...}) and
- * {@code minecraft:} resource paths aren't supported yet; they are logged and skipped.
+ * {@code minecraft:} resource paths aren't supported yet, for either directive; they are logged
+ * and skipped.
  */
 public final class CustomTextures {
     public enum Stage { SETUP, BEGIN, SHADOWCOMP, PREPARE, GBUFFERS, DEFERRED, COMPOSITE }
@@ -53,6 +57,12 @@ public final class CustomTextures {
 
     /** Per stage: sampler key (see {@link #key}) to the image. */
     private static final Map<Stage, Map<String, Entry>> byStage = new EnumMap<>(Stage.class);
+    /**
+     * {@code customTexture.<sampler>=<png>}: sampler name to the image, in every program of every
+     * stage (Iris CustomTextureManager's irisCustomTextures, bound by IrisSamplers.addCustomTextures
+     * after the render targets, so a render-target name keeps its target).
+     */
+    private static final Map<String, Entry> byName = new HashMap<>();
     /** The sampler each loaded image (and noisetex) is read with. */
     private static final Map<GpuTextureView, GpuSampler> samplerOf = new IdentityHashMap<>();
 
@@ -131,8 +141,30 @@ public final class CustomTextures {
             }
         }
         for (String name : props.stringPropertyNames()) {
-            if (name.startsWith("customTexture.")) {
-                MetalShadersClient.LOGGER.warn("{}: customTexture isn't supported yet (its sampler reads black)", name);
+            if (!name.startsWith("customTexture.")) {
+                continue;
+            }
+            // Iris ShaderProperties: the sampler name is everything after the prefix, uncut.
+            String sampler = name.substring("customTexture.".length());
+            String value = props.getProperty(name).strip();
+            if (value.contains(" ")) {
+                MetalShadersClient.LOGGER.warn("Custom texture {} = {}: raw textures aren't supported yet, skipped", name, value);
+                continue;
+            }
+            if (value.contains(":")) {
+                MetalShadersClient.LOGGER.warn("Custom texture {} = {}: resource-pack textures aren't supported yet, skipped", name, value);
+                continue;
+            }
+            try {
+                Entry e = loadPng(device, pack, value);
+                if (e == null) {
+                    MetalShadersClient.LOGGER.warn("Custom texture {} = {}: no such file in the pack, skipped", name, value);
+                    continue;
+                }
+                byName.put(sampler, e);
+                loaded.add(name + "=" + value);
+            } catch (Exception ex) {
+                MetalShadersClient.LOGGER.warn("Custom texture {} = {}: {}", name, value, ex.toString());
             }
         }
         if (!loaded.isEmpty()) {
@@ -194,6 +226,12 @@ public final class CustomTextures {
         return index != null && writtenBefore.contains(index) ? null : e.view();
     }
 
+    /** The {@code customTexture.<name>} image a sampler of that exact name reads, or null. */
+    static @Nullable GpuTextureView byName(String samplerName) {
+        Entry e = byName.get(samplerName);
+        return e != null ? e.view() : null;
+    }
+
     /** Registers the sampler a non-custom image is read with (noisetex: Iris NativeImageBackedNoiseTexture, linear and repeat). */
     static void setSampler(GpuTextureView view, GpuSampler sampler) {
         samplerOf.put(view, sampler);
@@ -221,6 +259,11 @@ public final class CustomTextures {
             }
         }
         byStage.clear();
+        for (Entry e : byName.values()) {
+            e.view().close();
+            e.texture().close();
+        }
+        byName.clear();
         samplerOf.clear();   // noisetex's too: PackChain registers it again with the next world's
     }
 }

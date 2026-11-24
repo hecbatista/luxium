@@ -65,6 +65,10 @@ public final class StandardDefines {
         // the fallback that mixes a translucency tint into colortex3 for every entity; under Iris
         // opaque entities write 0 there (found with mod/scripts/pipecheck, 2026-11-23).
         defines.put("IRIS_FEATURE_ENTITY_TRANSLUCENT", "");
+        // Iris StandardMacros: OptiFine's render and shadow quality multipliers, always 1.0 under
+        // Iris. Solas reads MC_RENDER_QUALITY in its sharpen filter (final).
+        defines.put("MC_RENDER_QUALITY", "1.0");
+        defines.put("MC_SHADOW_QUALITY", "1.0");
         for (int i = 0; i < RENDER_STAGES.size(); i++) {
             defines.put("MC_RENDER_STAGE_" + RENDER_STAGES.get(i), Integer.toString(i));
         }

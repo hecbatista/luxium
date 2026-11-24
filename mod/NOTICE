@@ -52,7 +52,8 @@ GNU Lesser General Public License version 3
   render stage table (names and their order) of the enum
   net.irisshaders.iris.pipeline.WorldRenderingPhase, used as MC_RENDER_STAGE_* values, and
   formats MC_VERSION and IRIS_VERSION the way
-  net.irisshaders.iris.gl.shader.StandardMacros.formatVersionString does. Which other names
+  net.irisshaders.iris.gl.shader.StandardMacros.formatVersionString does. MC_RENDER_QUALITY and
+  MC_SHADOW_QUALITY take StandardMacros's value, 1.0. Which other names
   are defined is our own choice, documented in the file.
 
   src/main/java/io/github/hecbatista/metalshaders/glsl/ProgramTranslator.java follows two
@@ -325,8 +326,12 @@ GNU Lesser General Public License version 3
   (pipeline.CompositeRenderer, flippedAtLeastOnce), PNG filtering from the .mcmeta file,
   nearest and repeat unless "blur" or "clamp" (targets.backed.NativeImageBackedCustomTexture),
   and noisetex read linear and repeating (targets.backed.NativeImageBackedNoiseTexture).
-  Changed: raw-texture directives, minecraft: resource paths and customTexture.* aren't
-  supported yet and are skipped with a warning.
+  customTexture.<sampler>=<png> follows ShaderProperties (the sampler name is the rest of the
+  key, uncut), pipeline.CustomTextureManager (irisCustomTextures) and
+  samplers.IrisSamplers.addCustomTextures (bound by name in every program, after the render
+  targets); PackChain.input looks it up in that order.
+  Changed: raw-texture directives and minecraft: resource paths aren't supported yet, for
+  either directive, and are skipped with a warning.
 
   src/main/java/io/github/hecbatista/metalshaders/mixin/GameRendererRenderMixin.java (the view
   bobbing part) follows net.irisshaders.iris.mixin.MixinModelViewBobbing: while a pack is in
