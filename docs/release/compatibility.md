@@ -9,6 +9,55 @@ one at a time with the flow in `mod/scripts/PACK-TESTING.md`:
 Earlier results (Complementary Unbound r5.10, Complementary Reimagined r5.9.3, Bliss v2.1.2,
 Solas v3.9) are in `docs/release/alpha.md`, "Fails safe".
 
+## Solas v3.9 (2026-11-23): renders; no Iris reference possible on macOS
+
+- Offline: 163/163 programs preprocess; **65/65** reach Metal (62/65 before: 3 ×
+  `'MC_RENDER_QUALITY' : undeclared identifier`, its sharpen filter in `final`).
+- Fixes:
+  - `pack/StandardDefines.java`: `MC_RENDER_QUALITY` and `MC_SHADOW_QUALITY`, 1.0 as Iris's
+    StandardMacros.
+  - `render/CustomTextures.java`, `PackChain.input`: `customTexture.<sampler>=<png>` (Solas:
+    `milkyWayTex`), bound by name in every program after the render targets, as Iris's
+    `IrisSamplers.addCustomTextures`. Raw and `minecraft:` forms are still skipped.
+  - `uniform/GameUniforms.java`, `mixin/FogRendererMixin.java`, `UniformWriter`: `gl_Fog`
+    (color, density, start, end, scale), `fogStart`, `fogEnd`, `fogDensity`, from FogData's
+    environmental start/end as Iris and Sodium take them. `gl_Fog` used to be declared but
+    left at zero; Solas's "modded fog" then saw `gl_Fog.end = 0` and fogged every pixel fully
+    (first run: daytime scenes solid pale white, night near-black). Complementary reads
+    `gl_Fog` only for lava fog and the End's dragon check, which now get Iris's values too.
+  - `render/EntityTakeover.java`: the albedo rename no longer maps `texture` → `Sampler0`. It
+    renamed every identifier, so `texture()` calls became `Sampler0()` and Solas's shadow
+    entity variants didn't compile (`'Sampler0' : can't use function syntax on variable`).
+    NameFixes already turns a sampler named `texture` into `gtexture`.
+- In game (`gametest.sh pack-solas2`, stops build zoo, zoo, beach, night): loads from the
+  root `shaders/` folder, 29 formulas loaded, 0 dropped, **0 validation messages**, every
+  program and variant compiles. Unit tests 112 pass; Complementary Unbound still 90/90.
+- Compared with vanilla on the same stops (`mod/build/compare/solas/`): geometry, entities,
+  block entities, signs, portals and translucents all there; sun shadows, volumetric clouds,
+  coloured block light in the night hut, reflective water, and the Milky Way texture with
+  the pack's round moon at night (offset from vanilla's by `sunPathRotation=-40`).
+- Flicker: still clips pass (zoo 0.089%, night 0.032% / 0.043%, beach still 0.0005%, sky
+  0%). The beach sprint (moving camera) and the Nether portal block (animated) flag, as
+  expected; vanilla flags on the same moving clips.
+- **No Iris comparison:** Iris 1.11.7 can't run Solas on macOS.
+  - Default settings: Iris's `shaders.properties` preprocessing treats the bare
+    `#define VX_SUPPORT` as an on option, so it creates the voxel images, and
+    `GlImage.clear` → `glClearTexImage` (GL 4.4) fails on Apple's GL 4.1; Iris disables
+    shaders. (Solas's GLSL turns VX_SUPPORT off under `MC_OS_MAC`, but the properties don't see that.)
+  - With `VX_SUPPORT=false` in the pack settings: Apple's GL compiler crashes (SIGSEGV in
+    `libGLProgrammability`, `glpLLVMGetFunctionGlobalVariableUse`) linking the deferred programs.
+- Differences and open items:
+  - Solas has no `gbuffers_skybasic`/`gbuffers_skytextured`; Iris falls back to
+    `gbuffers_basic`/`gbuffers_textured`, Luxium's sky takeover doesn't (it also takes only
+    colortex0, and `gbuffers_textured` writes 0 and 1). No visible effect in the Overworld:
+    `deferred1` replaces every sky pixel with its own sky. The Nether and End aren't checked.
+  - Night vision brightens the scene only a little (Solas adds a small ambient term, by design).
+  - The End gateway beam shows in vanilla's end-portal shot, not in Luxium's; the beam lasts
+    ~10 s after placing and Luxium reached that stop 6 s later, so likely timing. Unverified.
+  - The beach-sprint shot ends over water (vanilla: on the sand), the tour-speed difference
+    seen with BSL.
+  - Not compared: caves, rain/snow, the Nether and the End.
+
 ## Complementary Reimagined r5.10 (2026-11-23): works
 
 - Offline: 219/219 programs preprocess; **90/90** reach Metal.
