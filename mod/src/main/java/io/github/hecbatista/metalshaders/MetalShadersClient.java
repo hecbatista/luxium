@@ -297,9 +297,13 @@ public final class MetalShadersClient implements ClientModInitializer {
         if (now - lastLogNanos > 5_000_000_000L) {
             lastLogNanos = now;
             LOGGER.info("Values: {}", describe());
-            if (customUniforms != null && !customUniforms.failing().isEmpty()) {
-                LOGGER.warn("Pack formulas failing this frame: {}", customUniforms.failing());
+            // Only formulas still failing five seconds later: before the first frame is drawn,
+            // the ones that read its matrices can't run yet.
+            java.util.Map<String, String> failing = customUniforms == null ? java.util.Map.of() : customUniforms.failing();
+            if (!failing.isEmpty() && failing.keySet().equals(lastFailing)) {
+                LOGGER.warn("Pack formulas still failing: {}", failing);
             }
+            lastFailing = failing.keySet();
         }
     }
 
@@ -314,6 +318,8 @@ public final class MetalShadersClient implements ClientModInitializer {
     }
 
     private static final RenderMatrices RENDER_MATRICES = new RenderMatrices();
+    /** The formulas that failed at the last 5-second check. */
+    private static java.util.Set<String> lastFailing = java.util.Set.of();
 
     /** A value the game supplies (not the pack's formulas): the frame's matrices, then the rest. */
     private static Object gameValue(String name) {

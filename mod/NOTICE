@@ -426,7 +426,9 @@ GNU Lesser General Public License version 3
     the game's. Changed: one wrap of AbstractEndPortalRenderer.submitCube covers both blocks.
   - render/EntityTakeover.java draws world text (pipeline/text, text_polygon_offset) with
     gbuffers_entities_translucent, or gbuffers_block_translucent for a block entity, one tenth, as
-    net.irisshaders.iris.pipeline.IrisPipelines.getText and ShaderKey TEXT / TEXT_BE do.
+    net.irisshaders.iris.pipeline.IrisPipelines.getText and ShaderKey TEXT / TEXT_BE do; text
+    submits keep the ids current when they were made (mixin/ModelSubmitIdsMixin.java,
+    mixin/TextFeatureRendererIdsMixin.java), like Iris's ModelStorage capture.
   - render/ShadowTargets.java binds the shadow sampler as net.irisshaders.iris.samplers
     .IrisSamplers.addShadowSamplers does: shadowtex0, or shadowtex1 when the same program
     declares watershadow.

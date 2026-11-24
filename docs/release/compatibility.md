@@ -9,6 +9,61 @@ one at a time with the flow in `mod/scripts/PACK-TESTING.md`:
 Earlier results (Complementary Unbound r5.10, Complementary Reimagined r5.9.3, Bliss v2.1.2,
 Solas v3.9) are in `docs/release/alpha.md`, "Fails safe".
 
+## Bliss v2.1.2, Chocapic13 edit (2026-11-23): works, matches Iris on the zoo and beach stops
+
+- Offline: 244/244 programs preprocess; **103/103** reach Metal (48/112 before; the scoreboard now
+  leaves out the 9 programs shaders.properties switches off by default, as the game does).
+- In game: 0 validation messages, no crash. 62 formulas load (14 before).
+- What was wrong, in the order found:
+  - Didn't compile. Iris macros were missing: `MC_HAND_DEPTH` (0.125), `MC_NORMAL_MAP` and
+    `MC_SPECULAR_MAP` (Bliss declares `FlatNormals` only under `MC_NORMAL_MAP`), and `MC_RENDER_QUALITY`.
+    Names legal in OpenGL GLSL but not after translation: a parameter named `sampler` (a Vulkan
+    type), a function `bias()` (clashes with `metal::bias`), and `float tanh(float)` under
+    `#version 120` (a built-in from 1.30 on). A global `vec3 sunVec` in one stage collided with
+    the uniform `sunVec` of the other.
+  - Water and hand-water wouldn't link: an unused fragment input (`Flashing`) that the vertex
+    stage never writes. These inputs are now dropped.
+  - Every frame was black. `sunPosition`, `moonPosition`, `shadowLightPosition` and `upPosition`
+    weren't supplied (Iris's CelestialUniforms; Complementary never needed them), and 48 formulas
+    were dropped: vector types (`uniform.vec3.sunVec = vec3(...)`), `.0`-`.3` components, matrix
+    elements (`gbufferProjection.1.1`), the frame's matrices as inputs, `thunderStrength`,
+    `currentPlayerHealth`, and the literal `1000000000000000000`.
+  - No water near the camera: `alphaTest.gbuffers_water=false` wasn't read as "off", so the
+    near water (alpha 1/255) was discarded.
+  - End portals and gateways were invisible, and sign text was blank: the game's own draws land
+    in a buffer Bliss never reads. They're now drawn by the pack, as Iris does (the End portal as an
+    entity_solid draw for gbuffers_block; text by gbuffers_entities_translucent, or
+    gbuffers_block_translucent for a block entity). Text submits now keep the ids of the block
+    entity or entity that made them, so a sign's text gets the sign's blockEntityId.
+  - Glass, ice, slime and honey cast no shadows: the `shadow` sampler was always the map without
+    translucents. As in Iris it's now `shadowtex0`, unless the program also reads `watershadow`.
+  - The `normals` and `specular` samplers read Iris's defaults (flat normal, zero specular)
+    instead of opaque black.
+- Side by side with Iris (`mod/build/compare/bliss/`): sky, clouds, sun light, shadows (tinted
+  ones too), water, terrain, entities, block entities, signs, End portal and gateway, nether
+  portal and translucents match.
+- Differences left:
+  - The beach-sprint shot: Luxium is further along the sprint (over water, where Iris is still on
+    the sand runway). The same runner timing difference as BSL; not rendering.
+  - Mob poses and particle positions differ by timing.
+  - Flicker on still-camera clips is about twice Iris's on the zoo (0.12% vs 0.06%) and the
+    portal (0.14% vs 0.06%). The heat maps show only moving mobs, fire and portal particles; the
+    still beach is 0.02% (Iris 0.005%).
+- Not compared yet: night, caves, rain/snow, the Nether and the End; TAA quality in motion.
+- Effect on Complementary Unbound (same stops against Iris, 0 validation messages, formulas
+  unchanged; `mod/build/compare/cu/`):
+  - Better: the End portal and gateway now show Complementary's own starfield, as under Iris
+    (it was the game's, dimmer).
+  - **Worse, open:** glowing sign text is pale blue-white, where Iris (and Luxium before this
+    change, when the game drew text) shows lime; normal sign text matches. The text is now served
+    by gbuffers_block_translucent with the sign's id, the light pair (240, 240) and the lightmap
+    matrix are Iris's, so Complementary's `lmCoord.x > 0.999` glowing branch should be taken; why
+    it doesn't look so isn't known yet. Next step: dump the text variant
+    (`LUXIUM_DUMP_SHADERS`) and compare it with Iris's patched TEXT_BE program (pipecheck).
+- Not supported: Bliss's optional features that need compute shaders and custom images (its
+  floodfill light, `IS_LPV_ENABLED`, off by default); its translucent-entities option
+  (`TRANSLUCENT_ENTITIES`, off by default) doesn't compile under Iris either (`entityId` undeclared).
+
 ## Complementary Reimagined r5.10 (2026-11-23): works
 
 - Offline: 219/219 programs preprocess; **90/90** reach Metal.

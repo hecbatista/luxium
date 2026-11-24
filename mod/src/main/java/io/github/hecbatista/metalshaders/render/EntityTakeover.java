@@ -816,12 +816,13 @@ public final class EntityTakeover {
     /** Before the level's solid features. */
     public static void openWindow(Function<String, Object> values) {
         open(Phase.SOLID, values, List.of(SOLID, BLOCK, PARTICLES, SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING,
-                BLOCK_TRANSLUCENT, ENTITY_PATTERNS));
+                BLOCK_TRANSLUCENT, ENTITY_PATTERNS, TEXT, TEXT_BE));
     }
 
     /** Before the level's translucent features, and its "after terrain" ones (after the deferred cut). */
     public static void openTranslucentWindow(Function<String, Object> values) {
-        open(Phase.TRANSLUCENT, values, List.of(TRANSLUCENT, PARTICLES_TRANSLUCENT, SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING));
+        open(Phase.TRANSLUCENT, values, List.of(TRANSLUCENT, PARTICLES_TRANSLUCENT, SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING,
+                TEXT, TEXT_BE));
     }
 
     private static void open(Phase phase, Function<String, Object> values, List<Family> families) {

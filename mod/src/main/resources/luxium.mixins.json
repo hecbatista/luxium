@@ -30,6 +30,7 @@
     "RenderTypeFeatureRendererMixin",
     "SkyRendererMixin",
     "SubmitNodeCollectionMixin",
+    "TextFeatureRendererIdsMixin",
     "WeatherEffectRendererMixin",
     "metallum.MetalCrossShaderCompilerMixin",
     "metallum.MetallumCompiledAccessor",
