@@ -8,6 +8,11 @@ group = project.maven_group
 repositories {
 	// Sodium comes from Modrinth's Maven, the same way Metallum gets it.
 	maven { url "https://api.modrinth.com/maven" }
+	// Mod Menu's API, for its optional "Configure" button (compile only: never needed at run time).
+	maven {
+		url "https://maven.terraformersmc.com/releases/"
+		content { includeGroup "com.terraformersmc" }
+	}
 }
 
 // The Metallum jar we built and tested locally (see gradle.properties).
@@ -26,6 +31,9 @@ dependencies {
 	// Metallum's Metal bindings (nested in its jar, so present at run time). Step 7g calls
 	// MTLDevice.newLibraryWithSource on the compile pool to warm Metal's shader cache.
 	compileOnly "io.github.kokodio:metal-jvm:${project.metal_jvm_version}"
+	// Mod Menu (optional): its "modmenu" entrypoint opens the Shader Packs screen. Compile only, so
+	// Luxium runs without Mod Menu (and without Fabric API, which Mod Menu needs).
+	compileOnly("com.terraformersmc:modmenu:${project.modmenu_version}") { transitive = false }
 
 	// JCPP evaluates #if/#define. Its own dependencies (Ant, jopt-simple, annotations) are only
 	// for its command-line tool; slf4j, which it does need, already comes with Minecraft.
@@ -63,6 +71,11 @@ fabricApi {
 
 dependencies {
 	gametestImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	gametestCompileOnly("com.terraformersmc:modmenu:${project.modmenu_version}") { transitive = false }
+	// LUXIUM_TEST_MODMENU=1: run the game tests with Mod Menu installed (menus slice D).
+	if (System.getenv("LUXIUM_TEST_MODMENU") != null) {
+		gametestRuntimeOnly("com.terraformersmc:modmenu:${project.modmenu_version}") { transitive = false }
+	}
 }
 
 // Fail early, with a clear message, if Metallum hasn't been built yet.

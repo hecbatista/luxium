@@ -9,6 +9,8 @@
     "BlockEntityRenderDispatcherMixin",
     "BlockEntityRenderStateAccessor",
     "CustomFeatureRendererIdsMixin",
+    "DebugScreenEntriesMixin",
+    "DebugScreenEntryListMixin",
     "EntityRenderDispatcherMixin",
     "FogRendererMixin",
     "GameRendererHandMixin",
@@ -21,6 +23,8 @@
     "ItemStackRenderStateMixin",
     "LevelExtractorMixin",
     "LevelRendererTerrainMixin",
+    "MinecraftKeysMixin",
+    "OptionsKeysMixin",
     "ModelFeatureRendererIdsMixin",
     "ModelSubmitIdsMixin",
     "PreparedRenderTypeMixin",
@@ -29,6 +33,7 @@
     "RenderTypeFeatureRendererMixin",
     "SkyRendererMixin",
     "SubmitNodeCollectionMixin",
+    "VideoSettingsScreenMixin",
     "WeatherEffectRendererMixin",
     "metallum.MetalCrossShaderCompilerMixin",
     "metallum.MetallumCompiledAccessor",
@@ -40,7 +45,9 @@
     "sodium.RenderRegionManagerMixin",
     "sodium.RenderRegionMixin",
     "sodium.RenderSectionManagerAccessor",
-    "sodium.SodiumWorldRendererAccessor"
+    "sodium.ShaderChunkRendererAccessor",
+    "sodium.SodiumWorldRendererAccessor",
+    "sodium.SodiumWorldRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1

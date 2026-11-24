@@ -25,9 +25,10 @@ import net.minecraft.util.Mth;
  * 32 luxium_TangentIn   RGBA8_SNORM  texture tangent, w = handedness
  * </pre>
  * The game binds vertex inputs by element name (PipelineBuilder, 26.3), so Sodium's shader reads
- * its four elements and ignores the rest. The format is used from the start of the session, pack
- * or no pack: every holder of the stride (the section manager, the geometry arena, the memoised
- * pipelines) then agrees with every mesh, and nothing ever has to be rebuilt for a stride change.
+ * its four elements and ignores the rest. The format is used while a pack is chosen; with none,
+ * Sodium keeps its own. Every holder of the stride (the section manager, the geometry arena,
+ * Sodium's memoised pipelines) must agree with every mesh, so the format only changes as Sodium
+ * builds a new section manager (MetalShadersClient.applyMeshFormat, SodiumPrograms).
  * The extra words follow Iris's XHFPTerrainVertex (see NOTICE): the mid-texture encoding, the
  * block-id encoding and separateAo's colour; the normal and tangent are stored as plain signed
  * bytes rather than Iris's octahedral word.
@@ -48,7 +49,8 @@ public final class LuxiumChunkVertex implements ChunkVertexType {
 
     /**
      * The pack's {@code separateAo}: the AO goes into the colour's alpha instead of its RGB. Read
-     * when meshing, so it's set at startup, before any section is built.
+     * when meshing; set when the pack's mesh directives are read (startup, and every pack load),
+     * and a change rebuilds every chunk (MetalShadersClient.readMeshDirectives).
      */
     private static volatile boolean separateAo;
 

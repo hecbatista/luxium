@@ -14,6 +14,12 @@
   "entrypoints": {
     "client": [
       "io.github.hecbatista.metalshaders.MetalShadersClient"
+    ],
+    "modmenu": [
+      "io.github.hecbatista.metalshaders.compat.ModMenuEntry"
+    ],
+    "sodium:config_api_user": [
+      "io.github.hecbatista.metalshaders.compat.SodiumOptionsEntry"
     ]
   },
   "mixins": [
