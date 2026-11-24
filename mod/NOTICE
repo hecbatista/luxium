@@ -101,6 +101,13 @@ GNU Lesser General Public License version 3
   yet. velocity is deliberately not supplied, because Iris 26.3 defines it in
   HardcodedCustomUniforms but never calls that.
 
+  GameUniforms.java and mixin/FogRendererMixin.java also follow Iris's fog values:
+  net.irisshaders.iris.uniforms.FogUniforms (fogStart, fogEnd, fogDensity at least 0),
+  uniforms.IrisInternalUniforms and pipeline.transform.transformer.CommonTransformer (gl_Fog as
+  color, density, start, end and scale = 1 / (end - start)), and mixin.MixinFogRenderer (the
+  legacy water density 0.05 - waterVision^2 * 0.03, none outside water). Start and end are
+  FogData's environmentalStart and environmentalEnd, as Sodium's FogParameters (MIT) takes them.
+
   src/main/java/io/github/hecbatista/metalshaders/pack/ItemIds.java follows
   net.irisshaders.iris.shaderpack.IdMap.parseIdMap and materialmap.NamespacedId for
   item.properties: "minecraft:" by default, block-state entries skipped, -1 for unlisted items.
