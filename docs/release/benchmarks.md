@@ -50,4 +50,88 @@ Median frame times: Luxium 6.0–7.3 ms, Iris 8.6–10.2 ms. Worst frames: Luxiu
   - Luxium doesn't do chunk fade-in, which costs next to nothing.
   - Otherwise the pictures match (step 7 comparisons).
 - Iris runs on OpenGL, which macOS implements on top of Metal; Luxium talks to Metal directly through Metallum.
-- No per-pass GPU timing yet: the game's API doesn't expose it (7f).
+- No per-pass GPU timing through the game's API (7f). Metal System Trace gives it; see below.
+
+# Luxium vs LeadLight 0.2.0 (2026-11-23)
+
+## Method
+- **Benchmark:** the same `benchmark` stop and machine as above, with Complementary Unbound r5.10 at defaults.
+  - **Both mods on Modrinth's Metallum 0.0.25** (`leadlight-compare/libs/metallum-0.0.25.jar`, SHA-512 checked).
+  - LeadLight 0.2.0 `+mc26.3` from its GitHub release, run by `leadlight-compare/run.sh`.
+  - Luxium on main (6ec6e8f), run by `mod/scripts/bench.sh`.
+  - ABBA order. Other sessions were paused by a lock file (`mod/build/bench/benchmark-running`), and no run was overlapped by another game. The "another game is running" warnings in the logs come from a too-broad `pgrep` matching other sessions' wait loops.
+- **Profile:** a 5 s Metal System Trace (`xcrun xctrace record --template 'Metal System Trace' --attach <pid>`) of the overlook scene at render distance 5, with `LUXIUM_GPU_LABELS=1` (passes `--renderDebugLabels`, so Metallum labels its encoders).
+  - GPU time per pass comes from joining `metal-gpu-intervals` (GPU durations) with `metal-application-intervals` (encoder → pass label) on `encoder-id`. The scripts are in this session's scratchpad: `gpu_sum.py`, `exact.py`.
+
+## Results
+Average fps; each cell is run 1 · run 2. The machine got slower over each group of four runs (heat or background load), so the spread is wide.
+
+| Render distance | Scene | Luxium | LeadLight |
+|---|---|---|---|
+| 5 | beach | 125 · 92 | 153 · 114 |
+| 5 | overlook | 152 · 114 | 186 · 135 |
+| 5 | spin | 149 · 118 | 186 · 123 |
+| 12 | beach | 78 · 76 | 60* · 114 |
+| 12 | overlook | 87 · 84 | 62* · 118 |
+| 12 | spin | 87 · 86 | 61* · 124 |
+
+\*A median frame of ~10 ms with 1% lows of 24 fps: frame-pacing trouble in that run, not GPU load.
+
+**LeadLight is faster:** about 20–25% at render distance 5 and up to 40% at 12. Luxium's frame times are steadier at 12.
+
+## GPU time per pass (overlook, render distance 5, ms per frame)
+
+| Pass | Luxium | LeadLight | Luxium − LeadLight |
+|---|---|---|---|
+| Shadow map (Luxium: + its shadow depth copy) | 1.00 + 0.10 | 0.40 | **+0.70** |
+| Terrain, opaque + translucent | 0.89 + 0.40 | 1.19 | +0.10 |
+| composite1 | 0.91 | 0.86 | +0.05 |
+| deferred1 | 0.69 | 0.67 | +0.02 |
+| composite6 / 7 / 5 | 0.32 / 0.16 / 0.11 | 0.28 / 0.17 / 0.11 | +0.04 |
+| **composite4** (the pack scales it to 0.4) | 0.24 | 0.07 | **+0.17** |
+| composite | 0.11 | 0.05 | +0.06 |
+| sky | 0.17 | 0.16 | +0.01 |
+| Luxium-only passes: merge hand depth, depth to OpenGL convention, compose translucent catch, seed colortex0 | 0.17 | — | **+0.17** |
+| **All GPU work** | **5.80** | **4.66** | **+1.14** |
+
+Frame time was 7.0 ms against 6.0 ms, so the extra GPU work explains the whole gap.
+
+- **Shadow pass:** Luxium does 2.8× LeadLight's vertex work there (0.48 against 0.17 ms), so it draws about 2.8× the geometry. That's the 7c light box, with face culling off, against LeadLight's camera frustum swept along the light, cut at the shadow distance. The gap should grow with render distance.
+- **Reflection buffers:** `colortex1` and `colortex7` at full size cost little here. deferred1 and composite1 are within 5% of LeadLight's.
+- **composite4:** Luxium does pass `scale 0.4` to the translator (`PackChain`), yet costs 3.4× more. Check how the scaled pass covers its target (whole-target load/store, viewport).
+
+## After the tight shadow frustum (branch `fix-shadow-cull`, 2026-11-23)
+`render/ShadowFrustum` is Iris's advanced shadow frustum: the camera frustum swept toward the light, and also inside the shadow map's box. It's chosen as Iris chooses it (`ShadowCulling.configure`). `LUXIUM_SHADOW_CULL=box` restores the old box for A/B runs in the same build.
+
+- **Correctness:** game test under validation, 0 messages; every shot matches the box build, including shot 9 (a tower behind the camera casting into view); flicker unchanged; 112 unit tests pass; 90/90 on the scoreboard.
+- **Light's terrain walk:** 4–6 regions where the box took 8–10.
+
+Benchmark in the order T B LL LL B T (T = tight, B = box, same worktree build), each render distance alone. Average fps, beach / overlook / spin, mean of the two runs:
+
+| Render distance | Luxium, tight | Luxium, box | LeadLight 0.2.0 |
+|---|---|---|---|
+| 5 | 145 / 173 / 166 | 132 / 162 / 157 | 152 / 186 / 186 |
+| 12 | 107 / 114 / 114 | 83 / 91 / 91 | 113 / 116 / 122 (run 2 only*) |
+
+- The tight frustum is about +7% at render distance 5 and +25–30% at 12, against the box in the same build.
+- Against LeadLight: about 5–10% behind at render distance 5, and 1–6% behind at 12 (it was up to 40% behind).
+- \*LeadLight's first render-distance-12 run fell to about 39 fps in every scene (worst frame about 54 ms), as in the earlier benchmark (60 fps with 1% lows of 24). That's twice out of two first runs at that distance. Luxium had no such run.
+- The runner's "CONTAMINATED" marks on the Luxium runs are false: its check counted any game started from `.claude/worktrees`, and this Luxium build runs from one.
+- Next GPU targets from the profile: composite4 (+0.17 ms) and Luxium's helper passes (+0.17 ms per frame).
+
+## Mip chains and the scaled-pass scissor (commits 91e5b85, c5b5cd4 on `fix-shadow-cull`, 2026-11-23)
+- **Helper passes aren't a gap.** LeadLight has its own (depth window, scene seed, feature layer, pending colour clears), about 0.2 ms against Luxium's 0.17.
+- **`colortexNMipmapEnabled`** (Complementary: composite4 on colortex0, composite on colortex5) is now honoured.
+  - First version: mip levels on the pack's buffers, drawn one render pass per level. Quick A/B: −7% (159 against 170 fps), because of about 22 passes a frame plus Metallum clearing each level.
+  - Now: a separate chain texture per buffer, with a blit copy of level 0, then Metal's blit `generateMipmaps` (`render/MetalMips`). A/B: no measurable cost (176.4 against 177.6 fps).
+  - Fixes the bloom shimmer at the beach: still clip 0.16% → 0.00%, jump 0.18% → 0.02%.
+- **Scaled passes:** the render area is the scaled corner, as Iris's viewport. The full-screen triangle used to cover twice the corner. composite4: 0.22 → 0.05 ms of GPU (LeadLight 0.07).
+- **GPU time per frame** (overlook, render distance 5): **4.90 ms**, against 5.80 before these fixes and LeadLight's 4.66.
+- **Milestone ABBA (L LL LL L)** was noisy, with load up to 7.6 and one Luxium run at render distance 12 at 52–58 fps in two scenes. Best runs, fps beach / overlook / spin:
+
+  | Render distance | Luxium | LeadLight |
+  |---|---|---|
+  | 5 | 145 / 176 / 155 | 155 / 188 / 189 |
+  | 12 | 110 / 119 / 120 | 108 / 103 / 120 |
+
+  So Luxium is about even at render distance 12 and 6–10% behind at 5. LeadLight again had large hitches: 660 ms and 1013 ms worst frames. Rerun on a quiet machine before quoting these numbers anywhere.

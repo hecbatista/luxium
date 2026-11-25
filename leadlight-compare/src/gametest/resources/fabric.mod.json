@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "leadlight-compare-test",
+  "version": "1.0.0",
+  "name": "LeadLight comparison tour",
+  "description": "Runs Luxium's PlaytestTour under LeadLight, for benchmarks and side-by-side screenshots (dev only).",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-client-gametest": [
+      "leadlightcompare.LeadlightSetup",
+      "io.github.hecbatista.metalshaders.test.PlaytestTour"
+    ]
+  },
+  "depends": {
+    "leadlight": "*",
+    "fabric-api": "*"
+  }
+}

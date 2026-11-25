@@ -1,0 +1,66 @@
+// Runs the same PlaytestTour as mod/, but with LeadLight (github.com/ohjey/leadlight, a Vitrail fork
+// on Metallum's Metal backend) instead of Luxium, for benchmarks and side-by-side screenshots
+// (docs/release/leadlight-comparison.md). No Luxium classes are on the classpath.
+//
+// Both jars in libs/ are downloaded, not built (git-ignored; see README.md for where and the hashes).
+// Metallum is Modrinth's 0.0.25, the one players install; run Luxium with
+// LUXIUM_METALLUM_JAR=<this>/libs/metallum-0.0.25.jar so both sides use the same jar.
+plugins {
+	id 'net.fabricmc.fabric-loom' version "${loom_version}"
+}
+
+repositories {
+	maven { url "https://api.modrinth.com/maven" }
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	implementation "maven.modrinth:sodium:${project.sodium_version}"
+	implementation files("libs/metallum-0.0.25.jar")
+	implementation files("libs/${project.leadlight_jar}")
+}
+
+fabricApi {
+	configureTests {
+		createSourceSet = true
+		modId = "leadlight-compare-test"
+		enableGameTests = false
+		enableClientGameTests = true
+		eula = true                    // the user agreed to the Minecraft EULA on 2026-11-20
+	}
+}
+
+dependencies {
+	gametestImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	gametestImplementation files("libs/${project.leadlight_jar}")
+}
+
+// LUXIUM_GPU_LABELS=1: start the game with --renderDebugLabels (Minecraft's Main), so Metallum labels
+// its command buffers and encoders (MetalDevice.useLabels) and Metal System Trace shows pass names.
+// For profiling only; off by default (labels cost CPU).
+loom.runs.matching { it.name == 'clientGameTest' }.configureEach {
+	if (System.getenv('LUXIUM_GPU_LABELS') != null) {
+		programArgs '--renderDebugLabels'
+	}
+}
+
+// The tour itself is shared with mod/: one file, not a copy.
+sourceSets {
+	gametest {
+		java {
+			srcDir "../mod/src/gametest/java"
+			include "io/github/hecbatista/metalshaders/test/PlaytestTour.java"
+			include "leadlightcompare/**"
+		}
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+}

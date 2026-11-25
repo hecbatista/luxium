@@ -2,6 +2,12 @@
 
 Everything needed to create the project at modrinth.com/dashboard/projects. Nothing here is posted yet.
 
+Positioning (2026-11-23):
+- **LeadLight** (github.com/ohjey/leadlight) has run Iris packs on Metallum since 2026-10-19 and is what the Metallum Discord recommends (`leadlight-comparison.md`).
+- It isn't on Modrinth. The `leadlight` slug there is an unrelated stained-glass mod. So Luxium would be the shader loader Mac players find on Modrinth, but the listing mustn't claim it's the first or the only one.
+- The description credits LeadLight and says plainly how Luxium differs (the "Luxium and LeadLight" section).
+- Before publishing, update the pack table with the Bliss and Solas results (sessions `bliss-fix`, `solas-fix`), and the LeadLight benchmark line (`benchmarks.md`).
+
 ## Project fields
 
 | Field | Value |
@@ -102,6 +108,16 @@ No in-game shader menu yet (it's coming in the next release). Choose the pack in
 - Apple Silicon only.
 
 Found a bug? Open an issue on [GitHub](https://github.com/hecbatista/luxium/issues) with your `logs/latest.log`, the pack and its version, a screenshot, and your Mac model.
+
+### 🔀 Luxium and LeadLight
+
+[LeadLight](https://github.com/ohjey/leadlight) by OhJey also runs shader packs on Metallum. It's built on Vitrail, and it already runs more packs than Luxium (Photon, BSL and others) and has an in-game menu. Luxium is a separate, from-scratch take:
+- runs on Metallum and Sodium as you download them, with no Fabric API;
+- checked with Metal's validation layer on, with zero errors as the bar;
+- compared shot by shot against Iris;
+- benchmarked with a published method.
+
+Both are free; use whichever works best on your Mac.
 
 ### 💜 Credits
 
