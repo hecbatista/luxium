@@ -1,0 +1,13 @@
+# Stage 4: Resource and lifetime safety (standard tier)
+
+Scope: render/PackChain.java, render/TerrainTakeover.java, render/EntityTakeover.java, render/SkyTakeover.java, render/ShadowTargets.java, render/CustomTextures.java, render/LevelPass.java, render/RoutingPass.java, render/DropPass.java, render/PipelineCompiler.java, render/FlashProbe.java, render/PerfStats.java, mixin/sodium/*, mixin/metallum/*, MetalShadersClient.java (loadWorld), mixin/LevelRendererTerrainMixin.java.
+
+Check:
+1. Ownership: for every createTexture / createTextureView / pipeline / MappableRingBuffer, identify the owner and every close() path (resize at PackChain.ensureTargets, world switch via unload, failure via fail() and discard). Report leaks, double closes, and use-after-close (static maps of views surviving a resize or unload).
+2. Reuse across frames: MappableRingBuffer.rotate() placement (one rotate per pass vs many draws per pass sharing one buffer), buffers shared between program variants of different block sizes (history: docs/history/step-7.md:129), previous-frame textures and "keep contents" colortex, depthCopy/depthPre/coverage reuse inside a frame.
+3. Command buffers: PackChain creates a new CommandEncoder per hook (several per frame). Check ordering against the game's own encoder, textures read while attached, copyTextureToTexture size/format compatibility, LevelPass.suspend/reopen load actions, debug-group balance, passes left open on exceptions.
+4. Threading: pool threads (PipelineCompiler) vs render thread; shared static mutable state; warmMetal's device use off-thread (PipelineCompiler.java:182-220); reload (loadWorld) while compiles are in flight; volatile / happens-before.
+5. Failure behavior: after PackChain.fail(), do all takeovers stop consistently (ready() checks), or can the game draw with half-initialized state?
+Only claim a Metal/Metallum guarantee (e.g. "command buffers retain resources") if you can cite Metallum source in references/metallum or Apple docs; otherwise "unsure".
+
+Rules: you are READ-ONLY (see /AGENTS.md). Do not edit files, run builds, or run the game. Cite `file:line` (with a short quote) for every finding. If you cannot verify something from files you opened, mark it "unsure" and put it under Open questions; never guess at Iris, Metal, Metallum, Sodium or Minecraft behavior (check references/ if present). For each finding give: ID, file:line, issue, severity (critical/high/medium/low/info), your confidence (high/medium/low), and what would confirm it. Output as rows matching docs/audit/FINDINGS.md columns, followed by an Open questions list. Prefer few well-evidenced findings over many speculative ones.

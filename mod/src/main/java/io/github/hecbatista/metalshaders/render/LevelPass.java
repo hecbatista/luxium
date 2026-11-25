@@ -70,12 +70,27 @@ public final class LevelPass implements RenderPass {
             EntityTakeover.releaseHold();
             RenderPass r = RenderSystem.getDevice().createCommandEncoder()
                     .createRenderPass(this.label, this.color, Optional.empty(), this.depth, OptionalDouble.empty());
-            RenderSystem.bindDefaultUniforms(r);
-            for (Supplier<String> g : this.groups) {
-                r.pushDebugGroup(g);
-            }
-            if (this.scissor != null) {
-                r.enableScissor(this.scissor[0], this.scissor[1], this.scissor[2], this.scissor[3]);
+            int pushed = 0;
+            try {
+                RenderSystem.bindDefaultUniforms(r);
+                for (Supplier<String> g : this.groups) {
+                    r.pushDebugGroup(g);
+                    pushed++;
+                }
+                if (this.scissor != null) {
+                    r.enableScissor(this.scissor[0], this.scissor[1], this.scissor[2], this.scissor[3]);
+                }
+            } catch (RuntimeException e) {
+                // An open pass would block every later command on the encoder (audit S4-07).
+                try {
+                    for (int i = 0; i < pushed; i++) {
+                        r.popDebugGroup();
+                    }
+                    r.close();
+                } catch (RuntimeException ignored) {
+                    // the setup failure is the one to report
+                }
+                throw e;
             }
             this.real = r;
         }

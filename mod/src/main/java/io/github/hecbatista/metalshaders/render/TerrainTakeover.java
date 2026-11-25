@@ -195,6 +195,11 @@ public final class TerrainTakeover {
                     io.github.hecbatista.metalshaders.uniform.ShadowMatrices.directives().resolution(),
                     io.github.hecbatista.metalshaders.uniform.ShadowMatrices.directives().resolution());
         } catch (Exception e) {
+            // Variants that finished before the failure own pipelines (audit S4-03).
+            for (Program p : shadowPrograms.values()) {
+                p.compiled().close();
+                p.rings().forEach(MappableRingBuffer::close);
+            }
             shadowPrograms.clear();
             MetalShadersClient.LOGGER.error("Shadow pass disabled: {}", e.getMessage(), e);
         }
@@ -394,7 +399,13 @@ public final class TerrainTakeover {
         if (compiled == null) {
             throw new IllegalStateException(program + " (" + name + "): the device returned no pipeline");
         }
-        Std140Layout.Layout layout = Std140Layout.of(r.uniforms());
+        Std140Layout.Layout layout;
+        try {
+            layout = Std140Layout.of(r.uniforms());
+        } catch (RuntimeException e) {
+            compiled.close();
+            throw e;
+        }
         Map<String, String> defaults = new HashMap<>();
         r.uniforms().forEach(u -> {
             if (u.defaultValue() != null) {
@@ -445,6 +456,16 @@ public final class TerrainTakeover {
     }
 
     /** Frame start (from PackChain.beginFrame, no pass open): resolve inputs, reset per-frame state. */
+    /**
+     * Forgets this frame's "the pack drew it" flags. Runs at every frame start, even when the chain
+     * has failed: a stale flag would make the level's wrappers skip vanilla terrain that nothing
+     * else draws (audit S4-01).
+     */
+    static void resetDrawFlags() {
+        drewOpaque = false;
+        drewTranslucent = false;
+    }
+
     static void beginFrame() {
         usedRings.forEach(MappableRingBuffer::rotate);
         usedRings.clear();

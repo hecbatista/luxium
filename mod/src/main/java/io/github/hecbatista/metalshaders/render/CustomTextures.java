@@ -140,7 +140,15 @@ public final class CustomTextures {
                     MetalShadersClient.LOGGER.warn("Custom texture {} = {}: no such file in the pack, skipped", name, value);
                     continue;
                 }
-                (e.volume() != null ? volumesByStage : byStage).computeIfAbsent(stage, s -> new HashMap<>()).put(key(sampler), e);
+                Entry displaced = (e.volume() != null ? volumesByStage : byStage).computeIfAbsent(stage, s -> new HashMap<>()).put(key(sampler), e);
+                if (displaced != null) {
+                    // Two directives for one stage and sampler: the later one wins, the earlier is freed (audit S4-04).
+                    samplerOf.remove(displaced.view());
+                    displaced.view().close();
+                    if (displaced.texture() != null) {
+                        displaced.texture().close();
+                    }
+                }
                 loaded.add(name + "=" + value);
             } catch (Exception ex) {
                 MetalShadersClient.LOGGER.warn("Custom texture {} = {}: {}", name, value, ex.toString());
@@ -190,8 +198,14 @@ public final class CustomTextures {
         try (NativeImage image = NativeImage.read(png)) {
             GpuTexture t = device.createTexture("Luxium " + path, GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING,
                     GpuFormat.RGBA8_UNORM, image.getWidth(), image.getHeight(), 1, 1);
-            device.createCommandEncoder().writeToTexture(t, image);
-            GpuTextureView v = device.createTextureView(t);
+            GpuTextureView v;
+            try {
+                device.createCommandEncoder().writeToTexture(t, image);
+                v = device.createTextureView(t);
+            } catch (RuntimeException e) {
+                t.close();   // not yet owned by an Entry (audit S4-06)
+                throw e;
+            }
             FilterMode filter = blur ? FilterMode.LINEAR : FilterMode.NEAREST;
             GpuSampler s = clamp ? RenderSystem.getSamplerCache().getClampToEdge(filter) : RenderSystem.getSamplerCache().getRepeat(filter);
             samplerOf.put(v, s);

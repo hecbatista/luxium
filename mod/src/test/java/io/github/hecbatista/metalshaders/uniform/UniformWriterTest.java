@@ -75,4 +75,34 @@ class UniformWriterTest {
         assertEquals(0f, out.getFloat(4));
         assertEquals(Set.of("unknownThing"), missing);
     }
+
+    /** Audit S5-01: a name declared with a type the engine's value doesn't fit is zeroed and reported, not thrown. */
+    @Test
+    void aTypeMismatchLeavesZeroAndIsReportedInsteadOfThrowing() {
+        Std140Layout.Layout layout = Std140Layout.of(List.of(u("vec4", "frameTime"), u("float", "rainStrength")));
+        ByteBuffer out = ByteBuffer.allocate(layout.size()).order(ByteOrder.nativeOrder());
+        Map<String, Object> values = Map.of("frameTime", 1.5f, "rainStrength", 0.25f);
+
+        Set<String> missing = UniformWriter.write(layout, values::get, Map.of(), out);
+
+        assertEquals(Set.of("frameTime"), missing);
+        assertEquals(0f, out.getFloat(0));
+        assertEquals(0.25f, out.getFloat(16));
+    }
+
+    /** Audit S2-08: float and int arrays are written one element per 16-byte stride. */
+    @Test
+    void scalarArraysAreWrittenOneElementPerStride() {
+        Std140Layout.Layout layout = Std140Layout.of(List.of(
+                new Uniform("float", "weights", "[3]", null), new Uniform("int", "ids", "[2]", null)));
+        ByteBuffer out = ByteBuffer.allocate(layout.size()).order(ByteOrder.nativeOrder());
+        Map<String, Object> values = Map.of("weights", new float[]{1f, 2f, 3f}, "ids", new int[]{7, 9});
+
+        Set<String> missing = UniformWriter.write(layout, values::get, Map.of(), out);
+
+        assertEquals(Set.of(), missing);
+        assertEquals(2f, out.getFloat(16));
+        assertEquals(3f, out.getFloat(32));
+        assertEquals(9, out.getInt(48 + 16));
+    }
 }

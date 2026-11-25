@@ -239,7 +239,8 @@ public final class PackChain {
                 return;
             }
             boolean isFinal = name.equals("final");
-            List<Integer> writes = isFinal ? List.of() : r.drawBuffers();
+            // No DRAWBUFFERS / RENDERTARGETS directive: Iris writes buffer 0 (ProgramDirectives; audit S3-03).
+            List<Integer> writes = isFinal ? List.of() : r.drawBuffers().isEmpty() ? List.of(0) : r.drawBuffers();
             Identifier shader = Identifier.fromNamespaceAndPath("luxium", "pack/" + name);
             RenderPipeline.Builder builder = RenderPipeline.builder()
                     .withLocation(Identifier.fromNamespaceAndPath("luxium", "pipeline/pack_" + name))
@@ -276,6 +277,9 @@ public final class PackChain {
                 return;
             }
         }
+        // Passes are published only once all of them (and the seed) are built, so a failure part way
+        // never leaves a half-built chain reporting ready() (audit S4-02).
+        List<Pass> built = new ArrayList<>();
         for (int i = 0; i < started.size(); i++) {
             StartedPass sp = started.get(i);
             String name = sp.name();
@@ -287,30 +291,47 @@ public final class PackChain {
                 compiled = PipelineCompiler.finish(sp.compile());
             } catch (RuntimeException e) {
                 discard(started.subList(i + 1, started.size()));
+                closeBuilt(built);
                 fail(name + ": compile threw", e);
                 return;
             }
             if (compiled == null) {
                 discard(started.subList(i + 1, started.size()));
+                closeBuilt(built);
                 fail(name + ": the device returned no pipeline (reason logged above)", null);
                 return;
             }
-            Std140Layout.Layout layout = Std140Layout.of(r.uniforms());
-            Map<String, String> defaults = new HashMap<>();
-            r.uniforms().forEach(u -> {
-                if (u.defaultValue() != null) {
-                    defaults.put(u.name(), u.defaultValue());
+            MappableRingBuffer ubo = null;
+            try {
+                Std140Layout.Layout layout = Std140Layout.of(r.uniforms());
+                Map<String, String> defaults = new HashMap<>();
+                r.uniforms().forEach(u -> {
+                    if (u.defaultValue() != null) {
+                        defaults.put(u.name(), u.defaultValue());
+                    }
+                });
+                ubo = layout.size() == 0 ? null
+                        : new MappableRingBuffer(() -> "Luxium " + name + " uniforms", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_MAP_WRITE, layout.size());
+                built.add(new Pass(name, r, layout, defaults, compiled, ubo, writes, scale, sp.mipmapped()));
+            } catch (RuntimeException e) {
+                compiled.close();
+                if (ubo != null) {
+                    ubo.close();
                 }
-            });
-            MappableRingBuffer ubo = layout.size() == 0 ? null
-                    : new MappableRingBuffer(() -> "Luxium " + name + " uniforms", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_MAP_WRITE, layout.size());
-            passes.add(new Pass(name, r, layout, defaults, compiled, ubo, writes, scale, sp.mipmapped()));
+                discard(started.subList(i + 1, started.size()));
+                closeBuilt(built);
+                fail(name + ": setting up its uniforms threw", e);
+                return;
+            }
             MetalShadersClient.LOGGER.info("Chain pass {}: writes {}, reads {}, scale {}, mipmapped {}", name, writes,
                     r.samplers().stream().map(ProgramTranslator.Sampler::name).toList(), scale, sp.mipmapped());
         }
+        GpuTexture madeNoise = null;
+        try {
         if (noiseImage != null) {
             GpuTexture t = device.createTexture("Luxium noisetex", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING,
                     GpuFormat.RGBA8_UNORM, noiseImage.getWidth(), noiseImage.getHeight(), 1, 1);
+            madeNoise = t;
             device.createCommandEncoder().writeToTexture(t, noiseImage);
             noiseTexture = t;
             noise = device.createTextureView(t);
@@ -319,6 +340,36 @@ public final class PackChain {
             CustomTextures.setSampler(noise, RenderSystem.getSamplerCache().getRepeat(FilterMode.LINEAR));
         }
         compileSeed(device);
+        } catch (RuntimeException e) {
+            if (noiseImage != null) {
+                noiseImage.close();   // closing twice is harmless
+            }
+            if (noiseTexture == null && madeNoise != null) {
+                madeNoise.close();
+            }
+            closeBuilt(built);
+            fail("setting up the shared textures and passes threw", e);
+            return;
+        }
+        if (failed) {
+            closeBuilt(built);
+            return;
+        }
+        passes.addAll(built);
+    }
+
+    private static void closeBuilt(List<Pass> built) {
+        for (Pass p : built) {
+            try {
+                p.pipeline().close();
+                if (p.ubo() != null) {
+                    p.ubo().close();
+                }
+            } catch (RuntimeException ignored) {
+                // closing a broken pass must not hide the failure being reported
+            }
+        }
+        built.clear();
     }
 
     /**
@@ -504,6 +555,7 @@ public final class PackChain {
      * the coverage mask, so pack programs drawn during the world (6d) land on clean buffers.
      */
     public static void beginFrame(RenderTarget target) {
+        TerrainTakeover.resetDrawFlags();
         if (!ready()) {
             return;
         }
@@ -514,7 +566,11 @@ public final class PackChain {
             for (Map.Entry<Integer, GpuTexture[]> e : halves.entrySet()) {
                 RenderTargetPlan.Target t = plan.target(e.getKey());
                 if (t.clear()) {
-                    encoder.clearColorTexture(e.getValue()[current.get(e.getKey())], clearColor(t));
+                    // Both halves, as Iris's ClearPassCreator does: the one a pass writes next frame
+                    // must not hold old contents either (audit S3-04).
+                    Vector4f color = clearColor(t);
+                    encoder.clearColorTexture(e.getValue()[0], color);
+                    encoder.clearColorTexture(e.getValue()[1], color);
                 }
             }
             // Nothing is the pack's yet. If the pack draws the sky, skyDrawn() marks the whole
@@ -1187,6 +1243,7 @@ public final class PackChain {
         int w = target.width;
         int h = target.height;
         GpuBuffer buf = device.createBuffer(() -> "Luxium depth probe", GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_MAP_READ, (long) w * h * 4);
+        try {
         encoder.copyTextureToBuffer(target.getDepthTexture(), buf, 0, () -> {
             try (GpuBufferSlice.MappedView v = buf.map(true, false)) {
                 java.nio.FloatBuffer f = v.data().order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer();
@@ -1206,6 +1263,10 @@ public final class PackChain {
                 buf.close();
             }
         }, 0);
+        } catch (RuntimeException e) {
+            buf.close();   // the callback that would have closed it was never registered (audit S4-09)
+            throw e;
+        }
     }
 
     private static GpuTexture worldCopyTex;
@@ -1349,7 +1410,8 @@ public final class PackChain {
     private static Vector4f clearColor(RenderTargetPlan.Target t) {
         if (t.clearColor() != null) {
             float[] c = t.clearColor();
-            return new Vector4f(c[0], c[1], c[2], c[3]);
+            // A promoted RGB buffer reads alpha 1 (its writes are color-only), whatever clear alpha was asked (audit S3-04).
+            return new Vector4f(c[0], c[1], c[2], t.promoted() ? 1f : c[3]);
         }
         float alpha = t.promoted() ? 1f : 0f;
         return switch (t.index()) {
@@ -1499,10 +1561,29 @@ public final class PackChain {
             RenderTargetPlan.Target t = plan.target(i);
             int tw = targetWidth(i);
             int th = targetHeight(i);
-            GpuTexture a = device.createTexture("Luxium colortex" + i + " A", usage, t.format(), tw, th, 1, 1);
-            GpuTexture b = device.createTexture("Luxium colortex" + i + " B", usage, t.format(), tw, th, 1, 1);
-            halves.put(i, new GpuTexture[]{a, b});
-            halfViews.put(i, new GpuTextureView[]{device.createTextureView(a), device.createTextureView(b)});
+            // Each half is closed again if a later allocation of this buffer fails (audit S4-06).
+            GpuTexture a = null;
+            GpuTexture b = null;
+            GpuTextureView va = null;
+            try {
+                a = device.createTexture("Luxium colortex" + i + " A", usage, t.format(), tw, th, 1, 1);
+                b = device.createTexture("Luxium colortex" + i + " B", usage, t.format(), tw, th, 1, 1);
+                va = device.createTextureView(a);
+                GpuTextureView vb = device.createTextureView(b);
+                halves.put(i, new GpuTexture[]{a, b});
+                halfViews.put(i, new GpuTextureView[]{va, vb});
+            } catch (RuntimeException ex) {
+                for (AutoCloseable c : new AutoCloseable[]{va, a, b}) {
+                    if (c != null) {
+                        try {
+                            c.close();
+                        } catch (Exception ignored) {
+                            // the allocation failure is the one to report
+                        }
+                    }
+                }
+                throw ex;
+            }
             if (mipped.contains(i) && filterable(t.format())) {
                 int levels = 1 + (31 - Integer.numberOfLeadingZeros(Math.max(1, Math.max(tw, th))));
                 GpuTexture mip = device.createTexture("Luxium colortex" + i + " mips", GpuTexture.USAGE_COPY_DST

@@ -64,6 +64,7 @@ public final class FlashProbe {
             return;   // only 8-bit RGBA images are read
         }
         GpuBuffer buf = device.createBuffer(() -> "Luxium flash probe", GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_MAP_READ, (long) w * h * 4);
+        try {
         encoder.copyTextureToBuffer(color, buf, 0, () -> {
             try (GpuBufferSlice.MappedView v = buf.map(true, false)) {
                 ByteBuffer data = v.data();
@@ -76,6 +77,10 @@ public final class FlashProbe {
                 buf.close();
             }
         }, 0);
+        } catch (RuntimeException e) {
+            buf.close();   // the callback that would have closed it was never registered (audit S4-09)
+            throw e;
+        }
     }
 
     private static void analyse(long index, int w, int h, byte[] pixels) {

@@ -95,6 +95,27 @@ class TerrainTranslationTest {
         assertTrue(shadow.fragment().contains("vec3 screenPos = vec3(gl_FragCoord.xy, gl_FragCoord.z);"), shadow.fragment());
     }
 
+    /** Audit S2-03: an explicit gl_FragDepth write is OpenGL depth too, so the scene stores 1 - it; the shadow map doesn't. */
+    @Test
+    void explicitFragDepthWritesAreConvertedToReversedZ() throws Exception {
+        String fragment = """
+                uniform sampler2D tex;
+                in vec2 texCoord;
+                void main() {
+                    /* DRAWBUFFERS:0 */
+                    gl_FragData[0] = texture2D(tex, texCoord);
+                    gl_FragDepth = gl_FragCoord.z * 0.5;
+                }
+                """;
+        ProgramTranslator.Result scene = ProgramTranslator.translateForTerrain(VERTEX, fragment, new ProgramTranslator.Terrain(0.5f, true));
+        assertTrue(scene.fragment().contains("luxium_packFragDepth ="), scene.fragment());
+        assertTrue(scene.fragment().contains("gl_FragDepth = 1.0 - luxium_packFragDepth;"), scene.fragment());
+        assertTrue(scene.fragment().contains("luxium_Coverage = vec4(gl_FragDepth,"), scene.fragment());
+        compile("fragdepthwrite", scene);
+        ProgramTranslator.Result shadow = ProgramTranslator.translateForTerrain(VERTEX, fragment, new ProgramTranslator.Terrain(0.1f, false, true));
+        assertFalse(shadow.fragment().contains("luxium_packFragDepth"), shadow.fragment());
+    }
+
     @Test
     void complementaryTerrainCompilesToMetal() throws Exception {
         List<Path> packs = PackReader.findPacks(Path.of("run/shaderpacks"));

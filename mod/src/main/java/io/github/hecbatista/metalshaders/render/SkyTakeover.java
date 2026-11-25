@@ -97,6 +97,11 @@ public final class SkyTakeover {
             prepared = true;
             MetalShadersClient.LOGGER.info("Sky takeover ready: {} pieces", pieces.size());
         } catch (Exception e) {
+            // Pieces already built own pipelines: close them before forgetting them (audit S4-03).
+            for (Piece p : pieces.values()) {
+                p.compiled().close();
+                p.rings().forEach(MappableRingBuffer::close);
+            }
             pieces.clear();
             byCompiled.clear();
             MetalShadersClient.LOGGER.error("Sky takeover disabled: {}", e.getMessage(), e);
@@ -154,7 +159,13 @@ public final class SkyTakeover {
         if (compiled == null) {
             throw new IllegalStateException(program + " for " + vanilla.getLocation() + ": the device returned no pipeline");
         }
-        Std140Layout.Layout layout = Std140Layout.of(r.uniforms());
+        Std140Layout.Layout layout;
+        try {
+            layout = Std140Layout.of(r.uniforms());
+        } catch (RuntimeException e) {
+            compiled.close();
+            throw e;
+        }
         Map<String, String> defaults = new HashMap<>();
         r.uniforms().forEach(u -> {
             if (u.defaultValue() != null) {

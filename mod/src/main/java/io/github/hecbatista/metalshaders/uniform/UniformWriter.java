@@ -49,10 +49,19 @@ public final class UniformWriter {
                 continue;
             }
             if (m.arrayLength() > 0) {
-                // Arrays: mat4[] for luxium_TextureMatrix, one element per stride.
+                // Arrays: mat4[] for luxium_TextureMatrix; float[] and int[] values for scalar arrays
+                // (audit S2-08). One element per stride. Anything else stays zero and is reported.
                 if (value instanceof Matrix4fc[] array && m.type().equals("mat4")) {
                     for (int i = 0; i < Math.min(array.length, m.arrayLength()); i++) {
                         writeOne(b, m.offset() + i * m.stride(), "mat4", array[i], m.name());
+                    }
+                } else if (value instanceof float[] array && isScalar(m.type())) {
+                    for (int i = 0; i < Math.min(array.length, m.arrayLength()); i++) {
+                        writeOne(b, m.offset() + i * m.stride(), m.type(), array[i], m.name());
+                    }
+                } else if (value instanceof int[] array && isScalar(m.type())) {
+                    for (int i = 0; i < Math.min(array.length, m.arrayLength()); i++) {
+                        writeOne(b, m.offset() + i * m.stride(), m.type(), array[i], m.name());
                     }
                 } else {
                     missing.add(m.name());
@@ -73,9 +82,22 @@ public final class UniformWriter {
                 }
                 continue;
             }
-            writeOne(b, m.offset(), m.type(), value, m.name());
+            try {
+                writeOne(b, m.offset(), m.type(), value, m.name());
+            } catch (ClassCastException | IllegalArgumentException | IndexOutOfBoundsException e) {
+                // The pack declared this name with a type the engine's value doesn't fit (a vec4 frameTime,
+                // say). Leave it zero and report it, instead of throwing and disabling the chain (audit S5-01).
+                for (int i = 0; i < m.size(); i++) {
+                    b.put(m.offset() + i, (byte) 0);
+                }
+                missing.add(m.name());
+            }
         }
         return missing;
+    }
+
+    private static boolean isScalar(String type) {
+        return type.equals("float") || type.equals("int") || type.equals("uint") || type.equals("bool");
     }
 
     private static void writeOne(ByteBuffer b, int at, String type, Object value, String name) {

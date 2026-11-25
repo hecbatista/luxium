@@ -55,14 +55,20 @@ public final class ShadowTargets {
         GpuDevice device = RenderSystem.getDevice();
         if (resolution != size) {
             close();
-            size = resolution;
             int usage = GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST;
-            depth = device.createTexture("Luxium shadow depth", usage, GpuFormat.D32_FLOAT, size, size, 1, 1);
-            depthView = device.createTextureView(depth);
-            depthSampled = device.createTexture("Luxium shadowtex0 (sampled)", usage, GpuFormat.R32_FLOAT, size, size, 1, 1);
-            depthSampledView = device.createTextureView(depthSampled);
-            opaqueSampled = device.createTexture("Luxium shadowtex1 (sampled, no translucents)", usage, GpuFormat.R32_FLOAT, size, size, 1, 1);
-            opaqueSampledView = device.createTextureView(opaqueSampled);
+            try {
+                depth = device.createTexture("Luxium shadow depth", usage, GpuFormat.D32_FLOAT, resolution, resolution, 1, 1);
+                depthView = device.createTextureView(depth);
+                depthSampled = device.createTexture("Luxium shadowtex0 (sampled)", usage, GpuFormat.R32_FLOAT, resolution, resolution, 1, 1);
+                depthSampledView = device.createTextureView(depthSampled);
+                opaqueSampled = device.createTexture("Luxium shadowtex1 (sampled, no translucents)", usage, GpuFormat.R32_FLOAT, resolution, resolution, 1, 1);
+                opaqueSampledView = device.createTextureView(opaqueSampled);
+            } catch (RuntimeException e) {
+                close();   // whatever was made, so a retry starts clean (audit S4-05)
+                size = 0;
+                throw e;
+            }
+            size = resolution;
             MetalShadersClient.LOGGER.info("Shadow map allocated at {}x{}", size, size);
         }
         for (int index : writes) {
@@ -70,8 +76,15 @@ public final class ShadowTargets {
                 GpuTexture t = device.createTexture("Luxium shadowcolor" + index,
                         GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST,
                         FORMAT, size, size, 1, 1);
+                GpuTextureView view;
+                try {
+                    view = device.createTextureView(t);
+                } catch (RuntimeException e) {
+                    t.close();
+                    throw e;
+                }
                 colors.put(index, t);
-                colorViews.put(index, device.createTextureView(t));
+                colorViews.put(index, view);
             }
         }
     }
@@ -83,14 +96,21 @@ public final class ShadowTargets {
     }
 
     private static void close() {
-        if (depth != null) {
-            depthView.close();
-            depth.close();
-            depthSampledView.close();
-            depthSampled.close();
-            opaqueSampledView.close();
-            opaqueSampled.close();
+        for (AutoCloseable c : new AutoCloseable[]{depthView, depth, depthSampledView, depthSampled, opaqueSampledView, opaqueSampled}) {
+            if (c != null) {
+                try {
+                    c.close();
+                } catch (Exception ignored) {
+                    // freeing what a failed allocation left behind must not hide that failure
+                }
+            }
         }
+        depth = null;
+        depthView = null;
+        depthSampled = null;
+        depthSampledView = null;
+        opaqueSampled = null;
+        opaqueSampledView = null;
         colorViews.values().forEach(GpuTextureView::close);
         colors.values().forEach(GpuTexture::close);
         colorViews.clear();

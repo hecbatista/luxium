@@ -370,6 +370,9 @@ public final class ProgramTranslator {
      * engine sets luxium_ShadowFix = shadowModelView * inverse(camera view): the draw's own pose,
      * seen from the light instead of the camera.
      */
+    /** The pack's gl_FragDepth, held in OpenGL's convention until the wrapper main stores it reversed. */
+    private static final String FRAG_DEPTH_VAR = "luxium_packFragDepth";
+
     public static final String SHADOW_FIX = "luxium_ShadowFix";
 
     /** The game's overlay texture (hit flash, damage tint), bound by its entity draws (entity.vsh). */
@@ -860,6 +863,10 @@ public final class ProgramTranslator {
         boolean reversedFragDepth = !vertex && ((terrain != null && !terrain.shadow())
                 || (elements != null && !(dynamic && format.shadow())));
         Set<Integer> outputsUsed = new java.util.TreeSet<>();
+        // An explicit gl_FragDepth write is OpenGL-convention depth too: the pack's writes go to
+        // luxium_packFragDepth and the wrapper main stores 1 - that (Iris DepthTransformer wraps the
+        // assignments the same way; audit S2-03). Only where the wrapper below exists (out != null).
+        boolean fragDepthRewritten = false;
         for (int i = 0; i < t.size(); i++) {
             Token tok = t.get(i);
             if (tok.kind() == Kind.DIRECTIVE && (tok.text().startsWith("#version") || tok.text().startsWith("#extension"))) {
@@ -870,6 +877,11 @@ public final class ProgramTranslator {
                 continue;
             }
             String name = tok.text();
+            if (reversedFragDepth && out != null && name.equals("gl_FragDepth")) {
+                t.set(i, new Token(Kind.IDENT, FRAG_DEPTH_VAR));
+                fragDepthRewritten = true;
+                continue;
+            }
             if (reversedFragDepth && name.equals("gl_FragCoord")) {
                 t.set(i, new Token(Kind.IDENT, "vec4(gl_FragCoord.xy, 1.0 - gl_FragCoord.z, gl_FragCoord.w)"));
                 continue;
@@ -1036,6 +1048,9 @@ public final class ProgramTranslator {
                 h.append("uniform sampler2D ").append(GLINT_SAMPLER).append(";\n");
             }
         }
+        if (fragDepthRewritten) {
+            h.append("float ").append(FRAG_DEPTH_VAR).append(";\n");
+        }
         if (uniforms.containsKey("luxium_Fog")) {
             h.append("struct LuxiumFog { vec4 color; float density; float start; float end; float scale; };\n");
         }
@@ -1129,12 +1144,20 @@ public final class ProgramTranslator {
         if (out != null && !vertex) {
             // Epilogue: the pass's alpha test on output 0 (Iris tests what reaches draw buffer 0),
             // then the coverage mask: this fragment's depth, so the seed keeps the pack's pixel.
-            StringBuilder main = new StringBuilder("\nvoid main() {\n    luxium_pack_main();\n");
+            StringBuilder main = new StringBuilder("\nvoid main() {\n");
+            if (fragDepthRewritten) {
+                // Where the pack writes nothing, its depth is the fragment's own, in its convention.
+                main.append("    ").append(FRAG_DEPTH_VAR).append(" = 1.0 - gl_FragCoord.z;\n");
+            }
+            main.append("    luxium_pack_main();\n");
+            if (fragDepthRewritten) {
+                main.append("    gl_FragDepth = 1.0 - ").append(FRAG_DEPTH_VAR).append(";\n");
+            }
             if (!Float.isNaN(out.alphaTest()) && outputsUsed.contains(0)) {
                 main.append("    if (!(luxium_FragData0.a > ").append(out.alphaTest()).append(")) discard;\n");
             }
             if (out.coverage()) {
-                main.append("    ").append(COVERAGE_OUTPUT).append(" = vec4(gl_FragCoord.z, 0.0, 0.0, 1.0);\n");
+                main.append("    ").append(COVERAGE_OUTPUT).append(" = vec4(").append(fragDepthRewritten ? "gl_FragDepth" : "gl_FragCoord.z").append(", 0.0, 0.0, 1.0);\n");
             }
             main.append("}\n");
             body += main;

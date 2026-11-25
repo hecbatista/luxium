@@ -109,7 +109,12 @@ abstract class LevelRendererTerrainMixin {
         java.util.function.Supplier<String> label = () -> caught != null ? "Luxium translucent catch" : "Main (after Luxium deferred)";
         RenderPass real = RenderSystem.getDevice().createCommandEncoder().createRenderPass(
                 label, color, Optional.empty(), main.getDepthTextureView(), OptionalDouble.empty());
-        RenderSystem.bindDefaultUniforms(real);
+        try {
+            RenderSystem.bindDefaultUniforms(real);
+        } catch (RuntimeException e) {
+            real.close();   // never leave a pass open on the shared encoder (audit S4-07)
+            throw e;
+        }
         // A stand-in again, so the pack's translucent entities can step into the middle of it.
         LevelPass pass = new LevelPass(real, label, color, main.getDepthTextureView());
         try {
@@ -182,7 +187,7 @@ abstract class LevelRendererTerrainMixin {
     private void luxium$skipTranslucentTerrain(final ChunkSectionsToRender sections, final ChunkSectionLayerGroup group, final RenderPass pass,
                                                final GpuSampler sampler, final GpuTextureView atlas, final boolean wireframe,
                                                final Operation<Void> original) {
-        if (group == ChunkSectionLayerGroup.TRANSLUCENT && TerrainTakeover.drewTranslucent()) {
+        if (group == ChunkSectionLayerGroup.TRANSLUCENT && PackChain.ready() && TerrainTakeover.drewTranslucent()) {
             return;
         }
         original.call(sections, group, pass, sampler, atlas, wireframe);
@@ -193,7 +198,7 @@ abstract class LevelRendererTerrainMixin {
     private void luxium$skipOpaqueTerrain(final ChunkSectionsToRender sections, final ChunkSectionLayerGroup group, final RenderPass pass,
                                           final GpuSampler sampler, final GpuTextureView atlas, final boolean wireframe,
                                           final Operation<Void> original) {
-        if (group == ChunkSectionLayerGroup.OPAQUE && TerrainTakeover.drewOpaque()) {
+        if (group == ChunkSectionLayerGroup.OPAQUE && PackChain.ready() && TerrainTakeover.drewOpaque()) {
             return;
         }
         original.call(sections, group, pass, sampler, atlas, wireframe);
