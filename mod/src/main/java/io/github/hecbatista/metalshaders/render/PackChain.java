@@ -984,6 +984,12 @@ public final class PackChain {
         if (index != null && halves.containsKey(index)) {
             return view(index, true);
         }
+        // customTexture.<name>: after the render targets, before noisetex and depthtex (Iris's
+        // IrisSamplers order in CompositeRenderer and the gbuffers pipelines).
+        GpuTextureView custom = CustomTextures.byName(name);
+        if (custom != null) {
+            return custom;
+        }
         if (name.equals("depthtex1") || name.equals("depthtex2")) {
             return depthPreView;
         }

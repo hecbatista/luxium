@@ -60,7 +60,17 @@ public final class UniformWriter {
                 continue;
             }
             if (m.type().equals("LuxiumFog")) {
-                missing.add(m.name());   // the fog struct: not supplied yet
+                // std140: vec4 color, then density, start, end, scale (Std140Layout.STRUCTS).
+                if (value instanceof float[] f && f.length == 8) {
+                    for (int i = 0; i < 4; i++) {
+                        b.putFloat(m.offset() + 4 * i, f[i]);
+                    }
+                    for (int i = 0; i < 4; i++) {
+                        b.putFloat(m.offset() + 16 + 4 * i, f[4 + i]);
+                    }
+                } else {
+                    missing.add(m.name());
+                }
                 continue;
             }
             writeOne(b, m.offset(), m.type(), value, m.name());
