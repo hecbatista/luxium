@@ -391,7 +391,11 @@ GNU Lesser General Public License version 3
   0, then Metal's blit generateMipmaps through render/MetalMips.java), and only the pass that
   asks samples with mipmaps (Iris leaves them on for later passes that frame). A scaled pass's
   render area is (int) (width * scale) x (int) (height * scale), the viewport Iris sets for it in
-  CompositeRenderer.
+  CompositeRenderer. size.buffer.<buffer> = <x> <y> is read as Iris's ShaderProperties and
+  gl.texture.TextureScaleOverride read it (a value with a '.' is a fraction of the screen, cast to
+  int; else pixels), and the buffer is allocated at that size as in PackDirectives. Changed: our
+  own code; IRIS_FEATURE_BLOCK_EMISSION_ATTRIBUTE (always claimed by Iris's FeatureFlags) is
+  defined only for .properties files, since Luxium doesn't supply at_midBlock.w yet.
 
   render/PackChain.java cuts the chain as Vitrail's docs/frame.md describes ("The chain is cut in
   three"): the seed and deferred passes run after the opaque world, before translucents, and the
