@@ -9,6 +9,22 @@ one at a time with the flow in `mod/scripts/PACK-TESTING.md`:
 Earlier results (Complementary Unbound r5.10, Complementary Reimagined r5.9.3, Bliss v2.1.2,
 Solas v3.9) are in `docs/release/alpha.md`, "Fails safe".
 
+## Rethinking Voxels r0.1-beta9 (2026-11-25): falls back to vanilla, on purpose
+
+- Offline: 232/232 programs preprocess; **78/78** vertex+fragment pairs reach Metal. Its 31 compute
+  and 3 geometry shaders aren't translated.
+- The pack declares `iris.features.required=CUSTOM_IMAGES SSBO COMPUTE_SHADERS`: its voxel lighting
+  needs compute shaders, image load/store and storage buffers, none of which Luxium has. Luxium now
+  reads that directive and refuses such a pack before building anything, as Iris does where the
+  hardware lacks a feature (`MetalShadersClient.unsupportedFeatures`): "can't be used: it requires
+  CUSTOM_IMAGES, COMPUTE_SHADERS (iris.features.required), which Luxium doesn't support yet", with
+  the on-screen notice. The game renders vanilla; 0 validation messages, no crash.
+- (The pack's own `#define SSBO` makes SSBO an option, so the properties preprocessor expands the
+  flag to a number; such numbers are left out of the message.)
+- Under Iris on this Mac: Iris fails to load it too (Apple's OpenGL 4.1 has none of the three).
+- What it would take: compute shaders, custom images and SSBOs on Metal (Metallum has no compute
+  path for Luxium to use yet).
+
 ## Miniature 2.19 (2026-11-25): renders, matches Iris on the zoo and beach stops
 
 - Offline: **29/29** reach Metal before and after.

@@ -453,6 +453,33 @@ public final class MetalShadersClient implements ClientModInitializer {
         }
     }
 
+    /**
+     * Iris's feature flags (FeatureFlags) Luxium can't provide: no compute or tessellation
+     * shaders, no image load/store, no shader storage buffers. A pack that requires one is
+     * refused, as Iris refuses it where the hardware lacks the feature (ShaderPack: "unsupported
+     * pack"); a flag Iris doesn't know is refused too, as Iris does.
+     */
+    private static final Set<String> UNSUPPORTED_FEATURES = Set.of("CUSTOM_IMAGES", "COMPUTE_SHADERS", "TESSELLATION_SHADERS", "SSBO");
+    private static final Set<String> KNOWN_FEATURES = Set.of("SEPARATE_HARDWARE_SAMPLERS", "HIGHER_SHADOWCOLOR", "CUSTOM_IMAGES",
+            "PER_BUFFER_BLENDING", "COMPUTE_SHADERS", "TESSELLATION_SHADERS", "ENTITY_TRANSLUCENT", "REVERSED_CULLING",
+            "BLOCK_EMISSION_ATTRIBUTE", "CAN_DISABLE_WEATHER", "SSBO", "FADE_VARIABLE", "TEXTURE_FILTERING");
+
+    static List<String> unsupportedFeatures(String required) {
+        List<String> out = new java.util.ArrayList<>();
+        for (String flag : required.strip().split("\\s+")) {
+            String f = flag.toUpperCase(java.util.Locale.ROOT);
+            // A plain number is a flag name the properties preprocessor expanded (Rethinking
+            // Voxels' own "#define SSBO" makes SSBO an option): its name is lost, so skip it.
+            if (f.matches("\\d+")) {
+                continue;
+            }
+            if (!f.isEmpty() && (UNSUPPORTED_FEATURES.contains(f) || !KNOWN_FEATURES.contains(f))) {
+                out.add(f);
+            }
+        }
+        return out;
+    }
+
     /** A pack path in a world folder ("" is the shaders/ root). */
     private static String path(String folder, String file) {
         return folder.isEmpty() ? "/" + file : "/" + folder + "/" + file;
@@ -500,6 +527,11 @@ public final class MetalShadersClient implements ClientModInitializer {
     private static void prepareChain(Path pack, String folder, Map<String, String> defines, String properties) throws Exception {
         java.util.Properties props = new java.util.Properties();
         props.load(new java.io.StringReader(properties));
+        List<String> missing = unsupportedFeatures(props.getProperty("iris.features.required", ""));
+        if (!missing.isEmpty()) {
+            packUnusable("it requires " + String.join(", ", missing) + " (iris.features.required), which Luxium doesn't support yet");
+            return;
+        }
 
         List<String> fragmentSources = new java.util.ArrayList<>();
         for (String program : PackDirectives.foldOrder(pack, folder)) {
