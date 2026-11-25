@@ -67,24 +67,110 @@ public final class MetalShadersClient implements ClientModInitializer {
             if (testConfig != null) {
                 io.github.hecbatista.metalshaders.pack.LuxiumConfig.writeOverride(configFile, testConfig);
             }
-            shadersEnabledAtStartup = io.github.hecbatista.metalshaders.pack.LuxiumConfig.enabled(configFile);
+            boolean on = io.github.hecbatista.metalshaders.pack.LuxiumConfig.enabled(configFile);
+            LOGGER.info("Shaders {} ({})", on ? "on" : "off: the game renders as without Luxium", configFile);
         } catch (IOException | RuntimeException e) {
             LOGGER.error("Couldn't read {}: shaders stay on", configFile, e);
         }
-        LOGGER.info("Shaders {} ({})", shadersEnabledAtStartup ? "on" : "off: the game renders as without Luxium", configFile);
 
         logPacks(shaderpacks);
         readMeshDirectives(shaderpacks);
+        // No chunk exists yet: Sodium's first section manager takes this format.
+        wantedMeshFormat = packPresent;
     }
 
     /** config/luxium.properties (LuxiumConfig). */
     private static Path configFile;
 
+    public static Path configFile() {
+        return configFile != null ? configFile : FabricLoader.getInstance().getConfigDir().resolve("luxium.properties");
+    }
+
+    /** The game's shaderpacks/ folder, where Iris and OptiFine look too. */
+    public static Path shaderpacksDir() {
+        return FabricLoader.getInstance().getGameDir().resolve("shaderpacks");
+    }
+
     /**
-     * enableShaders as read at startup. It decides the chunk vertex format for the whole session
-     * (ChunkMeshFormatsMixin), so turning shaders on or off takes a restart.
+     * Whether Sodium meshes chunks in Luxium's wider vertex (ChunkMeshFormatsMixin): true while a
+     * pack is chosen. Sodium reads the format only when it builds a section manager (its renderer,
+     * mesh builder, region and arena strides), so a change is asked for here ({@link #wantedMeshFormat}
+     * plus LevelExtractor.allChanged) and applied by {@link #applyMeshFormat} as Sodium builds the
+     * next one. Iris switches its chunk format with a rebuild too (WorldRenderingSettings.setVertexFormat).
      */
-    public static volatile boolean shadersEnabledAtStartup = true;
+    private static volatile boolean luxiumMeshFormat;
+    private static volatile boolean wantedMeshFormat;
+
+    public static boolean luxiumMeshFormat() {
+        return luxiumMeshFormat;
+    }
+
+    /**
+     * Called by SodiumWorldRendererMixin as Sodium starts building a section manager (render
+     * thread): switches the format and Sodium's own terrain pipelines to match.
+     */
+    public static void applyMeshFormat() {
+        boolean wanted = wantedMeshFormat;
+        if (wanted != luxiumMeshFormat) {
+            io.github.hecbatista.metalshaders.sodium.SodiumPrograms.switchFormat(wanted);
+            luxiumMeshFormat = wanted;
+            LOGGER.info("Chunk format: {}", wanted ? "Luxium's (a pack is in use)" : "Sodium's own (no pack)");
+        }
+    }
+
+    /** The pack's mesh directives were read for this load; waiting for the format if it changes. */
+    private static boolean meshDirectivesRead;
+    private static boolean wantedMeshFormatAsked;
+
+    /** Set by {@link #requestReload}; acted on at the next frame, on the render thread. */
+    private static volatile boolean reloadRequested;
+
+    /**
+     * Reloads the pack at the start of the next frame: config/luxium.properties (on/off, which
+     * pack) and shaderpacks/&lt;pack&gt;.txt are read again, everything loaded is closed, and the
+     * chosen pack (or none) is loaded as at world load. Chunks are rebuilt only if their mesh
+     * format or contents change (format, separateAo, block ids). Any thread.
+     */
+    public static void requestReload() {
+        reloadRequested = true;
+    }
+
+    /** Whether a pack is in use now: chosen, and its programs loaded for this world. */
+    public static boolean packActive() {
+        return packPresent && loadedFolder != null && PackChain.ready();
+    }
+
+    /** Whether the chosen pack failed to load (packUnusable was called for it). */
+    public static boolean packFailed() {
+        return packPresent && reportedFailure != null;
+    }
+
+    /** The pack in use or about to be loaded (file or folder name), or null. */
+    public static String activePackName() {
+        return packPresent ? chosenName : null;
+    }
+
+    /**
+     * Forgets the pack: closes its programs, buffers and textures, and its settings, formulas and
+     * layout, so the next frame chooses and loads again.
+     */
+    private static void unloadPack() {
+        if (loadedFolder != null) {
+            PackChain.unload();
+        }
+        loadedFolder = null;
+        packInfo = null;
+        packPath = null;
+        packProperties = null;
+        customUniforms = null;
+        packOptions = null;
+        packLoaded = false;
+        meshDirectivesRead = false;
+        wantedMeshFormatAsked = false;
+        chosenName = null;
+        reportedFailure = null;
+        lastChoice = null;
+    }
 
     private static String lastChoice;
     /** The pack choosePack picked last, for messages. */
@@ -126,15 +212,12 @@ public final class MetalShadersClient implements ClientModInitializer {
         }
         try {
             var choice = io.github.hecbatista.metalshaders.pack.LuxiumConfig.choose(shaderpacks, configFile);
-            Path pack = shadersEnabledAtStartup ? choice.pack() : null;
-            if (pack != null) {
-                chosenName = pack.getFileName().toString();
-            }
-            String reason = shadersEnabledAtStartup || !choice.enabled() ? choice.reason()
-                    : "shaders were off at startup: restart to turn them on";
+            Path pack = choice.pack();
+            chosenName = pack != null ? pack.getFileName().toString() : null;
+            String reason = choice.reason();
             if (!reason.equals(lastChoice)) {
                 lastChoice = reason;
-                if (pack == null && choice.enabled() && shadersEnabledAtStartup && reason.contains("isn't in")) {
+                if (pack == null && choice.enabled() && reason.contains("isn't in")) {
                     LOGGER.warn("Shader pack: {}", reason);
                 } else {
                     LOGGER.info("Shader pack: {}", pack == null ? "none, " + reason : pack.getFileName() + " (" + reason + ")");
@@ -183,7 +266,10 @@ public final class MetalShadersClient implements ClientModInitializer {
             Path chosen = choosePack(shaderpacks);
             packPresent = chosen != null;
             if (chosen == null) {
-                return false;
+                packOptions = null;
+                boolean changed = !meshKey.equals("none");
+                meshKey = "none";
+                return changed;
             }
             packOptions = loadOptions(chosen);
             String properties = PackReader.open(chosen, (name, root, shaders) ->
@@ -267,17 +353,46 @@ public final class MetalShadersClient implements ClientModInitializer {
         io.github.hecbatista.metalshaders.render.PerfStats.frame();
         long valuesStart = io.github.hecbatista.metalshaders.render.PerfStats.start();
         GAME_UNIFORMS.update(mc, deltaTracker.getGameTimeDeltaPartialTick(false), now);
+        if (reloadRequested) {
+            reloadRequested = false;
+            LOGGER.info("Reloading the shader pack");
+            unloadPack();
+            if (mc.level == null) {
+                // No world, so no chunks: decide the format now, and the next world's first
+                // section manager is built with it (no second rebuild once the world is in).
+                readMeshDirectives(shaderpacksDir());
+                wantedMeshFormat = packPresent;
+                meshDirectivesRead = true;
+            }
+        }
         if (mc.level == null) {
             return;
         }
         if (!packLoaded) {
-            packLoaded = true;
-            if (readMeshDirectives(FabricLoader.getInstance().getGameDir().resolve("shaderpacks"))) {
-                LOGGER.info("Chunk mesh directives changed since startup: rebuilding all chunks");
-                mc.levelExtractor.allChanged();
+            if (!meshDirectivesRead) {
+                meshDirectivesRead = true;
+                boolean meshChanged = readMeshDirectives(shaderpacksDir());
+                if (meshChanged || luxiumMeshFormat != packPresent) {
+                    // Sodium builds a new section manager next frame and applies the format then.
+                    wantedMeshFormat = packPresent;
+                    LOGGER.info("Chunk meshes change ({}): rebuilding all chunks",
+                            packPresent ? "pack " + chosenName : "no pack, Sodium's own format");
+                    mc.levelExtractor.allChanged();
+                }
             }
-            loadPackValues();
-            keepImprovedTransparencyOff();
+            // The pack's programs read Luxium's vertex: load them only once Sodium meshes with it,
+            // or the frame in between would draw Sodium's 20-byte meshes through 36-byte pipelines.
+            if (luxiumMeshFormat == packPresent) {
+                packLoaded = true;
+                loadPackValues();
+                keepImprovedTransparencyOff();
+            } else if (!wantedMeshFormatAsked) {
+                wantedMeshFormatAsked = true;
+                if (wantedMeshFormat != packPresent) {   // read at the title screen for another world
+                    wantedMeshFormat = packPresent;
+                    mc.levelExtractor.allChanged();
+                }
+            }
         }
         // Step 7b: the folder whose programs draw this world; a different one is loaded in place
         // of the last (Iris keeps one pipeline per world; we keep only the current one).
@@ -326,8 +441,8 @@ public final class MetalShadersClient implements ClientModInitializer {
     private static String loadedFolder;
 
     /**
-     * Once per session, for the first pack found: its settings, ids and formulas, which every
-     * world shares. The world's own programs are loaded by {@link #loadWorld}.
+     * Once per pack load (startup's first world, or {@link #requestReload}), for the chosen pack:
+     * its settings, ids and formulas, which every world shares. The world's own programs are loaded by {@link #loadWorld}.
      */
     private static void loadPackValues() {
         try {

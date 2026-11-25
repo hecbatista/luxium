@@ -107,6 +107,11 @@ The full meanings are in `docs/history/` (grep the name).
   cold-cache timing see 7g in `docs/history/step-7.md`.
 - Test only: `LUXIUM_TOUR=1`, `LUXIUM_TOUR_ONLY`, `LUXIUM_TEST_NO_PACK=1`, `LUXIUM_TEST_SETTINGS`,
   `LUXIUM_TEST_CONFIG="enableShaders=false;shaderPack=X"` (writes config/luxium.properties before Luxium reads it),
+  `LUXIUM_TEST_TOGGLE=1` (shaders off and on, and a setting changed, live in a still scene; add `LUXIUM_TEST_NO_OIT=1`
+  and `LUXIUM_TEST_CONFIG="enableShaders=false"` for the off-from-start reference, then compare with
+  `java mod/scripts/ImageDiff.java a.png b.png [diff.png]`: live off must match it exactly),
+  `LUXIUM_TEST_MENUS=1` (the Shader Packs screen through Video Settings and the I key: off, Apply, Done, Cancel),
+  `LUXIUM_TEST_OPTIONS=1` (the pack's option screens: sub-screen, profile, slider drag, Shift-click, Apply, Shift + Reset),
   `LUXIUM_TEST_NO_BOB=1`, `LUXIUM_METALLUM_JAR=<jar>` (run against another Metallum, e.g. Modrinth's),
   `LUXIUM_TEST_PACKS=<dir>` (the test copies its packs from that folder instead of mod/run/shaderpacks),
   `LUXIUM_TEST_WALK_ONLY=1`, `LUXIUM_TEST_BOX_ONLY=1`, `LUXIUM_PERF=1`

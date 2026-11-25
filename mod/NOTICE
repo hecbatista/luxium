@@ -343,6 +343,72 @@ GNU Lesser General Public License version 3
   and IrisRenderingPipeline.shouldDisableVanillaEntityShadows: the vanilla blob shadow under
   entities is not submitted while the pack has a shadow pass.
 
+  src/main/java/io/github/hecbatista/metalshaders/gui/ShaderPackScreen.java follows the
+  behaviour of net.irisshaders.iris.gui.screen.ShaderPackScreen and
+  gui.element.ShaderPackSelectionList: a first row that turns shaders on and off and is inactive
+  with no packs; clicking a pack selects it and also turns shaders on; the applied pack drawn in
+  yellow (0xFFFFF263) and every pack grey (0xFFA2A2A2) while shaders are off; Cancel, Apply and
+  Done, with Done and Esc applying; "Open Shader Pack Folder...". The English labels follow
+  Iris's en_us.json (assets/luxium/lang/en_us.json). Changed: vanilla's list and buttons instead
+  of Iris's own widgets and textures, no transitions, a single footer layout, and no Download,
+  drag-and-drop or settings button yet.
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/PackMenus.java follows Iris's grammar for
+  a pack's option menus and profiles (net.irisshaders.iris.shaderpack.properties.ShaderProperties:
+  screen, screen.<NAME>, screen.columns, screen.<NAME>.columns, sliders and profile.<NAME>, read
+  from the unpreprocessed file in file order, OrderBackedProperties; values split on spaces;
+  shaderpack.option.menu.OptionMenuContainer, OptionMenuElementScreen and OptionMenuElement:
+  <empty>, <profile> dropped without profiles, [NAME] links, "*" for unused options, unknown
+  names as empty slots, no screen line meaning "*", 2 columns or 3 past 18 elements;
+  shaderpack.option.ProfileSet and Profile: !program.X, profile.X includes with cycle errors,
+  !OPT, OPT=value and OPT:value, bare on/off names, matching by most entries first, cycling with
+  wrap-around). Changed: "*" on several screens fills the first in file order, and a profile
+  included by two siblings isn't taken for a cycle.
+
+  src/main/java/io/github/hecbatista/metalshaders/pack/PackLang.java follows how Iris reads a
+  pack's lang files (shaders/lang/<language>.lang, the player's language over en_us).
+  Changed: file names matched without regard to case.
+
+  src/main/java/io/github/hecbatista/metalshaders/gui/ShaderOptionsScreen.java and
+  gui/PackSettings.java follow the behaviour of Iris's option screens
+  (net.irisshaders.iris.gui.element.ShaderPackOptionList, gui.NavigationController,
+  gui.element.widget.BaseOptionElementWidget, BooleanElementWidget, StringElementWidget,
+  SliderElementWidget, LinkElementWidget, ProfileElementWidget, and Iris's option queue,
+  net.irisshaders.iris.Iris.getShaderPackOptionQueue): label left and value box right; On/Off
+  coloured only when not the default; value options cycling with left and right clicks, shown
+  as prefix + value label (or value + suffix) in 0xFF6688FF; sliders taking one step per allowed
+  value under the mouse; links with ">"; the profile row with "Custom" in yellow; labels in
+  0xFFFFC94A while changed; Shift-click to one default; Shift + Reset to reset everything and
+  apply; Back and Esc through the sub-screens; pending values kept until Apply or Cancel and
+  dropped when the pack changes; the settings file holding only values that differ from the
+  defaults, deleted when none do (Iris.tryUpdateConfigPropertiesFile). Changed: vanilla sprites
+  instead of Iris's textures, comments as a tooltip instead of a panel, no keyboard navigation
+  between cells yet, no Import/Export.
+
+  src/main/java/io/github/hecbatista/metalshaders/gui/LuxiumKeys.java takes Iris 26.3's default
+  key for the screen, I (net.irisshaders.iris.Iris, shaderpackScreenKeybind).
+
+  src/main/java/io/github/hecbatista/metalshaders/compat/SodiumOptionsEntry.java adds a
+  "Shader Packs" page to Sodium's Video Settings through Sodium's config API, as Iris does
+  (net.irisshaders.iris.compat.sodium.config.IrisConfig: registerOwnModOptions with an external
+  page that opens the Shader Packs screen). Changed: only that page, no option overlays.
+
+  src/main/java/io/github/hecbatista/metalshaders/mixin/VideoSettingsScreenMixin.java puts a
+  "Shader Packs..." button in Video Settings, where Iris puts its own
+  (net.irisshaders.iris.mixin.gui.MixinVideoSettingsScreen). Changed: added with
+  OptionsList.addBig(AbstractWidget) after the graphics preset, not as a fake OptionInstance.
+
+  src/main/java/io/github/hecbatista/metalshaders/gui/LuxiumDebugEntry.java and
+  mixin/DebugScreenEntriesMixin.java, mixin/DebugScreenEntryListMixin.java follow how Iris adds
+  its F3 lines (net.irisshaders.iris.gui.debug.IrisDebugEntry, mixin.MixinDebugEntries,
+  mixin.MixinDebugScreenEntriesList): an entry registered with DebugScreenEntries, shown in the
+  overlay unless the player set its status. Changed: one line of our own, with colours.
+
+  src/main/java/io/github/hecbatista/metalshaders/sodium/SodiumPrograms.java solves the problem
+  net.irisshaders.iris.compat.sodium.mixin.MixinShaderChunkRenderer solves (Sodium's terrain
+  pipelines are built once, with the first chunk vertex format). Changed: one set kept per
+  format and swapped with it, where Iris always builds them with Sodium's own format.
+
 Vitrail, https://github.com/avpbynf/Vitrail-Shaders (commit 7a3cdcbe)
 Copyright the Vitrail contributors
 GNU Lesser General Public License version 3
