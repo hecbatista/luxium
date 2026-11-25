@@ -328,6 +328,10 @@ public final class MetalShadersClient implements ClientModInitializer {
         if (!options.ignored().isEmpty()) {
             LOGGER.warn("Pack settings ignored: {}", options.ignored());
         }
+        if (!options.computeOff().isEmpty()) {
+            LOGGER.info("Pack settings switched off because they turn on compute programs, which Luxium can't run: {}",
+                    options.computeOff());
+        }
         if (!options.ambiguous().isEmpty()) {
             LOGGER.info("Pack settings dropped as ambiguous (two different defaults), as Iris does: {}", options.ambiguous());
         }
@@ -406,12 +410,19 @@ public final class MetalShadersClient implements ClientModInitializer {
             }
         }
         if (customUniforms != null) {
-            customUniforms.update(GAME_UNIFORMS::get, (Float) GAME_UNIFORMS.get("frameTime"));
+            customUniforms.update(MetalShadersClient::gameValue, (Float) GAME_UNIFORMS.get("frameTime"));
         }
         io.github.hecbatista.metalshaders.render.PerfStats.end(io.github.hecbatista.metalshaders.render.PerfStats.Section.VALUES, valuesStart);
         if (now - lastLogNanos > 5_000_000_000L) {
             lastLogNanos = now;
             LOGGER.info("Values: {}", describe());
+            // Only formulas still failing five seconds later: before the first frame is drawn,
+            // the ones that read its matrices can't run yet.
+            java.util.Map<String, String> failing = customUniforms == null ? java.util.Map.of() : customUniforms.failing();
+            if (!failing.isEmpty() && failing.keySet().equals(lastFailing)) {
+                LOGGER.warn("Pack formulas still failing: {}", failing);
+            }
+            lastFailing = failing.keySet();
         }
     }
 
@@ -426,11 +437,23 @@ public final class MetalShadersClient implements ClientModInitializer {
     }
 
     private static final RenderMatrices RENDER_MATRICES = new RenderMatrices();
+    /** The formulas that failed at the last 5-second check. */
+    private static java.util.Set<String> lastFailing = java.util.Set.of();
+
+    /** A value the game supplies (not the pack's formulas): the frame's matrices, then the rest. */
+    private static Object gameValue(String name) {
+        Object matrix = RENDER_MATRICES.get(name);
+        return matrix != null ? matrix : GAME_UNIFORMS.get(name);
+    }
 
     /** Called by GameRendererRenderMixin with this frame's camera rotation and projection. */
     public static void captureMatrices(org.joml.Matrix4fc viewRotation, org.joml.Matrix4fc projection) {
         RENDER_MATRICES.capture(viewRotation, projection,
                 com.mojang.blaze3d.systems.RenderSystem.getDevice().getDeviceInfo().isZZeroToOne());
+        Object sunAngle = GAME_UNIFORMS.get("sunAngle");
+        RENDER_MATRICES.celestial(GAME_UNIFORMS.sunAngleDegrees(), GAME_UNIFORMS.moonAngleDegrees(),
+                sunAngle instanceof Float f && f * 360f < 180f,
+                io.github.hecbatista.metalshaders.uniform.ShadowMatrices.directives().sunPathRotation());
     }
 
     /** The pack in use, its layout, and its preprocessed shaders.properties (null: no pack). */
@@ -472,11 +495,14 @@ public final class MetalShadersClient implements ClientModInitializer {
                     entityIds.of("minecraft:pig"), entityIds.of("minecraft:slime"));
             LOGGER.info("item.properties: {} items numbered, {} entries skipped (block states aren't supported, as in Iris)",
                     itemIds.size(), itemIds.skipped().size());
-            customUniforms = CustomUniforms.load(PropertiesPreprocessor.preprocess(properties, propertyDefines),
-                    GAME_UNIFORMS.snapshot().keySet());
-            customUniforms.update(GAME_UNIFORMS::get, (Float) GAME_UNIFORMS.get("frameTime"));
+            java.util.Set<String> gameNames = new java.util.HashSet<>(GAME_UNIFORMS.snapshot().keySet());
+            gameNames.addAll(RenderMatrices.NAMES);
+            customUniforms = CustomUniforms.load(PropertiesPreprocessor.preprocess(properties, propertyDefines), gameNames);
+            // Logged before the first run: formulas reading the frame's matrices can't run until
+            // a frame has been drawn, which isn't a reason to call them dropped.
             LOGGER.info("Pack formulas: {} loaded, {} dropped: {}",
                     customUniforms.size(), customUniforms.dropped().size(), customUniforms.dropped());
+            customUniforms.update(MetalShadersClient::gameValue, (Float) GAME_UNIFORMS.get("frameTime"));
             packProperties = PropertiesPreprocessor.preprocess(properties, propertyDefines);
             packInfo = PackReader.read(pack);
             packPath = pack;
@@ -542,6 +568,33 @@ public final class MetalShadersClient implements ClientModInitializer {
         }
     }
 
+    /**
+     * Iris's feature flags (FeatureFlags) Luxium can't provide: no compute or tessellation
+     * shaders, no image load/store, no shader storage buffers. A pack that requires one is
+     * refused, as Iris refuses it where the hardware lacks the feature (ShaderPack: "unsupported
+     * pack"); a flag Iris doesn't know is refused too, as Iris does.
+     */
+    private static final Set<String> UNSUPPORTED_FEATURES = Set.of("CUSTOM_IMAGES", "COMPUTE_SHADERS", "TESSELLATION_SHADERS", "SSBO");
+    private static final Set<String> KNOWN_FEATURES = Set.of("SEPARATE_HARDWARE_SAMPLERS", "HIGHER_SHADOWCOLOR", "CUSTOM_IMAGES",
+            "PER_BUFFER_BLENDING", "COMPUTE_SHADERS", "TESSELLATION_SHADERS", "ENTITY_TRANSLUCENT", "REVERSED_CULLING",
+            "BLOCK_EMISSION_ATTRIBUTE", "CAN_DISABLE_WEATHER", "SSBO", "FADE_VARIABLE", "TEXTURE_FILTERING");
+
+    static List<String> unsupportedFeatures(String required) {
+        List<String> out = new java.util.ArrayList<>();
+        for (String flag : required.strip().split("\\s+")) {
+            String f = flag.toUpperCase(java.util.Locale.ROOT);
+            // A plain number is a flag name the properties preprocessor expanded (Rethinking
+            // Voxels' own "#define SSBO" makes SSBO an option): its name is lost, so skip it.
+            if (f.matches("\\d+")) {
+                continue;
+            }
+            if (!f.isEmpty() && (UNSUPPORTED_FEATURES.contains(f) || !KNOWN_FEATURES.contains(f))) {
+                out.add(f);
+            }
+        }
+        return out;
+    }
+
     /** A pack path in a world folder ("" is the shaders/ root). */
     private static String path(String folder, String file) {
         return folder.isEmpty() ? "/" + file : "/" + folder + "/" + file;
@@ -589,7 +642,11 @@ public final class MetalShadersClient implements ClientModInitializer {
     private static void prepareChain(Path pack, String folder, Map<String, String> defines, String properties) throws Exception {
         java.util.Properties props = new java.util.Properties();
         props.load(new java.io.StringReader(properties));
-        io.github.hecbatista.metalshaders.render.PackChain.setSizeOverrides(props);
+        List<String> missing = unsupportedFeatures(props.getProperty("iris.features.required", ""));
+        if (!missing.isEmpty()) {
+            packUnusable("it requires " + String.join(", ", missing) + " (iris.features.required), which Luxium doesn't support yet");
+            return;
+        }
 
         List<String> fragmentSources = new java.util.ArrayList<>();
         for (String program : PackDirectives.foldOrder(pack, folder)) {
@@ -605,9 +662,9 @@ public final class MetalShadersClient implements ClientModInitializer {
         List<String> names = info.programFiles().getOrDefault(folder, List.of()).stream()
                 .filter(f -> f.endsWith(".fsh"))
                 .map(f -> f.substring(0, f.length() - 4))
-                .filter(n -> n.matches("(deferred|composite)\\d*|final"))
+                .filter(n -> n.matches("(prepare|deferred|composite)\\d*|final"))
                 .filter(n -> info.programFiles().get(folder).contains(n + ".vsh"))
-                .sorted(java.util.Comparator.comparingInt((String n) -> n.startsWith("deferred") ? 0 : n.startsWith("composite") ? 1 : 2)
+                .sorted(java.util.Comparator.comparingInt((String n) -> n.startsWith("prepare") ? -1 : n.startsWith("deferred") ? 0 : n.startsWith("composite") ? 1 : 2)
                         .thenComparingInt(n -> n.replaceAll("\\D", "").isEmpty() ? 0 : Integer.parseInt(n.replaceAll("\\D", ""))))
                 .toList();
 
@@ -638,6 +695,23 @@ public final class MetalShadersClient implements ClientModInitializer {
             }
         }
         LOGGER.info("Chain: {} passes in order {}, scales {}", programs.size(), programs.stream().map(Map.Entry::getKey).toList(), scales);
+        Map<Integer, String[]> bufferSizes = new HashMap<>();
+        for (String key : props.stringPropertyNames()) {
+            if (key.startsWith("size.buffer.")) {
+                Integer index = PackChain.targetIndex(key.substring("size.buffer.".length()));
+                String[] parts = props.getProperty(key).strip().split("\\s+");
+                if (index != null && parts.length == 2) {
+                    bufferSizes.put(index, parts);
+                } else {
+                    LOGGER.warn("Chain: {} = {} not understood, ignored", key, props.getProperty(key));
+                }
+            }
+        }
+        PackChain.setBufferSizes(bufferSizes);
+        if (!bufferSizes.isEmpty()) {
+            LOGGER.info("Chain: buffer sizes {}", bufferSizes.entrySet().stream()
+                    .map(e -> "colortex" + e.getKey() + "=" + String.join("x", e.getValue())).toList());
+        }
         String clouds = props.getProperty("clouds", "").strip();
         PackChain.setCloudsOff(clouds.equals("off"));
         LOGGER.info("Chain: clouds={} (the game's clouds are {})", clouds.isEmpty() ? "(not set)" : clouds, clouds.equals("off") ? "hidden" : "drawn");

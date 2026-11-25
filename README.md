@@ -45,15 +45,23 @@ All taken with [Complementary Shaders](https://www.complementary.dev/) by EminGT
 
 ## 🎨 Shader pack compatibility
 
-Status as of 2026-11-23, with each pack at its default settings:
+Status as of 2026-11-25, with each pack at its default settings:
 
 | Pack | Status | Notes |
 |---|---|---|
 | Complementary Unbound r5.10 | ✅ Works | The pack Luxium is built against. Compared with Iris scene by scene: sky, terrain, water, clouds, shadows, entities, block entities, particles, weather, hand, Nether and End. |
-| Complementary Reimagined r5.9.3 | ✅ Loads and renders | No errors; not yet compared with Iris in detail. |
-| Bliss v2.1.2 (Chocapic13 edit) | ❌ Falls back to vanilla | One program doesn't compile yet (missing `MC_HAND_DEPTH`, `texelFetch2D`). |
-| Solas v3.9 | ❌ Falls back to vanilla | One program doesn't compile yet (missing `MC_RENDER_QUALITY`). |
+| Complementary Reimagined r5.10 | ✅ Works | Matches Iris on the zoo and beach test scenes; the End portal's starfield is dimmer (same as Unbound). r5.9.3 also loads. |
+| Bliss v2.1.2 (Chocapic13 edit) | ✅ Loads and renders | Matches Iris on the zoo and beach test scenes. Its optional floodfill light (compute) isn't supported. |
+| Solas v3.9 | ✅ Loads and renders | Iris can't run it on macOS, so it hasn't been compared. |
+| Miniature 2.19 | ✅ Loads and renders | Matches Iris on the zoo and beach test scenes. |
+| Mellow 3.5 | ✅ Loads and renders | Close to Iris on the zoo and beach test scenes; walls and mobs come out a little darker. |
+| MakeUp UltraFast 9.6a | ✅ Loads and renders | Matches Iris on the zoo and beach test scenes. |
+| Photon v1.4 | ✅ Loads and renders | Matches Iris on the zoo and beach test scenes (compared with cloud shadows off, which Iris on macOS needs). Its compute skylight (`SH_SKYLIGHT`) is switched off; Iris shows slightly more haze. |
+| BSL v10.1.8 | ✅ Loads and renders | Matches Iris on the zoo and beach test scenes (sky, light, shadows, water, clouds, entities, block entities, portals, glass). Night, caves, weather, Nether and End not compared yet. |
+| Rethinking Voxels r0.1-beta9 | ❌ Falls back to vanilla | Requires compute shaders, custom images and storage buffers (so does Iris on macOS). |
 | Other packs | ❔ Untested | They may work, fall back, or look wrong. Reports welcome. |
+
+Per-pack test notes: [docs/release/compatibility.md](docs/release/compatibility.md).
 
 When a pack can't be used, Luxium doesn't crash. The game renders without shaders, shows a "Luxium: shaders off" notice, and writes one line to `logs/latest.log` saying why.
 

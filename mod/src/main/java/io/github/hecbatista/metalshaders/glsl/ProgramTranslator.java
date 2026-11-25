@@ -24,7 +24,9 @@ import java.util.regex.Pattern;
  * <ul>
  *   <li>Both stages get the <b>same</b> uniform block: every loose uniform either stage
  *       declares, sorted by name. Vulkan doesn't allow loose uniforms, and the two stages must
- *       agree on the block's layout.</li>
+ *       agree on the block's layout. A stage that declares its own global (not a uniform) under
+ *       a uniform's name from the other stage gets that member under a placeholder name
+ *       ({@code luxium_other_<name>}): same layout, no redefinition.</li>
  *   <li>Each value passed from the vertex to the fragment stage gets a location number from one
  *       shared table, by name, so both sides agree.</li>
  * </ul>
@@ -35,15 +37,32 @@ public final class ProgramTranslator {
     public static final String UNIFORM_BLOCK = "LuxiumUniforms";
 
     /** Old function name -> new name. */
-    private static final Map<String, String> FUNCTION_RENAMES = Map.of(
+    private static final Map<String, String> FUNCTION_RENAMES = pairs(
             "texture2D", "texture",
             "texture3D", "texture",
             "textureCube", "texture",
             "texture2DLod", "textureLod",
             "texture3DLod", "textureLod",
+            // Iris CommonTransformer's other legacy names (see NOTICE).
+            "texture2DProj", "textureProj",
+            "texture3DProj", "textureProj",
+            "texture2DGrad", "textureGrad",
+            "texture2DGradARB", "textureGrad",
+            "texture3DGrad", "textureGrad",
+            "texelFetch2D", "texelFetch",
+            "texelFetch3D", "texelFetch",
+            "textureSize2D", "textureSize",
             "shadow2D", "luxium_shadow2D",
             "shadow2DLod", "luxium_shadow2DLod",
             "ftransform", "luxium_ftransform");
+
+    private static Map<String, String> pairs(String... keyValues) {
+        Map<String, String> m = new LinkedHashMap<>();
+        for (int i = 0; i < keyValues.length; i += 2) {
+            m.put(keyValues[i], keyValues[i + 1]);
+        }
+        return Map.copyOf(m);
+    }
 
     /** Old built-in uniforms: name -> (new name, type, array suffix). */
     private record Builtin(String name, String type, String array) {
@@ -184,10 +203,14 @@ public final class ProgramTranslator {
         final Set<String> identifiers = new LinkedHashSet<>();
         final Set<String> declaredNames = new LinkedHashSet<>();
         final Map<String, Integer> identifierCount = new java.util.HashMap<>();
+        /** Every name declared at file scope (variables, functions, types), with or without a storage word. */
+        final Set<String> globalNames;
+        /** Names this stage declares as loose (non-opaque) uniforms. */
+        final Set<String> uniformNames = new LinkedHashSet<>();
 
         StageScan(Stage stage, String source) {
             this.stage = stage;
-            this.tokens = new ArrayList<>(GlslTokenizer.tokenize(source));
+            this.tokens = new ArrayList<>(NameFixes.apply(GlslTokenizer.tokenize(source)));
             for (Token t : tokens) {
                 if (t.kind() == Kind.IDENT) {
                     identifiers.add(t.text());
@@ -200,8 +223,21 @@ public final class ProgramTranslator {
             for (Declaration d : declarations) {
                 for (Declarator x : d.declarators()) {
                     declaredNames.add(x.name());
+                    if (d.storage().equals("uniform")) {
+                        uniformNames.add(x.name());
+                    }
                 }
             }
+            this.globalNames = fileScopeNames(tokens);
+        }
+
+        /**
+         * The block member name for uniform {@code name} in this stage: the name itself, or a
+         * placeholder when this stage declares its own global of that name (Bliss's deferred:
+         * {@code vec3 sunVec = ...} in the vertex stage, {@code uniform vec3 sunVec} in the fragment).
+         */
+        String memberName(String name) {
+            return globalNames.contains(name) && !uniformNames.contains(name) ? "luxium_other_" + name : name;
         }
 
         /**
@@ -217,8 +253,45 @@ public final class ProgramTranslator {
         }
     }
 
-    /** Metal's sampler slots per stage ([[sampler(0..15)]]). */
-    static final int MAX_SAMPLERS_PER_STAGE = 16;
+    /**
+     * Names declared at file scope: outside braces and parentheses, a name that follows a type name
+     * ({@code vec3 sunVec}, {@code float f(}), an array suffix ({@code float[2] w}) or a comma
+     * ({@code vec3 a, b}). Over-collects harmlessly (a type after a qualifier, a block or struct
+     * name): only names that are also uniforms matter.
+     */
+    static Set<String> fileScopeNames(List<Token> tokens) {
+        Set<String> names = new LinkedHashSet<>();
+        int braces = 0;
+        int parens = 0;
+        Token previous = null;
+        for (Token t : tokens) {
+            if (t.trivia() || t.kind() == Kind.DIRECTIVE) {
+                continue;
+            }
+            if (t.is("{")) {
+                braces++;
+            } else if (t.is("}")) {
+                braces = Math.max(0, braces - 1);
+            } else if (t.is("(")) {
+                parens++;
+            } else if (t.is(")")) {
+                parens = Math.max(0, parens - 1);
+            } else if (t.kind() == Kind.IDENT && braces == 0 && parens == 0 && previous != null
+                    && (previous.kind() == Kind.IDENT || previous.is("]") || previous.is(","))) {
+                names.add(t.text());
+            }
+            previous = t;
+        }
+        return names;
+    }
+
+    /**
+     * Textures one program may use. Metallum numbers a pipeline's textures across both stages
+     * and gives each the sampler slot of the same number; Metal has 31 texture slots per stage
+     * but only 16 sampler slots, so textures from the 17th on read a sampler built into the
+     * shader (MetalSamplerSlotsMixin).
+     */
+    static final int MAX_TEXTURES_PER_PIPELINE = 31;
 
     public static Result translate(String vertexSource, String fragmentSource) throws TranslationException {
         return translate(vertexSource, fragmentSource, Mode.GBUFFERS);
@@ -469,6 +542,10 @@ public final class ProgramTranslator {
                                     Format format) throws TranslationException {
         boolean dynamic = format != null;
         Map<String, String> renames = format == null ? Map.of() : format.samplerRenames();
+        String[] compat = CompatVaryings.apply(vertexSource, fragmentSource);   // gl_FogFragCoord
+        String[] flat = StructVaryings.flatten(compat[0], compat[1]);   // the game refuses struct varyings
+        vertexSource = flat[0];
+        fragmentSource = FragmentOutputs.widen(flat[1]);   // Metal wants every colour component written
         StageScan vs = new StageScan(Stage.VERTEX, vertexSource);
         StageScan fs = new StageScan(Stage.FRAGMENT, fragmentSource);
         // entityColor (the hit flash) from the overlay texture, as Iris's EntityPatcher does: a
@@ -489,14 +566,12 @@ public final class ProgramTranslator {
         //    all of them; unmentioned ones are dropped from the source in rewrite()).
         Map<String, Sampler> samplers = new TreeMap<>();
         for (StageScan s : List.of(vs, fs)) {
-            int inStage = 0;
             for (Declaration d : s.declarations) {
                 if (d.storage().equals("uniform") && isOpaque(d.type())) {
                     for (Declarator x : d.declarators()) {
                         if (!s.mentions(x.name())) {
                             continue;
                         }
-                        inStage++;
                         String sname = renames.getOrDefault(x.name(), x.name());
                         Sampler old = samplers.putIfAbsent(sname, new Sampler(d.type(), sname));
                         if (old != null && !old.type().equals(d.type())) {
@@ -506,21 +581,19 @@ public final class ProgramTranslator {
                     }
                 }
             }
-            if (inStage > MAX_SAMPLERS_PER_STAGE) {
-                throw new TranslationException("The " + s.stage.name().toLowerCase() + " stage uses " + inStage
-                        + " textures; Metal allows " + MAX_SAMPLERS_PER_STAGE + " per stage");
-            }
+        }
+        if (samplers.size() > MAX_TEXTURES_PER_PIPELINE) {
+            throw new TranslationException("The program uses " + samplers.size() + " textures; Luxium allows "
+                    + MAX_TEXTURES_PER_PIPELINE + " (Metal's texture slots per stage)");
         }
 
         if (overlay) {
             samplers.putIfAbsent(OVERLAY_SAMPLER, new Sampler("sampler2D", OVERLAY_SAMPLER));
         }
         if (glintSampling) {
-            long inFragment = fs.declarations.stream().filter(d -> d.storage().equals("uniform") && isOpaque(d.type()))
-                    .flatMap(d -> d.declarators().stream()).filter(x -> fs.mentions(x.name())).count();
-            if (inFragment + 1 > MAX_SAMPLERS_PER_STAGE) {
-                throw new TranslationException("The fragment stage uses " + inFragment + " textures plus the glint; Metal allows "
-                        + MAX_SAMPLERS_PER_STAGE + " per stage");
+            if (samplers.size() + 1 > MAX_TEXTURES_PER_PIPELINE) {
+                throw new TranslationException("The program uses " + samplers.size() + " textures plus the glint; Luxium allows "
+                        + MAX_TEXTURES_PER_PIPELINE);
             }
             samplers.putIfAbsent(GLINT_SAMPLER, new Sampler("sampler2D", GLINT_SAMPLER));
         }
@@ -689,11 +762,25 @@ public final class ProgramTranslator {
                 }
             }
         }
+        // A fragment input the vertex stage never writes becomes a plain global of the fragment
+        // stage, zero: Metal won't link a fragment input with no vertex output, while OpenGL only
+        // rejects one the fragment stage really reads, and leaves it undefined otherwise. Bliss's
+        // water declares a Flashing varying it never uses; Mellow's deferred1 declares ViewPos and
+        // Normal inputs that only locals of the same name are read through.
+        Set<String> zeroInputs = new LinkedHashSet<>();
+        for (String name : fragmentIn) {
+            if (!vertexOut.contains(name)) {
+                varyingTypes.remove(name);
+                zeroInputs.add(name);
+            }
+        }
         Map<String, Slot> varyings = new LinkedHashMap<>();
+        Map<String, Integer> structSlots = structSlots(vs.tokens, warnings);
+        structSlots.putAll(structSlots(fs.tokens, warnings));
         int nextVarying = 0;
         for (Slot v : varyingTypes.values()) {
             varyings.put(v.name(), new Slot(v.name(), v.type(), v.array(), nextVarying));
-            nextVarying += slots(v.type(), v.array(), warnings);
+            nextVarying += slots(v.type(), v.array(), warnings, structSlots);
         }
         for (String name : fragmentIn) {
             if (!vertexOut.contains(name)) {
@@ -703,8 +790,8 @@ public final class ProgramTranslator {
 
         // 4. Rewrite each stage.
         List<Slot> fragmentOutputs = new ArrayList<>();
-        String vertex = rewrite(vs, mode, scale, elements, terrain, format, uniforms, vertexInputs, varyings, fragmentOutputs, warnings);
-        String fragment = rewrite(fs, mode, scale, elements, terrain, format, uniforms, vertexInputs, varyings, fragmentOutputs, warnings);
+        String vertex = rewrite(vs, mode, scale, elements, terrain, format, uniforms, vertexInputs, varyings, zeroInputs, fragmentOutputs, warnings);
+        String fragment = rewrite(fs, mode, scale, elements, terrain, format, uniforms, vertexInputs, varyings, zeroInputs, fragmentOutputs, warnings);
 
         return new Result(vertex, fragment, List.copyOf(uniforms.values()), List.copyOf(vertexInputs.values()),
                 List.copyOf(varyings.values()), List.copyOf(fragmentOutputs), drawBuffers(fs.tokens),
@@ -713,7 +800,7 @@ public final class ProgramTranslator {
 
     private static String rewrite(StageScan s, Mode mode, float scale, Set<String> elements, Terrain terrain, Format format,
                                   Map<String, Uniform> uniforms, Map<String, Slot> vertexInputs,
-                                  Map<String, Slot> varyings, List<Slot> fragmentOutputs, List<String> warnings)
+                                  Map<String, Slot> varyings, Set<String> zeroInputs, List<Slot> fragmentOutputs, List<String> warnings)
             throws TranslationException {
         List<Token> t = s.tokens;
         boolean vertex = s.stage == Stage.VERTEX;
@@ -726,15 +813,29 @@ public final class ProgramTranslator {
 
         // a) Replace declarations, last first so earlier indices stay valid.
         List<Declaration> ds = new ArrayList<>(s.declarations);
+        int drawCount = vertex ? 0 : drawBuffers(s.tokens).size();
         for (int k = ds.size() - 1; k >= 0; k--) {
             Declaration d = ds.get(k);
+            if (!vertex && d.storage().equals("out") && drawCount > 0 && outputPastDrawBuffers(d, drawCount)) {
+                // An output at a location the pack's draw buffers don't reach writes nowhere in
+                // OpenGL (Photon declares gbuffer_data_1 at location 1 under RENDERTARGETS: 1):
+                // a plain variable here, so it can't collide with Luxium's coverage output.
+                StringBuilder plain = new StringBuilder();
+                for (Declarator x : d.declarators()) {
+                    plain.append(d.type()).append(' ').append(x.name()).append(x.arraySuffix()).append(";\n");
+                }
+                List<Token> sub = t.subList(d.start(), d.end() + 1);
+                sub.clear();
+                sub.add(new Token(Kind.SPACE, plain.toString()));
+                continue;
+            }
             String replacement = switch (d.storage()) {
                 // Loose uniforms move into the block; samplers stay, minus the ones this stage never mentions.
                 case "uniform" -> isOpaque(d.type()) ? mentionedSamplers(d, s, renames) : "";
                 case "attribute", "in" -> vertex ? (terrain != null ? terrainAttributes(d) : elements != null ? formatInputs(d, vertexInputs) : slotDeclarations(d, "in", vertexInputs))
-                        : slotDeclarations(d, "in", varyings);
+                        : slotDeclarations(d, "in", varyings, zeroInputs);
                 case "out", "varying" -> vertex ? slotDeclarations(d, "out", varyings)
-                        : d.storage().equals("varying") ? slotDeclarations(d, "in", varyings) : null;
+                        : d.storage().equals("varying") ? slotDeclarations(d, "in", varyings, zeroInputs) : null;
                 default -> null;
             };
             if (replacement != null) {
@@ -873,6 +974,14 @@ public final class ProgramTranslator {
             if (renamed == null && vertex && BUILTIN_INPUTS.containsKey(name)) {
                 renamed = BUILTIN_INPUTS.get(name).name();
             }
+            if (name.equals("alphaTestRef")) {
+                // Iris's alphaTestRef (renamed to iris_currentAlphaTest): the program's own alpha
+                // test reference. Mellow discards cutout pixels below it; read as 0, its cobwebs,
+                // plants and particles drew as solid squares.
+                float ref = out != null && !Float.isNaN(out.alphaTest()) ? out.alphaTest() : 0f;
+                t.set(i, new Token(Kind.IDENT, "(" + ref + ")"));
+                continue;
+            }
             if (name.equals("gl_VertexID")) {
                 renamed = "gl_VertexIndex";
             }
@@ -933,7 +1042,7 @@ public final class ProgramTranslator {
         if (!uniforms.isEmpty()) {
             h.append("layout(std140) uniform ").append(UNIFORM_BLOCK).append(" {\n");
             for (Uniform u : uniforms.values()) {
-                h.append("    ").append(u.type()).append(' ').append(u.name()).append(u.array()).append(";\n");
+                h.append("    ").append(u.type()).append(' ').append(s.memberName(u.name())).append(u.array()).append(";\n");
             }
             h.append("};\n");
         }
@@ -948,7 +1057,9 @@ public final class ProgramTranslator {
         }
         if (vertex) {
             for (Slot in : vertexInputs.values()) {
-                if (in.name().startsWith("luxium_") || CORE_INPUTS.containsKey(in.name()) || terrain != null
+                // A core input the pack declares itself (Photon: in vec4 vaColor) keeps the pack's line.
+                if (in.name().startsWith("luxium_") || (CORE_INPUTS.containsKey(in.name()) && !s.declaredNames.contains(in.name()))
+                        || terrain != null
                         || (elements != null && ELEMENT_TYPES.containsKey(in.name()))) {
                     h.append("layout(location = ").append(in.location()).append(") in ")
                             .append(in.type()).append(' ').append(in.name()).append(in.array()).append(";\n");
@@ -1097,6 +1208,12 @@ public final class ProgramTranslator {
         return false;
     }
 
+    /** Whether a fragment output declaration sits at or past location {@code drawCount}. */
+    private static boolean outputPastDrawBuffers(Declaration d, int drawCount) {
+        Matcher m = Pattern.compile("location\\s*=\\s*(\\d+)").matcher(d.layout());
+        return m.find() && Integer.parseInt(m.group(1)) >= drawCount;
+    }
+
     /** Where the coverage output goes: after the pack's draw buffers and after every output it writes. */
     private static int coverageLocation(List<Token> tokens, Set<Integer> outputsUsed) {
         int after = drawBuffers(tokens).size();
@@ -1154,10 +1271,20 @@ public final class ProgramTranslator {
 
     /** Re-declares each name of an in/out declaration on its own, with its location. */
     private static String slotDeclarations(Declaration d, String direction, Map<String, Slot> table) {
+        return slotDeclarations(d, direction, table, Set.of());
+    }
+
+    /** As above; a name in {@code zero} becomes a plain global set to zero instead. */
+    private static String slotDeclarations(Declaration d, String direction, Map<String, Slot> table, Set<String> zero) {
         StringBuilder sb = new StringBuilder();
         for (Declarator x : d.declarators()) {
             Slot slot = table.get(x.name());
             if (slot == null) {
+                if (zero.contains(x.name()) && x.arraySuffix().isEmpty()) {
+                    sb.append(d.type()).append(' ').append(x.name()).append(" = ").append(d.type()).append("(0);\n");
+                } else if (zero.contains(x.name())) {
+                    sb.append(d.type()).append(' ').append(x.name()).append(x.arraySuffix()).append(";\n");
+                }
                 continue;
             }
             sb.append("layout(location = ").append(slot.location()).append(") ");
@@ -1176,10 +1303,22 @@ public final class ProgramTranslator {
 
     /** How many locations a value takes: a mat4 takes 4, an array of 3 vec2 takes 3. */
     static int slots(String type, String array, List<String> warnings) {
+        return slots(type, array, warnings, Map.of());
+    }
+
+    /**
+     * As above, where a struct takes one location per member location (GLSL 4.60 section 4.4.1:
+     * a struct's members get consecutive locations). {@code structs} gives each struct's count.
+     */
+    static int slots(String type, String array, List<String> warnings, Map<String, Integer> structs) {
         int per = 1;
         Matcher m = Pattern.compile("^d?mat(\\d)").matcher(type);
         if (m.find()) {
             per = Integer.parseInt(m.group(1));
+        }
+        String base = type.replaceAll("\\[.*$", "");
+        if (structs.containsKey(base)) {
+            per = structs.get(base);
         }
         int count = 1;
         Matcher a = Pattern.compile("\\[(\\d+)]").matcher(array + type.replaceAll("^[^\\[]*", ""));
@@ -1190,6 +1329,84 @@ public final class ProgramTranslator {
             warnings.add("Array size isn't a plain number (" + type + array + "); counted as 1 location");
         }
         return per * count;
+    }
+
+    /**
+     * The number of locations each file-scope struct of a stage takes as a varying: the sum of its
+     * members' locations ({@code struct F { vec3 a; vec3 b; vec3 c; }} takes 3). Photon passes
+     * such structs between stages; counted as 1, the next varying overlapped them.
+     */
+    static Map<String, Integer> structSlots(List<Token> tokens, List<String> warnings) {
+        Map<String, Integer> out = new java.util.HashMap<>();
+        List<Token> code = new ArrayList<>();
+        for (Token t : tokens) {
+            if (!t.trivia() && t.kind() != Kind.DIRECTIVE && !t.text().isEmpty()) {
+                code.add(t);
+            }
+        }
+        int depth = 0;
+        for (int i = 0; i < code.size(); i++) {
+            Token t = code.get(i);
+            if (t.is("{")) {
+                depth++;
+            } else if (t.is("}")) {
+                depth = Math.max(0, depth - 1);
+            } else if (depth == 0 && t.is("struct") && i + 2 < code.size() && code.get(i + 1).kind() == Kind.IDENT
+                    && code.get(i + 2).is("{")) {
+                String name = code.get(i + 1).text();
+                int total = 0;
+                int j = i + 3;
+                List<String> member = new ArrayList<>();
+                while (j < code.size() && !code.get(j).is("}")) {
+                    Token m = code.get(j);
+                    if (m.is(";")) {
+                        total += memberSlots(member, warnings, out);
+                        member.clear();
+                    } else {
+                        member.add(m.text());
+                    }
+                    j++;
+                }
+                out.put(name, Math.max(1, total));
+                i = j;   // the struct's closing brace: depth stays 0
+            }
+        }
+        return out;
+    }
+
+    /** Locations of one struct member declaration ({@code [qualifiers] type a, b[2]}). */
+    private static int memberSlots(List<String> words, List<String> warnings, Map<String, Integer> structs) {
+        int typeAt = -1;
+        for (int k = 0; k < words.size(); k++) {
+            if (!Set.of("flat", "smooth", "noperspective", "highp", "mediump", "lowp", "precise").contains(words.get(k))) {
+                typeAt = k;
+                break;
+            }
+        }
+        if (typeAt < 0 || typeAt + 1 >= words.size()) {
+            return 0;
+        }
+        String type = words.get(typeAt);
+        int total = 0;
+        StringBuilder array = new StringBuilder();
+        boolean named = false;
+        for (int k = typeAt + 1; k <= words.size(); k++) {
+            String w = k < words.size() ? words.get(k) : ",";
+            if (w.equals(",")) {
+                if (named) {
+                    total += slots(type, array.toString(), warnings, structs);
+                }
+                array.setLength(0);
+                named = false;
+            } else if (w.equals("[") || w.equals("]") || w.matches("\\d+")) {
+                if (named) {
+                    array.append(w);
+                }
+            } else {
+                named = true;
+            }
+        }
+        return total;
     }
 
     private static int nextCode(List<Token> t, int from) {

@@ -52,7 +52,8 @@ GNU Lesser General Public License version 3
   render stage table (names and their order) of the enum
   net.irisshaders.iris.pipeline.WorldRenderingPhase, used as MC_RENDER_STAGE_* values, and
   formats MC_VERSION and IRIS_VERSION the way
-  net.irisshaders.iris.gl.shader.StandardMacros.formatVersionString does. Which other names
+  net.irisshaders.iris.gl.shader.StandardMacros.formatVersionString does. MC_RENDER_QUALITY and
+  MC_SHADOW_QUALITY take StandardMacros's value, 1.0. Which other names
   are defined is our own choice, documented in the file.
 
   src/main/java/io/github/hecbatista/metalshaders/glsl/ProgramTranslator.java follows two
@@ -63,6 +64,16 @@ GNU Lesser General Public License version 3
   vaNormal, ...; net.irisshaders.iris.pipeline.transform.transformer.CompositeCoreTransformer,
   SodiumCoreTransformer and VanillaCoreTransformer). Changed: those names are only declared
   so the program compiles. Iris's replacement expressions aren't reproduced.
+
+  src/main/java/io/github/hecbatista/metalshaders/glsl/NameFixes.java follows Iris's rule
+  for a sampler named "texture": every use that isn't a function call becomes "gtexture"
+  (net.irisshaders.iris.pipeline.transform.transformer.CommonTransformer,
+  getGtextureRenameTargets). Changed: done on tokens, not a syntax tree; a stage declaring
+  both names is left alone instead of merged; "gcolor" isn't renamed. Its list of C++ and
+  Metal words renamed to luxium_<name> is our own, measured with glslang, spirv-cross and
+  xcrun metal. ProgramTranslator's legacy function renames (texture2DProj, texture2DGrad,
+  texture2DGradARB, texture3DGrad, texelFetch2D/3D, textureSize2D and their replacements)
+  follow the same class's renameFunctionCall list.
 
   src/main/java/io/github/hecbatista/metalshaders/uniform/GameUniforms.java reproduces how
   Iris computes each value it supplies, quirks included, from net.irisshaders.iris.uniforms
@@ -78,15 +89,24 @@ GNU Lesser General Public License version 3
   GameUniforms.java also reproduces wetness from net.irisshaders.iris.uniforms.transforms
   .SmoothedFloat and PackDirectives (defaults 600/200, the 0.1 factor, and the bug where
   drynessHalflife sets the rising half-life), and biome / biome_precipitation from
-  net.irisshaders.iris.uniforms.BiomeUniforms.
+  net.irisshaders.iris.uniforms.BiomeUniforms. eyeBrightnessSmooth follows
+  net.irisshaders.iris.uniforms.CommonUniforms (SmoothedVec2f over eyeBrightness, the default
+  half-life of 10, cut to int). Changed: the pack's eyeBrightnessHalflife directive isn't read.
 
   GameUniforms.java also follows net.irisshaders.iris.uniforms.IrisExclusiveUniforms
-  (eyePosition, relativeEyePosition, playerLookVector, cloudHeight, isElytraFlying, heavyFog,
+  (eyePosition, relativeEyePosition, playerLookVector, bedrockLevel, cloudHeight, isElytraFlying, heavyFog,
   lightningBoltPosition, endFlashIntensity via EndFlashStorage) and IdMapUniforms (heldItemId,
   heldBlockLightValue for both hands, with the item light rule of
   net.irisshaders.iris.api.v0.item.IrisItemLightProvider). Changed: old hand light isn't applied
   yet. velocity is deliberately not supplied, because Iris 26.3 defines it in
   HardcodedCustomUniforms but never calls that.
+
+  GameUniforms.java and mixin/FogRendererMixin.java also follow Iris's fog values:
+  net.irisshaders.iris.uniforms.FogUniforms (fogStart, fogEnd, fogDensity at least 0),
+  uniforms.IrisInternalUniforms and pipeline.transform.transformer.CommonTransformer (gl_Fog as
+  color, density, start, end and scale = 1 / (end - start)), and mixin.MixinFogRenderer (the
+  legacy water density 0.05 - waterVision^2 * 0.03, none outside water). Start and end are
+  FogData's environmentalStart and environmentalEnd, as Sodium's FogParameters (MIT) takes them.
 
   src/main/java/io/github/hecbatista/metalshaders/pack/ItemIds.java follows
   net.irisshaders.iris.shaderpack.IdMap.parseIdMap and materialmap.NamespacedId for
@@ -139,8 +159,9 @@ GNU Lesser General Public License version 3
   src/main/java/io/github/hecbatista/metalshaders/uniform/Formula.java and CustomUniforms.java
   are our own parser and evaluator for custom uniforms. They follow the behavior of Iris's
   net.irisshaders.iris.uniforms.custom.CustomUniforms, net.irisshaders.iris.parsing.IrisFunctions
-  and net.irisshaders.iris.parsing.SmoothFloat: int/float typing, if/in/smooth and the math
-  functions, smooth's 0.1 factor and unsmoothed first value, dependency ordering, and dropping
+  and net.irisshaders.iris.parsing.SmoothFloat: int/float typing, if/in/smooth and the scalar
+  math functions (frac, fmod, remainder, sign, the trig and log/exp families, mix, edge,
+  between, equals; vector forms and random aren't supported), smooth's 0.1 factor and unsmoothed first value, dependency ordering, and dropping
   broken formulas with their dependents. Iris's expression library (kroppeb.stareval) was not
   copied; the operator precedence is the usual C one.
 
@@ -329,8 +350,12 @@ GNU Lesser General Public License version 3
   (pipeline.CompositeRenderer, flippedAtLeastOnce), PNG filtering from the .mcmeta file,
   nearest and repeat unless "blur" or "clamp" (targets.backed.NativeImageBackedCustomTexture),
   and noisetex read linear and repeating (targets.backed.NativeImageBackedNoiseTexture).
-  Changed: raw-texture directives, minecraft: resource paths and customTexture.* aren't
-  supported yet and are skipped with a warning.
+  customTexture.<sampler>=<png> follows ShaderProperties (the sampler name is the rest of the
+  key, uncut), pipeline.CustomTextureManager (irisCustomTextures) and
+  samplers.IrisSamplers.addCustomTextures (bound by name in every program, after the render
+  targets); PackChain.input looks it up in that order.
+  Changed: raw-texture directives and minecraft: resource paths aren't supported yet, for
+  either directive, and are skipped with a warning.
 
   src/main/java/io/github/hecbatista/metalshaders/mixin/GameRendererRenderMixin.java (the view
   bobbing part) follows net.irisshaders.iris.mixin.MixinModelViewBobbing: while a pack is in
@@ -482,6 +507,67 @@ GNU Lesser General Public License version 3
   shadow pair as the pass's fixed-function matrices, both faces drawn. Replaying the level's entities into
   the map and dropping what the shadow program doesn't serve follows the same document ("What
   moves is submitted a second time, for the light"; "inside the light's walk a refusal is a drop").
+
+  Added for Bliss v2.1.2 (2026-11-23):
+  - pack/StandardDefines.java defines MC_HAND_DEPTH as net.irisshaders.iris.pathways
+    .HandRenderer.DEPTH (0.125), and MC_NORMAL_MAP, MC_SPECULAR_MAP, MC_RENDER_QUALITY and
+    MC_SHADOW_QUALITY as net.irisshaders.iris.gl.shader.StandardMacros does.
+  - render/PackChain.java gives the normals and specular samplers the default colours of
+    net.irisshaders.iris.pbr.texture.PBRType (NORMAL 0x7F7FFFFF, SPECULAR 0, read as RGBA by
+    NativeImageBackedSingleColorTexture).
+  - uniform/RenderMatrices.java computes sunPosition, moonPosition, shadowLightPosition and
+    upPosition as net.irisshaders.iris.uniforms.CelestialUniforms does (the -90 degree Y turn,
+    sunPathRotation about Z, the body's angle about X, (0, 100, 0, 1) for both bodies, isDay
+    from the sun angle). Changed: the End flash isn't used for shadowLightPosition.
+  - uniform/GameUniforms.java supplies thunderStrength, currentPlayerHealth and maxPlayerHealth
+    as net.irisshaders.iris.uniforms.IrisExclusiveUniforms does (clamped thunder; -1 outside
+    survival), and is_hurt as CommonUniforms.isHurt (hurtTime > 0).
+  - uniform/Formula.java and CustomUniforms.java follow Iris's accessors in
+    net.irisshaders.iris.parsing.IrisFunctions (.0-.3, .stpq, a matrix's .N is its column N),
+    its VectorConstructor (vec2/vec3/vec4 from scalars) and vecN uniform types, and
+    kroppeb.stareval.resolver.ExpressionResolver.resolveNumber (a whole number too big for an
+    int is a float). Still not supported: vector arithmetic and Iris's vectorized functions.
+  - render/TerrainTakeover.java reads alphaTest.<program>=false as "off", as
+    net.irisshaders.iris.shaderpack.properties.ShaderProperties does.
+  - mixin/EndPortalRendererMixin.java draws End portals and gateways the way Iris's
+    mixin.MixinTheEndPortalRenderer and MixinTheEndGatewayRenderer do while a pack runs: an
+    entity_solid draw with the End portal texture, the colour (0.075, 0.15, 0.2), full light, the
+    overlay off and UVs (0..0.2 per face) scrolling with a 100 second period; outline draws stay
+    the game's. Changed: one wrap of AbstractEndPortalRenderer.submitCube covers both blocks.
+  - render/EntityTakeover.java draws world text (pipeline/text, text_polygon_offset) with
+    gbuffers_entities_translucent, or gbuffers_block_translucent for a block entity, one tenth, as
+    net.irisshaders.iris.pipeline.IrisPipelines.getText and ShaderKey TEXT / TEXT_BE do; text
+    submits keep the ids current when they were made (mixin/ModelSubmitIdsMixin.java,
+    mixin/TextFeatureRendererIdsMixin.java), like Iris's ModelStorage capture.
+  - render/ShadowTargets.java binds the shadow sampler as net.irisshaders.iris.samplers
+    .IrisSamplers.addShadowSamplers does: shadowtex0, or shadowtex1 when the same program
+    declares watershadow.
+  - uniform/BiomeIds.java and uniform/GameUniforms.java (for Photon v1.4): the biome_category,
+    rainfall and temperature uniforms and the CAT_<name> and PPT_NONE/RAIN/SNOW defines follow
+    net.irisshaders.iris.uniforms.BiomeUniforms, net.irisshaders.iris.parsing.BiomeCategories
+    and net.irisshaders.iris.shaderpack.IrisDefines.createIrisReplacements: the same category
+    list and order, the same biome-tag tests in the same order. Changed: the downfall is read by
+    reflection instead of Iris's ExtendedBiome mixin.
+  - glsl/CompatVaryings.java (for MakeUp 9.6a): gl_FogFragCoord becomes a float varying set to 0
+    at the top of the vertex main, as net.irisshaders.iris.pipeline.transform.transformer
+    .CommonTransformer.transform does; entityId/blockEntityId/currentRenderedItemId read the draw's
+    ids whatever their declaration, as EntityPatcher.patchEntityId replaces every use of those names.
+    Changed: rewritten on our token stream; the ids are Luxium's per-draw uniforms.
+  - glsl/ProgramTranslator.java (for Mellow 3.5): alphaTestRef reads the program's own alpha
+    test reference, as Iris's VanillaCoreTransformer/SodiumCoreTransformer rename it to
+    iris_currentAlphaTest. Changed: written as a constant of each variant. uniform/GameUniforms.java:
+    pi and anisotropicFiltering as net.irisshaders.iris.uniforms.CommonUniforms supplies them.
+  - render/CustomTextures.java: a namespace:path custom texture binds the game's own texture of
+    that name, as net.irisshaders.iris.pipeline.CustomTextureManager does for ResourceData
+    (without its PBR-suffix forms).
+  - uniform/Formula.java: random() and random(min, max) as net.irisshaders.iris.parsing
+    .IrisFunctions registers them.
+  - render/CustomTextures.java reads the raw texture forms (<file> TEXTURE_2D|TEXTURE_3D
+    <internal format> <sizes> <pixel format> <pixel type>) as net.irisshaders.iris.shaderpack
+    .properties.ShaderProperties parses them, with Iris's defaults from net.irisshaders.iris
+    .shaderpack.ShaderPack (a raw texture is blurred and clamped unless its .mcmeta says
+    otherwise). Changed: a 3D texture becomes a 2D atlas of bordered slices read by
+    glsl/VolumeTextures.java (our own code), since the game has no 3D textures.
 
 JCPP, https://github.com/shevek/jcpp (org.anarres:jcpp 1.4.14)
 Apache License 2.0

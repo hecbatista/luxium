@@ -180,14 +180,21 @@ public final class ShadowTargets {
     /**
      * What a shadow sampler name reads, or null for the placeholder: shadowtex0/1, shadow,
      * watershadow -> the depth; shadowcolor0/1, shadowcolor -> the colours.
+     * <p>
+     * {@code shadow} follows Iris's IrisSamplers.addShadowSamplers (see NOTICE), per program: the
+     * whole map (shadowtex0) unless the same program also reads {@code watershadow}, then the map
+     * without translucents (shadowtex1), OptiFine's old pairing.
+     *
+     * @param waterShadow whether the program reading it declares watershadow
      */
-    public static GpuTextureView input(String name) {
+    public static GpuTextureView input(String name, boolean waterShadow) {
         if (!drawn) {
             return null;
         }
         return switch (name) {
             case "shadowtex0", "watershadow" -> copiedShadowtex0 ? depthSampledView : depthView;
-            case "shadowtex1", "shadow" -> opaqueSampledView;
+            case "shadowtex1" -> opaqueSampledView;
+            case "shadow" -> waterShadow ? opaqueSampledView : copiedShadowtex0 ? depthSampledView : depthView;
             case "shadowcolor", "shadowcolor0" -> colorViews.get(0);
             case "shadowcolor1" -> colorViews.get(1);
             default -> null;

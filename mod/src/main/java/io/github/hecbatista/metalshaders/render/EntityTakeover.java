@@ -137,9 +137,14 @@ public final class EntityTakeover {
         }
     }
 
-    /** Pack albedo names -> the game's skin sampler; lightmap -> the game's lightmap sampler. */
+    /**
+     * Pack albedo names -> the game's skin sampler; lightmap -> the game's lightmap sampler.
+     * Not "texture": NameFixes already renames a sampler declared as texture to gtexture, and the
+     * rename hits every identifier, so it turned GLSL's texture() calls into Sampler0() (Solas's
+     * shadow program, 2026-11-23).
+     */
     private static final Map<String, String> RENAMES = Map.of(
-            "tex", "Sampler0", "texture", "Sampler0", "gtexture", "Sampler0", "gcolor", "Sampler0", "lightmap", "Sampler2");
+            "tex", "Sampler0", "gtexture", "Sampler0", "gcolor", "Sampler0", "lightmap", "Sampler2");
     private static final Set<String> GAME_BOUND = Set.of("Sampler0", "Sampler1", "Sampler2", ProgramTranslator.GLINT_SAMPLER);
     private static final Matrix4f LIGHTMAP_MATRIX = new Matrix4f(
             0.00390625f, 0, 0, 0, 0, 0.00390625f, 0, 0, 0, 0, 0.00390625f, 0, 0.03125f, 0.03125f, 0.03125f, 1);
@@ -216,7 +221,7 @@ public final class EntityTakeover {
                     drawElements = new HashSet<>(elements);
                     drawElements.add("UV3");
                 }
-                ProgramTranslator.Result r = ProgramTranslator.translateForDraw(glsl[0], glsl[1], drawElements,
+                ProgramTranslator.Result r = ProgramTranslator.translateForDraw(PackChain.gbufferVolumes(glsl[0]), PackChain.gbufferVolumes(glsl[1]), drawElements,
                         new ProgramTranslator.Format(alpha, coverage(), RENAMES, hand, overlay, shadow, glint != Glint.NONE));
                 Map<String, String> defaults = new HashMap<>();
                 r.uniforms().forEach(u -> {
@@ -292,6 +297,16 @@ public final class EntityTakeover {
      */
     private static final Family HAND_TEXT = new Family("gbuffers_hand", false, 16, DefaultVertexFormat.POSITION_TEX_LIGHTMAP_COLOR,
             Set.of("Position", "UV0", "UV2", "Color"), false);
+    /**
+     * Text in the world: signs, name tags, text displays (RenderTypes.text and textPolygonOffset,
+     * POSITION_TEX_LIGHTMAP_COLOR, blended). Iris IrisPipelines.getText: ShaderKey TEXT
+     * (ProgramId.EntitiesTrans) or, for a block entity, TEXT_BE (ProgramId.BlockTrans), both one
+     * tenth. Left to the game, text lands in a buffer only some packs read (Bliss's signs were blank).
+     */
+    private static final Family TEXT = new Family("gbuffers_entities_translucent", true, 11, DefaultVertexFormat.POSITION_TEX_LIGHTMAP_COLOR,
+            Set.of("Position", "UV0", "UV2", "Color"), true);
+    private static final Family TEXT_BE = new Family("gbuffers_block_translucent", true, 12, DefaultVertexFormat.POSITION_TEX_LIGHTMAP_COLOR,
+            Set.of("Position", "UV0", "UV2", "Color"), true);
     /** Entities and block entities in the shadow map (Iris ShaderKey SHADOW_ENTITIES_CUTOUT: ProgramId.ShadowEntities -> Shadow, one tenth). */
     private static final Family SHADOW_ENTITIES = new Family("shadow", false, 11, DefaultVertexFormat.ENTITY, ELEMENTS, true);
 
@@ -301,7 +316,8 @@ public final class EntityTakeover {
     }
     /** Every family (declared after all of them: static fields initialise in order). */
     private static final List<Family> ALL = List.of(SOLID, BLOCK, TRANSLUCENT, PARTICLES, PARTICLES_TRANSLUCENT, WEATHER, HAND, HAND_TRANSLUCENT,
-            SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING, SHADOW_ENTITIES, BLOCK_TRANSLUCENT, ENTITY_PATTERNS, HAND_TEXT);
+            SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING, SHADOW_ENTITIES, BLOCK_TRANSLUCENT, ENTITY_PATTERNS, HAND_TEXT,
+            TEXT, TEXT_BE);
 
     static {
         HAND.hand = true;
@@ -311,6 +327,11 @@ public final class EntityTakeover {
         HAND_TEXT.alphaOverride = 0.0001f;   // Iris AlphaTests.NON_ZERO_ALPHA
         BLOCK_TRANSLUCENT.coverageAlways = true;
         ENTITY_PATTERNS.coverageAlways = true;
+        // Block entities' text (signs) is drawn in the SOLID window, before the seed: without the
+        // mask the seed put the game's image over every glyph (Complementary's sign text read as
+        // the fog colour, pale blue-white).
+        TEXT.coverageAlways = true;
+        TEXT_BE.coverageAlways = true;
         SPIDEREYES.pipelinePath = "pipeline/eyes";
         // Iris ProgramId.SpiderEyes: SRC_ALPHA ONE ZERO ONE.
         SPIDEREYES.blendOverride = Optional.of(new BlendFunction(com.mojang.renderpearl.api.pipeline.BlendFactor.SRC_ALPHA,
@@ -361,6 +382,8 @@ public final class EntityTakeover {
         prepareFamily(TRANSLUCENT, translucent != null ? translucent : solid, properties);
         prepareFamily(ENTITY_PATTERNS, translucent != null ? translucent : solid, properties,
                 translucent != null ? "gbuffers_entities_translucent" : "gbuffers_entities");
+        prepareFamily(TEXT, translucent != null ? translucent : solid, properties,
+                translucent != null ? "gbuffers_entities_translucent" : "gbuffers_entities");
         if (block != null) {
             prepareFamily(BLOCK, block, properties);
         }
@@ -372,6 +395,7 @@ public final class EntityTakeover {
      */
     public static void prepareBlockTranslucent(String name, String[] glsl, Properties properties) {
         prepareFamily(BLOCK_TRANSLUCENT, glsl, properties, name);
+        prepareFamily(TEXT_BE, glsl, properties, name);
     }
 
     /**
@@ -524,6 +548,9 @@ public final class EntityTakeover {
             boolean blended = pipeline.getColorTargetStates().size() == 1 && pipeline.getColorTargetStates().getFirst().blendFunction().isPresent();
             return blended ? HAND_TRANSLUCENT : HAND;
         }
+        if ((window == Phase.SOLID || window == Phase.TRANSLUCENT) && TEXT.format.equals(pipeline.getVertexFormatBinding(0))) {
+            return ids != null && ids.blockEntity() && TEXT_BE.prepared ? TEXT_BE : TEXT;
+        }
         if (window == Phase.TRANSLUCENT) {
             return TRANSLUCENT;
         }
@@ -561,8 +588,8 @@ public final class EntityTakeover {
         }
         drawing = f;
         drawingIds = ids;
-        if (seenIds.add(f.program + " " + type.name() + " " + ids)) {
-            MetalShadersClient.LOGGER.info("Entity draw {} ({}): {}", type.name(), f.program,
+        if (seenIds.add(f.program + " " + type.name() + " " + ids + " " + window)) {
+            MetalShadersClient.LOGGER.info("Entity draw {} ({}, {} window): {}", type.name(), f.program, window,
                     ids == null ? "no ids (not an entity's or block entity's)" : "entityId " + ids.entityId() + ", blockEntityId " + ids.blockEntityId() + ", currentRenderedItemId " + ids.itemId());
         }
         return true;
@@ -799,12 +826,13 @@ public final class EntityTakeover {
     /** Before the level's solid features. */
     public static void openWindow(Function<String, Object> values) {
         open(Phase.SOLID, values, List.of(SOLID, BLOCK, PARTICLES, SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING,
-                BLOCK_TRANSLUCENT, ENTITY_PATTERNS));
+                BLOCK_TRANSLUCENT, ENTITY_PATTERNS, TEXT, TEXT_BE));
     }
 
     /** Before the level's translucent features, and its "after terrain" ones (after the deferred cut). */
     public static void openTranslucentWindow(Function<String, Object> values) {
-        open(Phase.TRANSLUCENT, values, List.of(TRANSLUCENT, PARTICLES_TRANSLUCENT, SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING));
+        open(Phase.TRANSLUCENT, values, List.of(TRANSLUCENT, PARTICLES_TRANSLUCENT, SPIDEREYES, BEACON, BEACON_TRANSLUCENT, LIGHTNING,
+                TEXT, TEXT_BE));
     }
 
     private static void open(Phase phase, Function<String, Object> values, List<Family> families) {
@@ -825,7 +853,7 @@ public final class EntityTakeover {
             for (Program p : f.byAlpha.values()) {
                 for (ProgramTranslator.Sampler s : p.result().samplers()) {
                     if (!GAME_BOUND.contains(s.name())) {
-                        f.inputs.put(s.name(), PackChain.inputView(s.name()));
+                        f.inputs.put(s.name(), PackChain.inputView(s.name(), p.result().samplers()));
                     }
                 }
             }

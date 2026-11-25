@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
  * refused. Iris reads these lines from shaders.properties after preprocessing it.
  */
 public final class CustomUniforms {
-    private static final Pattern KEY = Pattern.compile("^(uniform|variable)\\.(float|int|bool)\\.([A-Za-z_][A-Za-z0-9_]*)$");
+    private static final Pattern KEY = Pattern.compile("^(uniform|variable)\\.(float|int|bool|vec2|vec3|vec4)\\.([A-Za-z_][A-Za-z0-9_]*)$");
     private static final Pattern ANY_KEY = Pattern.compile("^(uniform|variable)\\.([A-Za-z0-9]+)\\.(.+)$");
 
     private record Entry(String name, String type, boolean uniform, Formula formula) {
@@ -36,6 +36,8 @@ public final class CustomUniforms {
     /** Names dropped while loading, with why. */
     private final Map<String, String> dropped;
     private final Map<String, Object> values = new HashMap<>();
+    /** Formulas whose last run failed, with why. */
+    private final Map<String, String> failing = new TreeMap<>();
 
     private CustomUniforms(List<Entry> entries, Map<String, String> dropped) {
         this.entries = entries;
@@ -128,14 +130,31 @@ public final class CustomUniforms {
         for (Entry e : entries) {
             try {
                 values.put(e.name(), convert(e.formula().evaluate(names, frameTime), e.type()));
+                failing.remove(e.name());
             } catch (Formula.FormulaException ex) {
+                // Not dropped: a value it reads may only be missing this frame (the frame's
+                // matrices before the first frame). Later frames try again.
                 values.remove(e.name());
-                dropped.putIfAbsent(e.name(), "failed while running: " + ex.getMessage());
+                failing.put(e.name(), ex.getMessage());
             }
         }
     }
 
     private static Object convert(Object v, String type) throws Formula.FormulaException {
+        if (type.startsWith("vec")) {
+            int size = type.charAt(3) - '0';
+            float[] out = new float[size];
+            if (v instanceof float[] f && f.length == size) {
+                System.arraycopy(f, 0, out, 0, size);
+            } else if (v instanceof int[] i && i.length == size) {
+                for (int k = 0; k < size; k++) {
+                    out[k] = i[k];
+                }
+            } else {
+                throw new Formula.FormulaException("result isn't a " + type);
+            }
+            return out;
+        }
         float f = v instanceof Integer i ? i : v instanceof Float x ? x : v instanceof Boolean b ? (b ? 1f : 0f) : Float.NaN;
         if (Float.isNaN(f) && !(v instanceof Float)) {
             throw new Formula.FormulaException("result is a vector, not a " + type);
@@ -164,5 +183,10 @@ public final class CustomUniforms {
 
     public Map<String, String> dropped() {
         return Map.copyOf(dropped);
+    }
+
+    /** Formulas that failed on their last run (their value is missing until one succeeds). */
+    public Map<String, String> failing() {
+        return Map.copyOf(failing);
     }
 }

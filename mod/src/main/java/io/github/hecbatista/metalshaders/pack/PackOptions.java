@@ -758,8 +758,43 @@ public final class PackOptions {
             PackOptions options = discover(path -> PackReader.readText(shaders, path), starts(info), settings);
             options.labels = readLabels(PackReader.readText(shaders, "/lang/en_US.lang")
                     .or(() -> readQuietly(shaders, "/lang/en_us.lang")).orElse(""));
+            options.switchOffComputeOptions(PackReader.readText(shaders, "/shaders.properties").orElse(""), info);
             return options;
         });
+    }
+
+    private static final Pattern PROGRAM_SWITCH = Pattern.compile(
+            "^\\s*program\\.([^.\\s]+)\\.enabled\\s*=\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*$", Pattern.MULTILINE);
+
+    /** On/off options switched off because they turn on a compute program (see below). */
+    private final List<String> computeOff = new ArrayList<>();
+
+    /**
+     * Luxium can't run compute programs (.csh). Where shaders.properties switches one on with a
+     * single on/off option ({@code program.world0/deferred4_a.enabled = SH_SKYLIGHT}: Photon's
+     * skylight, on by default), that option is switched off, so the pack takes its own path
+     * without the compute pass instead of reading data nothing wrote. Not something Iris does
+     * (it runs them). The user's settings file can't turn such an option back on.
+     */
+    void switchOffComputeOptions(String properties, PackInfo info) {
+        Matcher m = PROGRAM_SWITCH.matcher(properties);
+        while (m.find()) {
+            String program = m.group(1);
+            String option = m.group(2);
+            int slash = program.lastIndexOf('/');
+            String folder = slash < 0 ? "" : program.substring(0, slash);
+            String name = program.substring(slash + 1);
+            boolean compute = info.programFiles().getOrDefault(folder, List.of()).contains(name + ".csh");
+            if (compute && booleans.containsKey(option) && booleanValue(option) && !computeOff.contains(option)) {
+                changedBooleans.put(option, false);
+                computeOff.add(option);
+            }
+        }
+    }
+
+    /** Options {@link #switchOffComputeOptions} switched off. */
+    public List<String> computeOff() {
+        return Collections.unmodifiableList(computeOff);
     }
 
     private static Optional<String> readQuietly(Path shaders, String path) {

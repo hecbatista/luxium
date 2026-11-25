@@ -87,38 +87,6 @@ public final class PackChain {
             "\\bconst\\s+bool\\s+(colortex\\d+|gcolor|gdepth|gnormal|composite|gaux[1-4])MipmapEnabled\\s*=\\s*(true|false)\\s*;");
 
     /**
-     * size.buffer.<name> = <x> <y> (Iris ShaderProperties and TextureScaleOverride, see NOTICE): a
-     * value with a '.' is a fraction of the screen, else pixels. Buffer index -> {x, y} as given.
-     */
-    private static final Map<Integer, String[]> sizeOverrides = new HashMap<>();
-
-    public static void setSizeOverrides(java.util.Properties props) {
-        sizeOverrides.clear();
-        for (String key : props.stringPropertyNames()) {
-            if (!key.startsWith("size.buffer.")) {
-                continue;
-            }
-            Integer index = targetIndex(key.substring("size.buffer.".length()));
-            String[] parts = props.getProperty(key).strip().split("\\s+");
-            if (index == null || parts.length != 2) {
-                MetalShadersClient.LOGGER.warn("Ignoring {} = {} (expected size.buffer.<buffer> = <x> <y>)", key, props.getProperty(key));
-                continue;
-            }
-            sizeOverrides.put(index, parts);
-        }
-        if (!sizeOverrides.isEmpty()) {
-            MetalShadersClient.LOGGER.info("Buffer sizes: {}", sizeOverrides.entrySet().stream()
-                    .map(e -> "colortex" + e.getKey() + " " + String.join(" ", e.getValue())).toList());
-        }
-    }
-
-    /** One axis of a size.buffer value, as Iris's TextureScaleOverride.getX/getY. */
-    static int sizeAxis(String value, int screen) {
-        int n = value.contains(".") ? (int) (screen * Float.parseFloat(value)) : Integer.parseInt(value);
-        return Math.max(1, n);
-    }
-
-    /**
      * luxium.fullSizeBuffers=true (system property, read every frame, for the quick A/B): ignore
      * size.buffer.*; the buffers are rebuilt when it flips.
      */
@@ -129,13 +97,11 @@ public final class PackChain {
     private static boolean builtFullSize;
 
     private static int targetWidth(int index) {
-        String[] o = fullSizeBuffers() ? null : sizeOverrides.get(index);
-        return o == null ? width : sizeAxis(o[0], width);
+        return targetSize(index, width, height)[0];
     }
 
     private static int targetHeight(int index) {
-        String[] o = fullSizeBuffers() ? null : sizeOverrides.get(index);
-        return o == null ? height : sizeAxis(o[1], height);
+        return targetSize(index, width, height)[1];
     }
 
     private static final Map<String, Integer> LEGACY = Map.of(
@@ -190,6 +156,36 @@ public final class PackChain {
         cloudsOff = off;
     }
 
+    /**
+     * The pack's {@code size.buffer.<buffer> = <x> <y>} (shaders.properties), by colortex number:
+     * Iris's TextureScaleOverride, where a value with a '.' is a fraction of the screen and one
+     * without is a size in pixels (Photon: colortex4 192 108, its clouds and fog at 0.5).
+     */
+    private static final Map<Integer, String[]> bufferSizes = new HashMap<>();
+
+    public static void setBufferSizes(Map<Integer, String[]> sizes) {
+        bufferSizes.clear();
+        bufferSizes.putAll(sizes);
+        width = -1;
+    }
+
+    /**
+     * A target's size for a w x h screen. A buffer pack geometry writes keeps the screen's size:
+     * it shares the scene's depth attachment. Full-screen passes draw one triangle over their
+     * attachments, so a smaller target is simply drawn whole, as Iris sets the viewport to it.
+     */
+    private static int[] targetSize(int index, int w, int h) {
+        String[] size = fullSizeBuffers() ? null : bufferSizes.get(index);
+        if (size == null || geometryTargets.contains(index)) {
+            return new int[] {w, h};
+        }
+        return new int[] {Math.max(1, axis(size[0], w)), Math.max(1, axis(size[1], h))};
+    }
+
+    private static int axis(String value, int screen) {
+        return value.contains(".") ? (int) (screen * Float.parseFloat(value)) : Integer.parseInt(value);
+    }
+
     public static boolean cloudsOff() {
         return cloudsOff && ready();
     }
@@ -230,7 +226,13 @@ public final class PackChain {
             float scale = scales.getOrDefault(name, 1.0f);
             ProgramTranslator.Result r;
             try {
-                r = ProgramTranslator.translate(p.getValue()[0], p.getValue()[1], ProgramTranslator.Mode.FULLSCREEN, scale);
+                // Raw 3D textures of this pass's stage become 2D atlases (VolumeTextures).
+                CustomTextures.Stage stage = CustomTextures.stageOfPass(name);
+                java.util.function.Function<String, io.github.hecbatista.metalshaders.glsl.VolumeTextures.Volume> volumes =
+                        n -> CustomTextures.volume(stage, n);
+                r = ProgramTranslator.translate(io.github.hecbatista.metalshaders.glsl.VolumeTextures.rewrite(p.getValue()[0], volumes),
+                        io.github.hecbatista.metalshaders.glsl.VolumeTextures.rewrite(p.getValue()[1], volumes),
+                        ProgramTranslator.Mode.FULLSCREEN, scale);
             } catch (ProgramTranslator.TranslationException e) {
                 discard(started);
                 fail(name + ": translation failed: " + e.getMessage(), null);
@@ -523,6 +525,7 @@ public final class PackChain {
             TerrainTakeover.beginFrame();
             EntityTakeover.beginFrame();
             deferredRan = false;
+            prepareRan = false;
             stopped = false;
         } catch (RuntimeException e) {
             fail("beginFrame threw", e);
@@ -570,9 +573,40 @@ public final class PackChain {
             convertDepthBoth(encoder, target);
             seed(device, encoder, target);
             deferredRan = true;
-            runPasses(device, encoder, target, values, true);
+            runPasses(device, encoder, target, values, "deferred");
         } catch (RuntimeException e) {
             fail("drawing the deferred passes threw", e);
+        }
+    }
+
+    private static String groupOf(String pass) {
+        return pass.startsWith("prepare") ? "prepare" : pass.startsWith("deferred") ? "deferred" : "composite";
+    }
+
+    /** Per frame: whether the prepare passes ran. */
+    private static boolean prepareRan;
+
+    /**
+     * The pack's prepare passes (prepare, prepare1...), once per frame, before the pack's sky or
+     * its opaque terrain, whichever the game draws first (MakeUp's prepare draws the sky colour its
+     * sky and terrain read). Iris runs them after the shadow pass; Luxium draws the shadow map with
+     * the opaque terrain, so a prepare pass that reads it sees the previous frame's.
+     */
+    public static void drawPrepare(RenderTarget target, Function<String, Object> values) {
+        if (!ready() || prepareRan) {
+            return;
+        }
+        prepareRan = true;
+        if (passes.stream().noneMatch(p -> p.name().startsWith("prepare"))) {
+            return;
+        }
+        try {
+            GpuDevice device = RenderSystem.getDevice();
+            CommandEncoder encoder = device.createCommandEncoder();
+            ensureTargets(device, target.width, target.height);
+            runPasses(device, encoder, target, values, "prepare");
+        } catch (RuntimeException e) {
+            fail("drawing the prepare passes threw", e);
         }
     }
 
@@ -605,7 +639,7 @@ public final class PackChain {
             if (!deferredRan) {
                 convertDepthBoth(encoder, target);
                 seed(device, encoder, target);
-                runPasses(device, encoder, target, values, true);
+                runPasses(device, encoder, target, values, "deferred");
             } else {
                 convertDepth(encoder, target, depthConvertedView);   // depthtex0 now includes translucents
             }
@@ -646,7 +680,7 @@ public final class PackChain {
                     mergeHandBoth(device, encoder);
                 }
             }
-            runPasses(device, encoder, target, values, false);
+            runPasses(device, encoder, target, values, "composite");
             FlashProbe.capture(device, encoder, target.getColorTexture());
         } catch (RuntimeException e) {
             fail("drawing the composites threw", e);
@@ -845,9 +879,9 @@ public final class PackChain {
         }
     }
 
-    /** The deferred passes ({@code deferred == true}) or the composite passes and final. */
+    /** The passes of one group: "prepare", "deferred", or "composite" (the composites and final). */
     private static void runPasses(GpuDevice device, CommandEncoder encoder, RenderTarget target,
-                                  Function<String, Object> values, boolean deferred) {
+                                  Function<String, Object> values, String group) {
         String stopAfter = System.getenv("LUXIUM_STOP_AFTER");
         // Render targets earlier passes of this stage wrote this frame: their texture.<stage>
         // overrides are off from then on (Iris CompositeRenderer, flippedAtLeastOnce).
@@ -856,7 +890,7 @@ public final class PackChain {
             if (stopped) {
                 return;
             }
-            if (pass.name().startsWith("deferred") != deferred) {
+            if (!groupOf(pass.name()).equals(group)) {
                 continue;
             }
             CustomTextures.Stage stage = CustomTextures.stageOfPass(pass.name());
@@ -874,14 +908,17 @@ public final class PackChain {
             Map<String, GpuTextureView> inputs = new HashMap<>();
             Map<String, GpuSampler> samplers = new HashMap<>();
             for (ProgramTranslator.Sampler s : pass.program().samplers()) {
-                GpuTextureView custom = CustomTextures.override(stage, s.name(), writtenThisStage);
+                GpuTextureView custom = CustomTextures.volumeView(stage, s.name());
+                if (custom == null) {
+                    custom = CustomTextures.override(stage, s.name(), writtenThisStage);
+                }
                 Integer index = custom == null ? targetIndex(s.name()) : null;
                 if (index != null && mipmapped.contains(index) && chainViews.containsKey(index)) {
                     inputs.put(s.name(), chainViews.get(index));
                     samplers.put(s.name(), RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR, true));
                     continue;
                 }
-                inputs.put(s.name(), custom != null ? custom : input(device, encoder, s.name()));
+                inputs.put(s.name(), custom != null ? custom : input(device, encoder, s.name(), readsWaterShadow(pass.program().samplers())));
             }
             if (pass.ubo() != null) {
                 try (GpuBufferSlice.MappedView v = pass.ubo().currentBuffer().map(false, true)) {
@@ -1086,7 +1123,7 @@ public final class PackChain {
         }
         GpuTextureView view = altIndex != null && halves.containsKey(altIndex) ? view(altIndex, false)
                 : show.equals("rawdepth") ? depthCopyView
-                : show.equals("maindepth") ? target.getDepthTextureView() : input(device, encoder, name);
+                : show.equals("maindepth") ? target.getDepthTextureView() : input(device, encoder, name, false);
         try (RenderPass rp = encoder.createRenderPass(() -> "Luxium debug show " + show, target.getColorTextureView(), Optional.empty())) {
             rp.setPipeline(showPipeline);
             rp.setUniform("shown", view, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
@@ -1217,26 +1254,50 @@ public final class PackChain {
         return plan.target(index).promoted();
     }
 
-    /** What a sampler name reads. Creates placeholders, so call it outside any render pass. */
-    public static GpuTextureView inputView(String name) {
+    /** Whether a program declares watershadow, which changes what its {@code shadow} reads. */
+    public static boolean readsWaterShadow(List<ProgramTranslator.Sampler> samplers) {
+        return samplers.stream().anyMatch(s -> s.name().equals("watershadow"));
+    }
+
+    /**
+     * What a sampler name reads. Creates placeholders, so call it outside any render pass.
+     *
+     * @param programSamplers every sampler of the program that reads it
+     */
+    /** A gbuffers or shadow stage with its raw 3D textures as atlases (VolumeTextures, GBUFFERS stage). */
+    public static String gbufferVolumes(String source) {
+        return io.github.hecbatista.metalshaders.glsl.VolumeTextures.rewrite(source,
+                n -> CustomTextures.volume(CustomTextures.Stage.GBUFFERS, n));
+    }
+
+    public static GpuTextureView inputView(String name, List<ProgramTranslator.Sampler> programSamplers) {
         // Every caller is a gbuffers or shadow program: Iris's GBUFFERS_AND_SHADOW texture stage.
-        GpuTextureView custom = CustomTextures.override(CustomTextures.Stage.GBUFFERS, name, java.util.Set.of());
+        GpuTextureView custom = CustomTextures.volumeView(CustomTextures.Stage.GBUFFERS, name);
+        if (custom == null) {
+            custom = CustomTextures.override(CustomTextures.Stage.GBUFFERS, name, java.util.Set.of());
+        }
         if (custom != null) {
             return custom;
         }
         GpuDevice device = RenderSystem.getDevice();
-        return input(device, device.createCommandEncoder(), name);
+        return input(device, device.createCommandEncoder(), name, readsWaterShadow(programSamplers));
     }
 
     /** What a sampler name reads. */
-    private static GpuTextureView input(GpuDevice device, CommandEncoder encoder, String name) {
-        GpuTextureView shadow = ShadowTargets.input(name);
+    private static GpuTextureView input(GpuDevice device, CommandEncoder encoder, String name, boolean waterShadow) {
+        GpuTextureView shadow = ShadowTargets.input(name, waterShadow);
         if (shadow != null) {
             return shadow;
         }
         Integer index = targetIndex(name);
         if (index != null && halves.containsKey(index)) {
             return view(index, true);
+        }
+        // customTexture.<name>: after the render targets, before noisetex and depthtex (Iris's
+        // IrisSamplers order in CompositeRenderer and the gbuffers pipelines).
+        GpuTextureView custom = CustomTextures.byName(name);
+        if (custom != null) {
+            return custom;
         }
         if (name.equals("depthtex1") || name.equals("depthtex2")) {
             return depthPreView;
@@ -1247,13 +1308,27 @@ public final class PackChain {
         if (name.equals("noisetex") && noise != null) {
             return noise;
         }
+        // The game's lightmap (Iris's "lightmap" sampler). Game draws bind it themselves as
+        // Sampler2 (EntityTakeover's renames); terrain and others read it here. Miniature's
+        // terrain takes its whole ambient light from it: as the black placeholder, terrain was black.
+        if (name.equals("lightmap")) {
+            return net.minecraft.client.Minecraft.getInstance().gameRenderer.lightmap();
+        }
         if (name.startsWith("shadowtex")) {
             return solid(device, encoder, 0xFFFFFFFF);
+        }
+        // No PBR resource pack: the atlas's normal and specular maps are Iris's defaults
+        // (PBRType: NORMAL 0x7F7FFFFF, a flat normal; SPECULAR 0, both written as RGBA).
+        if (name.equals("normals")) {
+            return solid(device, encoder, 0xFF7F7FFF);
+        }
+        if (name.equals("specular")) {
+            return solid(device, encoder, 0x00000000);
         }
         return solid(device, encoder, 0xFF000000);
     }
 
-    static Integer targetIndex(String name) {
+    public static Integer targetIndex(String name) {
         if (name.startsWith("colortex")) {
             try {
                 return Integer.parseInt(name.substring("colortex".length()));

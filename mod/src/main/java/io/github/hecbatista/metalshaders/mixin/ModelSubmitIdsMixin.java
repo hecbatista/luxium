@@ -4,6 +4,7 @@ import io.github.hecbatista.metalshaders.render.DrawIds;
 import io.github.hecbatista.metalshaders.render.ItemDrawState;
 import net.minecraft.client.renderer.feature.CustomFeatureRenderer;
 import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
+import net.minecraft.client.renderer.feature.TextFeatureRenderer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -11,11 +12,11 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * A model or custom-geometry submit (ModelFeatureRenderer.Submit, CustomFeatureRenderer.Submit,
- * 26.3) keeps the ids current when it was made, as item submits do (ItemFeatureRendererSubmitMixin;
+ * A model, custom-geometry or text submit (ModelFeatureRenderer.Submit, CustomFeatureRenderer.Submit,
+ * TextFeatureRenderer.Submit, 26.3) keeps the ids current when it was made, as item submits do (ItemFeatureRendererSubmitMixin;
  * Iris ModelStorage.iris$capture). See DrawIds: render types are shared, submits are not.
  */
-@Mixin({ModelFeatureRenderer.Submit.class, CustomFeatureRenderer.Submit.class})
+@Mixin({ModelFeatureRenderer.Submit.class, CustomFeatureRenderer.Submit.class, TextFeatureRenderer.Submit.class})
 abstract class ModelSubmitIdsMixin implements ItemDrawState.Captured {
     @Unique
     private DrawIds.Ids luxium$ids;

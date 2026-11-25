@@ -268,14 +268,18 @@ public final class TerrainTakeover {
         }
     }
 
-    /** {@code alphaTest.<program>=GREATER 0.1} (Iris AlphaTest syntax); only GREATER and off are read. */
+    /**
+     * {@code alphaTest.<program>=GREATER 0.1} (Iris AlphaTest syntax); only GREATER and off are read.
+     * "off" and "false" both turn the test off, as Iris's ShaderProperties reads them (Bliss writes
+     * {@code alphaTest.gbuffers_water=false}: its near water has alpha 1/255).
+     */
     static float alphaTest(java.util.Properties properties, String program, float fallback) {
         String v = properties.getProperty("alphaTest." + program);
         if (v == null) {
             return fallback;
         }
         String[] parts = v.strip().split("\\s+");
-        if (parts[0].equalsIgnoreCase("off")) {
+        if (parts[0].equalsIgnoreCase("off") || parts[0].equalsIgnoreCase("false")) {
             return Float.NaN;
         }
         if (parts.length == 2 && parts[0].equals("GREATER")) {
@@ -328,7 +332,7 @@ public final class TerrainTakeover {
     /** Translates and builds one terrain pipeline, and starts its compile on {@link PipelineCompiler}'s pool. */
     private static Started start(TerrainRenderPass pass, String program, String name, String[] glsl, float alphaTest, int stage,
                                  boolean coverage, java.util.Properties properties, boolean shadow) throws Exception {
-        ProgramTranslator.Result r = ProgramTranslator.translateForTerrain(glsl[0], glsl[1], new ProgramTranslator.Terrain(alphaTest, coverage, shadow));
+        ProgramTranslator.Result r = ProgramTranslator.translateForTerrain(PackChain.gbufferVolumes(glsl[0]), PackChain.gbufferVolumes(glsl[1]), new ProgramTranslator.Terrain(alphaTest, coverage, shadow));
         List<Integer> writes = r.drawBuffers().isEmpty() ? List.of(0) : r.drawBuffers();
         if (coverage) {
             int coverageAt = r.fragmentOutputs().stream().filter(s -> s.name().equals(ProgramTranslator.COVERAGE_OUTPUT))
@@ -460,7 +464,7 @@ public final class TerrainTakeover {
         inputs.clear();
         for (ProgramTranslator.Sampler s : p.result().samplers()) {
             if (!ALBEDO.contains(s.name())) {
-                inputs.put(s.name(), PackChain.inputView(s.name()));
+                inputs.put(s.name(), PackChain.inputView(s.name(), p.result().samplers()));
             }
         }
     }
@@ -492,6 +496,7 @@ public final class TerrainTakeover {
     }
 
     private static void drawOpaqueTimed(GpuTextureView depth, GpuSampler sampler, GpuTextureView atlas, boolean wireframe) {
+        PackChain.drawPrepare(net.minecraft.client.Minecraft.getInstance().gameRenderer.mainRenderTarget(), MetalShadersClient::value);
         drawShadow(sampler, atlas, wireframe);
         drewOpaque = drawGroup(ChunkSectionLayerGroup.OPAQUE, DefaultTerrainRenderPasses.SOLID, depth, sampler, atlas, wireframe);
     }

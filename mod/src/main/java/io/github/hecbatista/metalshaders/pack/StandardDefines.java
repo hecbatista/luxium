@@ -65,9 +65,24 @@ public final class StandardDefines {
         // the fallback that mixes a translucency tint into colortex3 for every entity; under Iris
         // opaque entities write 0 there (found with mod/scripts/pipecheck, 2026-11-23).
         defines.put("IRIS_FEATURE_ENTITY_TRANSLUCENT", "");
+        // Iris StandardMacros: OptiFine's render and shadow quality multipliers, always 1.0 under
+        // Iris. Solas reads MC_RENDER_QUALITY in its sharpen filter (final).
+        defines.put("MC_RENDER_QUALITY", "1.0");
+        defines.put("MC_SHADOW_QUALITY", "1.0");
         for (int i = 0; i < RENDER_STAGES.size(); i++) {
             defines.put("MC_RENDER_STAGE_" + RENDER_STAGES.get(i), Integer.toString(i));
         }
+
+        // Iris StandardMacros, read by Bliss v2.1.2 (which also reads MC_RENDER_QUALITY above):
+        // - MC_HAND_DEPTH, the depth scale of the hand (Iris HandRenderer.DEPTH = 0.125F, written
+        //   with Float.toString); Bliss's deferred and composite passes tell the hand by depth.
+        // - MC_NORMAL_MAP and MC_SPECULAR_MAP, always defined by Iris. Bliss's gbuffers declare
+        //   FlatNormals and their tangent input only under MC_NORMAL_MAP, but use FlatNormals
+        //   unconditionally. The normals and specular samplers then read Iris's default
+        //   textures (PackChain.input).
+        defines.put("MC_HAND_DEPTH", "0.125");
+        defines.put("MC_NORMAL_MAP", "");
+        defines.put("MC_SPECULAR_MAP", "");
         return Collections.unmodifiableMap(defines);
     }
 

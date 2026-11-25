@@ -39,7 +39,7 @@ Facts as of 2026-11-23:
   | `BadProgram` (folder pack, programs don't compile) | vanilla; one error line and a notice |
   | `Minimal` (folder pack, only a grayscale `final`) | **works**: vanilla gbuffers, the pack's final pass |
   | Complementary Reimagined r5.9.3 | **works** fully, no errors |
-  | Bliss v2.1.2 (Chocapic13 edit) | vanilla: `deferred1` doesn't compile (`MC_HAND_DEPTH` undefined, `texelFetch2D` unknown) |
+  | Bliss v2.1.2 (Chocapic13 edit) | vanilla: `deferred1` doesn't compile (`MC_HAND_DEPTH` undefined, `texelFetch2D` unknown). **Works since 2026-11-23** (branch `claude/bliss-fix-ac0f91`; `docs/release/compatibility.md`) |
   | Solas v3.9 | vanilla: `final` doesn't compile (`MC_RENDER_QUALITY` undefined; `customTexture.milkyWayTex` unsupported) |
 
   - A pack that can't be used now gives one plain error line: "Shader pack X can't be used: <why>. The game renders without shaders. If this pack should work, please report it with logs/latest.log (issues link)."
