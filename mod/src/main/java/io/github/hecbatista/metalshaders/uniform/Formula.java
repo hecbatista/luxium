@@ -545,9 +545,17 @@ public final class Formula {
                 }
                 yield Math.abs(num(v[0]) - num(v[1])) <= num(v[2]);
             }
+            // Iris IrisFunctions: random() in [0, 1), random(min, max), a new number each evaluation.
+            case "random" -> switch (n) {
+                case 0 -> RANDOM.nextFloat();
+                case 2 -> num(v[0]) + RANDOM.nextFloat() * (num(v[1]) - num(v[0]));
+                default -> throw new FormulaException("random() takes 0 or 2 arguments");
+            };
             default -> throw new FormulaException("Unknown function " + c.name() + "()");
         };
     }
+
+    private static final java.util.Random RANDOM = new java.util.Random();
 
     private static Object one(Object[] v, Call c) throws FormulaException {
         if (v.length != 1) {

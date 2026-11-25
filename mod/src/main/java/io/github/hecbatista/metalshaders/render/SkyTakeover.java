@@ -103,13 +103,27 @@ public final class SkyTakeover {
         }
     }
 
+    /** The buffers the sky programs write (colortex0 for most packs), in draw-buffer order. */
+    private static List<Integer> skyWrites;
+
+    /** The sky pass's colour attachments, or null if the sky isn't the pack's. */
+    public static List<Integer> writes() {
+        return skyWrites;
+    }
+
     private static void add(RenderPipeline vanilla, String program, String[] glsl) throws Exception {
         Set<String> elements = new java.util.HashSet<>();
         vanilla.getVertexFormatBindings().getFirst().getElements().forEach(e -> elements.add(e.name()));
         ProgramTranslator.Result r = ProgramTranslator.translateForFormat(glsl[0], glsl[1], elements);
         List<Integer> writes = r.drawBuffers().isEmpty() ? List.of(0) : r.drawBuffers();
-        if (!writes.equals(List.of(0))) {
-            throw new IllegalStateException(program + " writes " + writes + "; only colortex0 is supported for the sky yet");
+        // One pass draws every piece, so they must agree on their buffers (MakeUp's sky writes
+        // colortex1, its scene buffer; Iris binds each program's own).
+        if (skyWrites == null) {
+            skyWrites = List.copyOf(writes);
+            PackChain.requireTargets(skyWrites);
+        } else if (!skyWrites.equals(writes)) {
+            throw new IllegalStateException(program + " writes " + writes + " but the other sky program writes " + skyWrites
+                    + "; sky programs writing different buffers aren't supported yet");
         }
         Identifier shader = Identifier.fromNamespaceAndPath("luxium", "pack/" + program + "_" + vanilla.getLocation().getPath().replace('/', '_'));
         RenderPipeline.Builder b = RenderPipeline.builder()
@@ -118,8 +132,11 @@ public final class SkyTakeover {
                 .withPrimitiveTopology(vanilla.getPrimitiveTopology())
                 .withVertexBinding(0, vanilla.getVertexFormatBindings().getFirst());
         ColorTargetState vanillaTarget = vanilla.getColorTargetStates().getFirst();
-        b.withColorTargetState(new ColorTargetState(vanillaTarget.blendFunction(), PackChain.targetFormat(0),
-                PackChain.promoted(0) ? ColorTargetState.WRITE_COLOR : vanillaTarget.writeMask()));
+        for (int i = 0; i < writes.size(); i++) {
+            int index = writes.get(i);
+            b.withColorTargetState(i, new ColorTargetState(vanillaTarget.blendFunction(), PackChain.targetFormat(index),
+                    PackChain.promoted(index) ? ColorTargetState.WRITE_COLOR : vanillaTarget.writeMask()));
+        }
         if (vanilla.getDepthStencilState() != null) {
             b.withDepthStencilState(vanilla.getDepthStencilState());
         }
@@ -157,6 +174,7 @@ public final class SkyTakeover {
         }
         pieces.clear();
         byCompiled.clear();
+        skyWrites = null;
         inputs.clear();
         usedRings.clear();
         prepared = false;

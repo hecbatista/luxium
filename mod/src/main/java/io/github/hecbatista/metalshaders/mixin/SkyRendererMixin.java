@@ -71,13 +71,29 @@ abstract class SkyRendererMixin {
                                           final Optional<Vector4fc> clear, final GpuTextureView depth, final OptionalDouble clearDepth,
                                           final Operation<RenderPass> original) {
         SkyTakeover.enterPass();
-        GpuTextureView colortex0 = SkyTakeover.inPass() ? PackChain.gbufferTarget(0) : null;
-        if (colortex0 == null) {
+        java.util.List<Integer> writes = SkyTakeover.inPass() ? SkyTakeover.writes() : null;
+        java.util.List<GpuTextureView> targets = new java.util.ArrayList<>();
+        if (writes != null) {
+            for (int index : writes) {
+                targets.add(PackChain.gbufferTarget(index));
+            }
+        }
+        if (writes == null || targets.contains(null)) {
             SkyTakeover.leavePass();
             return original.call(encoder, label, color, clear, depth, clearDepth);
         }
+        PackChain.drawPrepare(net.minecraft.client.Minecraft.getInstance().gameRenderer.mainRenderTarget(), MetalShadersClient::value);
         PackChain.skyDrawn(encoder);
-        RenderPass pass = original.call(encoder, (Supplier<String>) () -> "Luxium sky (pack)", colortex0, Optional.<Vector4fc>empty(), depth, OptionalDouble.empty());
+        RenderPass pass;
+        if (targets.size() == 1) {
+            pass = original.call(encoder, (Supplier<String>) () -> "Luxium sky (pack)", targets.getFirst(), Optional.<Vector4fc>empty(), depth, OptionalDouble.empty());
+        } else {
+            com.mojang.renderpearl.api.commands.RenderPassDescriptor.Builder d =
+                    com.mojang.renderpearl.api.commands.RenderPassDescriptor.builder(() -> "Luxium sky (pack)");
+            targets.forEach(d::withColorAttachment);
+            d.withDepthAttachment(depth);
+            pass = encoder.createRenderPass(d.build());
+        }
         SkyTakeover.drawHorizon(pass, MetalShadersClient::value);
         return pass;
     }

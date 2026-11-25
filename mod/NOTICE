@@ -450,6 +450,13 @@ GNU Lesser General Public License version 3
     and net.irisshaders.iris.shaderpack.IrisDefines.createIrisReplacements: the same category
     list and order, the same biome-tag tests in the same order. Changed: the downfall is read by
     reflection instead of Iris's ExtendedBiome mixin.
+  - glsl/CompatVaryings.java (for MakeUp 9.6a): gl_FogFragCoord becomes a float varying set to 0
+    at the top of the vertex main, as net.irisshaders.iris.pipeline.transform.transformer
+    .CommonTransformer.transform does; entityId/blockEntityId/currentRenderedItemId read the draw's
+    ids whatever their declaration, as EntityPatcher.patchEntityId replaces every use of those names.
+    Changed: rewritten on our token stream; the ids are Luxium's per-draw uniforms.
+  - uniform/Formula.java: random() and random(min, max) as net.irisshaders.iris.parsing
+    .IrisFunctions registers them.
   - render/CustomTextures.java reads the raw texture forms (<file> TEXTURE_2D|TEXTURE_3D
     <internal format> <sizes> <pixel format> <pixel type>) as net.irisshaders.iris.shaderpack
     .properties.ShaderProperties parses them, with Iris's defaults from net.irisshaders.iris

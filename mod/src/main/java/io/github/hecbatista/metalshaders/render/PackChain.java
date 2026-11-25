@@ -425,6 +425,7 @@ public final class PackChain {
             TerrainTakeover.beginFrame();
             EntityTakeover.beginFrame();
             deferredRan = false;
+            prepareRan = false;
             stopped = false;
         } catch (RuntimeException e) {
             fail("beginFrame threw", e);
@@ -473,9 +474,40 @@ public final class PackChain {
             encoder.copyTextureToTexture(depthConverted, depthPre, 0, 0, 0, 0, 0, width, height);
             seed(device, encoder, target);
             deferredRan = true;
-            runPasses(device, encoder, target, values, true);
+            runPasses(device, encoder, target, values, "deferred");
         } catch (RuntimeException e) {
             fail("drawing the deferred passes threw", e);
+        }
+    }
+
+    private static String groupOf(String pass) {
+        return pass.startsWith("prepare") ? "prepare" : pass.startsWith("deferred") ? "deferred" : "composite";
+    }
+
+    /** Per frame: whether the prepare passes ran. */
+    private static boolean prepareRan;
+
+    /**
+     * The pack's prepare passes (prepare, prepare1...), once per frame, before the pack's sky or
+     * its opaque terrain, whichever the game draws first (MakeUp's prepare draws the sky colour its
+     * sky and terrain read). Iris runs them after the shadow pass; Luxium draws the shadow map with
+     * the opaque terrain, so a prepare pass that reads it sees the previous frame's.
+     */
+    public static void drawPrepare(RenderTarget target, Function<String, Object> values) {
+        if (!ready() || prepareRan) {
+            return;
+        }
+        prepareRan = true;
+        if (passes.stream().noneMatch(p -> p.name().startsWith("prepare"))) {
+            return;
+        }
+        try {
+            GpuDevice device = RenderSystem.getDevice();
+            CommandEncoder encoder = device.createCommandEncoder();
+            ensureTargets(device, target.width, target.height);
+            runPasses(device, encoder, target, values, "prepare");
+        } catch (RuntimeException e) {
+            fail("drawing the prepare passes threw", e);
         }
     }
 
@@ -509,7 +541,7 @@ public final class PackChain {
                 convertDepth(encoder, target, depthConvertedView);
                 encoder.copyTextureToTexture(depthConverted, depthPre, 0, 0, 0, 0, 0, width, height);
                 seed(device, encoder, target);
-                runPasses(device, encoder, target, values, true);
+                runPasses(device, encoder, target, values, "deferred");
             } else {
                 convertDepth(encoder, target, depthConvertedView);   // depthtex0 now includes translucents
             }
@@ -546,7 +578,7 @@ public final class PackChain {
                 mergeHand(device, encoder, depthConverted, depthConvertedView);
                 mergeHand(device, encoder, depthPre, depthPreView);
             }
-            runPasses(device, encoder, target, values, false);
+            runPasses(device, encoder, target, values, "composite");
             FlashProbe.capture(device, encoder, target.getColorTexture());
         } catch (RuntimeException e) {
             fail("drawing the composites threw", e);
@@ -645,9 +677,9 @@ public final class PackChain {
         }
     }
 
-    /** The deferred passes ({@code deferred == true}) or the composite passes and final. */
+    /** The passes of one group: "prepare", "deferred", or "composite" (the composites and final). */
     private static void runPasses(GpuDevice device, CommandEncoder encoder, RenderTarget target,
-                                  Function<String, Object> values, boolean deferred) {
+                                  Function<String, Object> values, String group) {
         String stopAfter = System.getenv("LUXIUM_STOP_AFTER");
         // Render targets earlier passes of this stage wrote this frame: their texture.<stage>
         // overrides are off from then on (Iris CompositeRenderer, flippedAtLeastOnce).
@@ -656,7 +688,7 @@ public final class PackChain {
             if (stopped) {
                 return;
             }
-            if (pass.name().startsWith("deferred") != deferred) {
+            if (!groupOf(pass.name()).equals(group)) {
                 continue;
             }
             CustomTextures.Stage stage = CustomTextures.stageOfPass(pass.name());

@@ -515,9 +515,9 @@ public final class MetalShadersClient implements ClientModInitializer {
         List<String> names = info.programFiles().getOrDefault(folder, List.of()).stream()
                 .filter(f -> f.endsWith(".fsh"))
                 .map(f -> f.substring(0, f.length() - 4))
-                .filter(n -> n.matches("(deferred|composite)\\d*|final"))
+                .filter(n -> n.matches("(prepare|deferred|composite)\\d*|final"))
                 .filter(n -> info.programFiles().get(folder).contains(n + ".vsh"))
-                .sorted(java.util.Comparator.comparingInt((String n) -> n.startsWith("deferred") ? 0 : n.startsWith("composite") ? 1 : 2)
+                .sorted(java.util.Comparator.comparingInt((String n) -> n.startsWith("prepare") ? -1 : n.startsWith("deferred") ? 0 : n.startsWith("composite") ? 1 : 2)
                         .thenComparingInt(n -> n.replaceAll("\\D", "").isEmpty() ? 0 : Integer.parseInt(n.replaceAll("\\D", ""))))
                 .toList();
 

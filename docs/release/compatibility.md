@@ -9,6 +9,37 @@ one at a time with the flow in `mod/scripts/PACK-TESTING.md`:
 Earlier results (Complementary Unbound r5.10, Complementary Reimagined r5.9.3, Bliss v2.1.2,
 Solas v3.9) are in `docs/release/alpha.md`, "Fails safe".
 
+## MakeUp UltraFast 9.6a (2026-11-25): renders, matches Iris on the zoo and beach stops
+
+- Offline: **99/99** reach Metal (43/99 before: 56 × `'gl_FogFragCoord' : undeclared identifier`).
+- In game: 0 validation messages, no crash; 33 formulas load. `fixedTaaCorrection`
+  (`vec2(...) * 0.51`) fails, as under Iris ("Failed to resolve uniform fixedTaaCorrection": Iris
+  has no vector-by-number arithmetic either).
+- What was wrong, in the order found:
+  - `gl_FogFragCoord`, a compatibility varying Vulkan GLSL lacks, is now a real varying, as Iris
+    does (`glsl/CompatVaryings.java`).
+  - The sky was black. MakeUp's `prepare` pass draws the sky colour its sky and terrain read, and
+    Luxium didn't run prepare passes. They now run once per frame, before the pack's sky or its
+    opaque terrain, whichever comes first (`render/PackChain.drawPrepare`). Iris runs them after
+    the shadow pass; Luxium draws the shadow map with the opaque terrain, so a prepare pass reading
+    it would see the previous frame's.
+  - The sky takeover only handled `colortex0`; MakeUp's whole scene is in `colortex1`. The sky
+    pass now attaches whatever its programs write (`render/SkyTakeover.java`,
+    `mixin/SkyRendererMixin.java`).
+  - The End portal and gateway were black: MakeUp declares `attribute int blockEntityId;`, which
+    Luxium read as a missing attribute (0). The entity ids now read the draw's ids whatever their
+    declaration, as Iris does.
+  - `random()` wasn't a formula function (`ditherShift`).
+- Side by side with Iris (`mod/build/compare/makeup/`): sky and clouds, sun light, shadows,
+  water, terrain, entities, block entities, signs, End portal, nether portal and translucents match.
+- Differences left:
+  - Luxium's grass is a touch lighter. Cause not looked into.
+  - The End portal's starfield colour cycles with `frameTimeCounter`, so the two runs catch it at
+    different colours (purple vs teal); same for the gateway beam. Not a difference in rendering.
+  - The beach-sprint shot timing and mob poses, as with the other packs.
+- Not compared: night, caves, rain/snow, the Nether and the End.
+- Effect on Complementary Unbound: still 90/90; the zoo stops unchanged (`mod/build/compare/cu-makeup/`).
+
 ## Photon v1.4 (2026-11-25): renders, matches Iris on the zoo and beach stops
 
 - Offline: **165/165** reach Metal (128/171 before; the 6 `gbuffers_voxels`/`shadow_voxels`

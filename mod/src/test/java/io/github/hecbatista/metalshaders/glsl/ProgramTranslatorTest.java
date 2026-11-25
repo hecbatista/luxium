@@ -281,4 +281,36 @@ class ProgramTranslatorTest {
         assertTrue(r.fragment().contains("luxium_po_fragment_color = vec4(fragment_color, float(1));"), r.fragment());
         assertFalse(r.fragment().contains("out vec3"), r.fragment());
     }
+
+    @Test
+    void fogFragCoordBecomesAVarying() throws Exception {
+        // MakeUp 9.6a: gl_FogFragCoord = length(position.xyz) in every gbuffers vertex stage.
+        ProgramTranslator.Result r = ProgramTranslator.translate("""
+                #version 130
+                void main() { gl_Position = vec4(0.0); gl_FogFragCoord = 2.0; }
+                """, """
+                #version 130
+                void main() { gl_FragData[0] = vec4(gl_FogFragCoord); }
+                """);
+        assertTrue(r.vertex().contains("out float luxium_FogFragCoord;"), r.vertex());
+        assertTrue(r.vertex().contains("luxium_FogFragCoord = 2.0;"), r.vertex());
+        assertTrue(r.fragment().contains("in float luxium_FogFragCoord;"), r.fragment());
+    }
+
+    @Test
+    void blockEntityIdAttributeReadsTheUniform() throws Exception {
+        // MakeUp 9.6a: attribute int blockEntityId; in its block-entity vertex stage.
+        ProgramTranslator.Result r = ProgramTranslator.translate("""
+                #version 120
+                attribute int blockEntityId;
+                varying float portal;
+                void main() { portal = float(blockEntityId == 10091); gl_Position = vec4(0.0); }
+                """, """
+                #version 120
+                varying float portal;
+                void main() { gl_FragData[0] = vec4(portal); }
+                """);
+        assertTrue(r.uniforms().stream().anyMatch(u -> u.name().equals("blockEntityId")), r.vertex());
+        assertFalse(r.vertex().contains("in int blockEntityId"), r.vertex());
+    }
 }

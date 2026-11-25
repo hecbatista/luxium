@@ -496,6 +496,7 @@ public final class TerrainTakeover {
     }
 
     private static void drawOpaqueTimed(GpuTextureView depth, GpuSampler sampler, GpuTextureView atlas, boolean wireframe) {
+        PackChain.drawPrepare(net.minecraft.client.Minecraft.getInstance().gameRenderer.mainRenderTarget(), MetalShadersClient::value);
         drawShadow(sampler, atlas, wireframe);
         drewOpaque = drawGroup(ChunkSectionLayerGroup.OPAQUE, DefaultTerrainRenderPasses.SOLID, depth, sampler, atlas, wireframe);
     }

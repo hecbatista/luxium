@@ -542,7 +542,8 @@ public final class ProgramTranslator {
                                     Format format) throws TranslationException {
         boolean dynamic = format != null;
         Map<String, String> renames = format == null ? Map.of() : format.samplerRenames();
-        String[] flat = StructVaryings.flatten(vertexSource, fragmentSource);   // the game refuses struct varyings
+        String[] compat = CompatVaryings.apply(vertexSource, fragmentSource);   // gl_FogFragCoord
+        String[] flat = StructVaryings.flatten(compat[0], compat[1]);   // the game refuses struct varyings
         vertexSource = flat[0];
         fragmentSource = FragmentOutputs.widen(flat[1]);   // Metal wants every colour component written
         StageScan vs = new StageScan(Stage.VERTEX, vertexSource);
