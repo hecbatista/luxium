@@ -30,6 +30,9 @@ Common runs:
 | Pack settings | add `LUXIUM_TEST_SETTINGS="NAME=value;NAME2=value"` |
 | Frame timing | add `LUXIUM_PERF=1` (best with validation off: run gradle directly) |
 | Promo shots for README/Modrinth | `mod/scripts/promo.sh <label>` (validation off, render distance 12; never for checking changes) |
+| **Is a small change faster or slower?** (~70 s) | `mod/scripts/ab.sh <label> <system property> [value]`: one launch, overlook view, the property flipped on and off over 4 rounds (e.g. `luxium.noMipmaps`, `luxium.shadowCull box`, `luxium.noScaleScissor`). The feature must read the property every frame. Use this first; read each result as it lands |
+| Milestone numbers vs LeadLight/Iris | `mod/scripts/bench.sh <label> [LUXIUM_BENCH_RD=12]` + `leadlight-compare/run.sh` / `iris-compare/run.sh` in ABBA order (docs/release/benchmarks.md); 2–3 min per run, so only for numbers that go into docs |
+| GPU time per pass | Metal System Trace during a run (`xcrun xctrace record --template 'Metal System Trace' --attach <pid> --time-limit 3s`) with `LUXIUM_GPU_LABELS=1`; then `mod/scripts/trace-passes.py` (its header has the export commands) |
 
 Tour stop names, in order (see `runTest` in PlaytestTour.java):
 survival walk, build zoo, zoo, effects, survival actions, menus, lightning and fireworks, night,

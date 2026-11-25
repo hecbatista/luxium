@@ -93,6 +93,10 @@ public class PlaytestTour implements FabricClientGameTest {
             stop("portal trip", this::portalTrip);
             stop("window resize", this::windowResize);
             // LUXIUM_BENCH=1: the benchmark (docs/release/alpha.md). Not part of the normal tour.
+            // LUXIUM_AB=<system property>: the quick A/B (about 2 min, one launch). See abTest.
+            if (System.getenv("LUXIUM_AB") != null) {
+                stop("ab", this::abTest);
+            }
             if (System.getenv("LUXIUM_BENCH") != null) {
                 stop("benchmark", this::benchmark);
             }
@@ -614,7 +618,8 @@ public class PlaytestTour implements FabricClientGameTest {
      * limiter, the test world's render distance, a 1708x960 window. Each: 3 s warm-up, 10 s measured. Logs
      * "[Luxium tour] bench <scene>: ..." lines. Run it alone on the machine, validation off.
      */
-    private void benchmark() {
+    /** The benchmark's fixed settings: spectator, noon, clear, vsync off, no frame cap, 1708x960. */
+    private void benchSetup() {
         spectator();
         hud(true);
         cmd("time set noon");
@@ -630,6 +635,42 @@ public class PlaytestTour implements FabricClientGameTest {
         context.waitTicks(10);
         context.runOnClient(mc -> log("bench window: " + mc.getWindow().getWidth() + "x" + mc.getWindow().getHeight()
                 + " framebuffer, render distance " + mc.options.renderDistance().get()));
+    }
+
+    /**
+     * The quick A/B for a small render change (about 2 minutes, one launch): the benchmark's
+     * settings and overlook view, then LUXIUM_AB_ROUNDS rounds (default 4) that each measure the
+     * system property LUXIUM_AB unset and set to "true", in A B / B A order, 1 s warm-up and 4 s
+     * measured each. Flipping in one process cancels the machine's drift between launches. Logs
+     * "[Luxium tour] bench ab <property>=<off|on> r<round>: ...". The feature must read the
+     * property every frame (e.g. luxium.noMipmaps, luxium.shadowCull=box via LUXIUM_AB_VALUE).
+     */
+    private void abTest() {
+        String property = System.getenv("LUXIUM_AB");
+        String value = System.getenv().getOrDefault("LUXIUM_AB_VALUE", "true");
+        int rounds = Integer.parseInt(System.getenv().getOrDefault("LUXIUM_AB_ROUNDS", "4"));
+        benchSetup();
+        BlockPos spawn = surface(8, 8);
+        cmd("tp @a 8.5 " + (spawn.getY() + 30) + " 8.5 30 20");
+        settle(80);
+        for (int r = 1; r <= rounds; r++) {
+            boolean[] order = r % 2 == 1 ? new boolean[]{false, true} : new boolean[]{true, false};
+            for (boolean on : order) {
+                context.runOnClient(mc -> {
+                    if (on) {
+                        System.setProperty(property, value);
+                    } else {
+                        System.clearProperty(property);
+                    }
+                });
+                measure("ab " + property + "=" + (on ? value : "off") + " r" + r, null, 20, 80);
+            }
+        }
+        context.runOnClient(mc -> System.clearProperty(property));
+    }
+
+    private void benchmark() {
+        benchSetup();
         BlockPos at = findBiome(Biomes.BEACH);
         if (at != null) {
             cmd("tp @a " + at.getX() + " 200 " + at.getZ());
@@ -706,10 +747,14 @@ public class PlaytestTour implements FabricClientGameTest {
     }
 
     private void measure(String scene, Runnable perTick) {
-        context.waitTicks(60);   // warm-up: pipelines, chunk uploads
+        measure(scene, perTick, 60, 200);
+    }
+
+    private void measure(String scene, Runnable perTick, int warmTicks, int ticks) {
+        context.waitTicks(warmTicks);   // warm-up: pipelines, chunk uploads
         stampCount = 0;
         recording = true;
-        for (int i = 0; i < 200; i++) {
+        for (int i = 0; i < ticks; i++) {
             if (perTick != null) {
                 perTick.run();
             }

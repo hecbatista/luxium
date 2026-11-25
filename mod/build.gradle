@@ -65,6 +65,15 @@ dependencies {
 	gametestImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 }
 
+// LUXIUM_GPU_LABELS=1: start the game with --renderDebugLabels (Minecraft's Main), so Metallum labels
+// its command buffers and encoders (MetalDevice.useLabels) and Metal System Trace shows pass names.
+// For profiling only; off by default (labels cost CPU).
+loom.runs.matching { it.name == 'clientGameTest' }.configureEach {
+	if (System.getenv('LUXIUM_GPU_LABELS') != null) {
+		programArgs '--renderDebugLabels'
+	}
+}
+
 // Fail early, with a clear message, if Metallum hasn't been built yet.
 tasks.named("compileJava") {
 	doFirst {
