@@ -31,7 +31,7 @@ Shader packs are written for OpenGL. On a Mac, the [Metallum](https://github.com
 - 🌅 **runs the pack's render passes** on Metallum's Metal device: sky, terrain, water, entities, shadows, deferred and composite passes
 
 > [!NOTE]
-> Luxium is in **alpha** (0.1.0-alpha.1). It's tested on one Mac (M1 Max, macOS 27). Expect bugs, and back up your worlds.
+> Luxium is in **alpha** (0.2.0-alpha.1). It's tested on one Mac (M1 Max, macOS 27). Expect bugs, and back up your worlds.
 
 ## 📸 Screenshots
 
@@ -76,9 +76,9 @@ First measurements, with Complementary Unbound at default settings on an M1 Max,
 | Beach, facing the sea | 12 | **90** (1% low 76) | 81 (1% low 67) |
 | Overlook of terrain | 12 | **96** (1% low 82) | 88 (1% low 70) |
 | 360° spin | 12 | **95** (1% low 74) | 86 (1% low 65) |
-| Beach, facing the sea | 5 | **137** (1% low 113) | 96 (1% low 68) |
+| Beach, facing the sea | 5 | **157** (1% low 128) | 96 (1% low 68) |
 
-Frame pacing is steadier too: Luxium's worst frame was 20 ms, against 85 ms for Iris. These are early numbers from one Mac; the method and every run are in [`docs/release/benchmarks.md`](docs/release/benchmarks.md).
+The render distance 12 rows were measured on 0.1.0; 0.2.0 is faster still, and its render distance 5 numbers are the beach row (it was 137 fps on 0.1.0). Frame pacing is steadier too: Luxium's worst frame was 20 ms, against 85 ms for Iris. These are early numbers from one Mac; the method and every run are in [`docs/release/benchmarks.md`](docs/release/benchmarks.md).
 
 ## 🧰 Requirements
 
@@ -97,7 +97,7 @@ Frame pacing is steadier too: Luxium's worst frame was 20 ms, against 85 ms for 
 2. **Put three mods in your `mods` folder:**
    - [Sodium](https://modrinth.com/mod/sodium) 0.9.2 for 26.3;
    - [Metallum](https://modrinth.com/mod/metallum-mc) **0.0.25**, exactly that version: Luxium checks it at startup;
-   - Luxium, `luxium-0.1.0-alpha.1.jar` from [Releases](https://github.com/hecbatista/luxium/releases).
+   - Luxium, `luxium-0.2.0-alpha.1.jar` from [Releases](https://github.com/hecbatista/luxium/releases).
 
    Fabric API isn't needed.
 3. **Put a shader pack** (the `.zip`, unopened) in the `shaderpacks` folder next to `mods`. Complementary Unbound is the best-tested pack.
@@ -156,7 +156,6 @@ shaderPack=ComplementaryUnbound_r5.10.zip
 - **Settings menus:** moving between individual settings with the keyboard isn't supported yet (use the mouse), and there's no import/export of settings.
 - **Not supported yet:**
   - chunk fade-in (new chunks pop in instead of fading through the fog);
-  - packs' `customTexture.*` and raw custom textures;
   - Distant Horizons.
 - **Performance at long render distances:** Luxium slows down more than Iris as render distance grows. It's still ahead at 12 chunks, but the gap narrows ([details](docs/release/benchmarks.md)).
 - **Brightness:** Complementary can look very slightly darker than under Iris in some scenes; the cause is being looked into.

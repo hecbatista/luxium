@@ -569,8 +569,12 @@ public final class PackChain {
                     // Both halves, as Iris's ClearPassCreator does: the one a pass writes next frame
                     // must not hold old contents either (audit S3-04).
                     Vector4f color = clearColor(t);
-                    encoder.clearColorTexture(e.getValue()[0], color);
-                    encoder.clearColorTexture(e.getValue()[1], color);
+                    if (Boolean.getBoolean("luxium.clearOneHalf")) {   // A/B switch: the pre-audit single clear
+                        encoder.clearColorTexture(e.getValue()[current.get(e.getKey())], color);
+                    } else {
+                        encoder.clearColorTexture(e.getValue()[0], color);
+                        encoder.clearColorTexture(e.getValue()[1], color);
+                    }
                 }
             }
             // Nothing is the pack's yet. If the pack draws the sky, skyDrawn() marks the whole

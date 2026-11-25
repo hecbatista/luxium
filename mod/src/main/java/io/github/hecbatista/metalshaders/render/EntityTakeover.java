@@ -513,7 +513,9 @@ public final class EntityTakeover {
                 f.program(0.1f);
             }
             f.writes = p.result().drawBuffers().isEmpty() ? List.of(0) : p.result().drawBuffers();
-            PackChain.requireTargets(f.writes);
+            if (!f.shadow) {
+                PackChain.requireTargets(f.writes);   // the shadow program writes shadowcolor, not colortex
+            }
             f.prepared = true;
             MetalShadersClient.LOGGER.info("Entity takeover ({}): writes colortex{}{}; samplers {}", f.program, f.writes,
                     f.coverage() ? " plus the coverage mask" : "", p.result().samplers().stream().map(ProgramTranslator.Sampler::name).toList());
