@@ -135,3 +135,24 @@ Benchmark in the order T B LL LL B T (T = tight, B = box, same worktree build), 
   | 12 | 110 / 119 / 120 | 108 / 103 / 120 |
 
   So Luxium is about even at render distance 12 and 6–10% behind at 5. LeadLight again had large hitches: 660 ms and 1013 ms worst frames. Rerun on a quiet machine before quoting these numbers anywhere.
+
+## Render distance 5 on an idle Mac (2026-11-25)
+All fixes on `fix-shadow-cull` (tight shadow frustum, mip chains, scaled-pass scissor, depth path, no shadowtex0 copy, half-size `colortex1/7`). Both mods on Modrinth's Metallum 0.0.25, alternating launches, validation off.
+
+- **Half-size reflection buffers** (`size.buffer.colortex1/7 = 0.5`, quick A/B in one launch, 6 rounds): 195.2 fps half against 192.8 full (+1.2%), and faster in every round.
+- **Clean launches**, mean fps (1% low):
+
+  | Scene | Luxium (8 launches) | LeadLight 0.2.0 (7) | Difference |
+  |---|---|---|---|
+  | beach | 156.9 (127.9) | 157.9 (127.0) | −0.6% |
+  | overlook | 193.0 (156.2) | 192.4 (154.8) | +0.3% |
+  | spin | 189.6 (138.6) | 192.1 (140.5) | −1.3% |
+
+  Standard deviations are 1–1.6 fps, so beach and overlook are a tie. Spin is a small, steady loss: Luxium's median frame there is 5.25 ms against 5.20.
+- **Stuttering launches are shared.** 5 of 13 Luxium launches and 3 of 10 LeadLight launches had a p99 over 8.5 ms (1% lows near 90 fps instead of 130–155), over the whole launch. The per-frame dump (`LUXIUM_BENCH_DUMP`) shows the signature: about 80 frames in 10 s of about 11 ms, each followed by a frame of about 1.8 ms, spaced at multiples of 50 ms. So the render thread stalls, the GPU drains, and the next frame doesn't wait.
+  - Not GC: G1 young pauses come every 6–10 s in both mods (`LUXIUM_JVM_ARGS=-Xlog:gc...`).
+  - Not a Java lock: JFR thread-park and monitor events on `main` (the render thread on macOS) have the same distribution in spiky and clean launches. JFR's execution sampler crashes this JVM (`PosixSignals::do_suspend`), so only blocking events can be recorded. macOS `sample` at 1 ms slows the game too much to use.
+  - Still open: a native wait (likely the drawable or present), outside both mods' code.
+  - An earlier head-to-head that compared only spiky Luxium launches with clean LeadLight ones made Luxium look 30–40% worse in 1% lows. Compare clean with clean, or count spiky launches per mod.
+- **Spin, tight against box shadow culling** (quick A/B with `LUXIUM_AB_SPIN=1`, 6 rounds): 184.1 against 174.8 fps. The tight frustum isn't the spin gap.
+- New tooling: `LUXIUM_BENCH_DUMP=<dir>` (per-frame times per scene), `LUXIUM_JVM_ARGS` (both run configs), `LUXIUM_AB_SPIN=1` (A/B while turning), and `LUXIUM_TOUR_SRC` for `leadlight-compare` (it otherwise compiles the tour from the main checkout).

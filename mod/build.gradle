@@ -72,6 +72,10 @@ loom.runs.matching { it.name == 'clientGameTest' }.configureEach {
 	if (System.getenv('LUXIUM_GPU_LABELS') != null) {
 		programArgs '--renderDebugLabels'
 	}
+	// LUXIUM_JVM_ARGS: extra JVM options for the game (for example -Xlog:gc), space-separated. Profiling only.
+	if (System.getenv('LUXIUM_JVM_ARGS') != null) {
+		vmArgs(System.getenv('LUXIUM_JVM_ARGS').trim().split(/\s+/))
+	}
 }
 
 // Fail early, with a clear message, if Metallum hasn't been built yet.

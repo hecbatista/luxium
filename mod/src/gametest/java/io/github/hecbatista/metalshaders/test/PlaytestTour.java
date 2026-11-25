@@ -653,6 +653,7 @@ public class PlaytestTour implements FabricClientGameTest {
         BlockPos spawn = surface(8, 8);
         cmd("tp @a 8.5 " + (spawn.getY() + 30) + " 8.5 30 20");
         settle(80);
+        float[] yaw = {30f};
         for (int r = 1; r <= rounds; r++) {
             boolean[] order = r % 2 == 1 ? new boolean[]{false, true} : new boolean[]{true, false};
             for (boolean on : order) {
@@ -663,7 +664,12 @@ public class PlaytestTour implements FabricClientGameTest {
                         System.clearProperty(property);
                     }
                 });
-                measure("ab " + property + "=" + (on ? value : "off") + " r" + r, null, 20, 80);
+                // LUXIUM_AB_SPIN=1: turn the camera as the benchmark's spin scene does (1.8 degrees a tick).
+                Runnable spin = System.getenv("LUXIUM_AB_SPIN") == null ? null : () -> {
+                    yaw[0] += 1.8f;
+                    cmd("tp @a 8.5 " + (spawn.getY() + 30) + " 8.5 " + yaw[0] + " 10");
+                };
+                measure("ab " + property + "=" + (on ? value : "off") + " r" + r, spin, 20, 80);
             }
         }
         context.runOnClient(mc -> System.clearProperty(property));
@@ -782,6 +788,25 @@ public class PlaytestTour implements FabricClientGameTest {
         log(String.format(java.util.Locale.ROOT,
                 "bench %s: %d frames in %.1f s, avg %.1f fps, median %.2f ms, 1%% low %.1f fps (p99 %.2f ms), worst %.1f ms; %s",
                 scene, n, seconds, (n - 1) / seconds, median, 1000.0 / p99, p99, max, entities));
+        dumpFrames(scene, ms);
+    }
+
+    /** LUXIUM_BENCH_DUMP=<dir>: also writes each scene's frame times (ms, one per line) to <dir>/<scene>.txt. */
+    private static void dumpFrames(String scene, double[] ms) {
+        String dir = System.getenv("LUXIUM_BENCH_DUMP");
+        if (dir == null) {
+            return;
+        }
+        StringBuilder out = new StringBuilder(ms.length * 6);
+        for (double v : ms) {
+            out.append(String.format(java.util.Locale.ROOT, "%.3f%n", v));
+        }
+        try {
+            java.nio.file.Files.createDirectories(java.nio.file.Path.of(dir));
+            java.nio.file.Files.writeString(java.nio.file.Path.of(dir, scene + ".txt"), out);
+        } catch (java.io.IOException e) {
+            log("bench dump failed: " + e);
+        }
     }
 
     /** A carved cave 60 blocks under spawn: torches, glow lichen, lava, ores. No sky light. */
