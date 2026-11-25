@@ -327,6 +327,11 @@ public final class EntityTakeover {
         HAND_TEXT.alphaOverride = 0.0001f;   // Iris AlphaTests.NON_ZERO_ALPHA
         BLOCK_TRANSLUCENT.coverageAlways = true;
         ENTITY_PATTERNS.coverageAlways = true;
+        // Block entities' text (signs) is drawn in the SOLID window, before the seed: without the
+        // mask the seed put the game's image over every glyph (Complementary's sign text read as
+        // the fog colour, pale blue-white).
+        TEXT.coverageAlways = true;
+        TEXT_BE.coverageAlways = true;
         SPIDEREYES.pipelinePath = "pipeline/eyes";
         // Iris ProgramId.SpiderEyes: SRC_ALPHA ONE ZERO ONE.
         SPIDEREYES.blendOverride = Optional.of(new BlendFunction(com.mojang.renderpearl.api.pipeline.BlendFactor.SRC_ALPHA,
@@ -583,8 +588,8 @@ public final class EntityTakeover {
         }
         drawing = f;
         drawingIds = ids;
-        if (seenIds.add(f.program + " " + type.name() + " " + ids)) {
-            MetalShadersClient.LOGGER.info("Entity draw {} ({}): {}", type.name(), f.program,
+        if (seenIds.add(f.program + " " + type.name() + " " + ids + " " + window)) {
+            MetalShadersClient.LOGGER.info("Entity draw {} ({}, {} window): {}", type.name(), f.program, window,
                     ids == null ? "no ids (not an entity's or block entity's)" : "entityId " + ids.entityId() + ", blockEntityId " + ids.blockEntityId() + ", currentRenderedItemId " + ids.itemId());
         }
         return true;

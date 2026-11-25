@@ -104,12 +104,14 @@ Solas v3.9) are in `docs/release/alpha.md`, "Fails safe".
   unchanged; `mod/build/compare/cu/`):
   - Better: the End portal and gateway now show Complementary's own starfield, as under Iris
     (it was the game's, dimmer).
-  - **Worse, open:** glowing sign text is pale blue-white, where Iris (and Luxium before this
-    change, when the game drew text) shows lime; normal sign text matches. The text is now served
-    by gbuffers_block_translucent with the sign's id, the light pair (240, 240) and the lightmap
-    matrix are Iris's, so Complementary's `lmCoord.x > 0.999` glowing branch should be taken; why
-    it doesn't look so isn't known yet. Next step: dump the text variant
-    (`LUXIUM_DUMP_SHADERS`) and compare it with Iris's patched TEXT_BE program (pipecheck).
+  - Was worse, **fixed 2026-11-25:** sign text (glowing and normal) was pale blue-white, where Iris
+    shows lime and dark grey. Block entities' text is drawn in the SOLID window, before the seed,
+    and the text families wrote no coverage mask, so the seed put the game's image (the fog-coloured
+    clear) over every glyph; the pack's output never showed (a debug copy of the pack that painted
+    the sign branch didn't change a pixel). The text families now always write the mask, like
+    banner patterns (`render/EntityTakeover.java`); the polygon offset doesn't upset the seed's
+    depth match. Complementary's signs match Iris again (`mod/build/compare/cu-sign/`); Bliss's
+    and Photon's signs are unchanged.
 - Not supported: Bliss's optional features that need compute shaders and custom images (its
   floodfill light, `IS_LPV_ENABLED`, off by default); its translucent-entities option
   (`TRANSLUCENT_ENTITIES`, off by default) doesn't compile under Iris either (`entityId` undeclared).
