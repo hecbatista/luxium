@@ -87,3 +87,10 @@ What we can say honestly, measured the same way each time:
 - [ ] Real GPU timing (the Metallum hook above) for the benchmark table.
 - [ ] Modrinth listing (needs the license, icon (`branding/`), screenshots and description).
 - [ ] Crash and bug report template (GitHub issue form).
+
+## 0.2.0-alpha.1 (2026-11-25, user's go)
+- `release-0.2.0` = main + `fix-shadow-cull` (perf) + `claude/shader-menus-9e7bd0` + `claude/pack-breadth-341c46` (with bliss and solas) + Codex's audit fixes from the main checkout. Pushed to `main` (`dfd06d3`), tag `v0.2.0-alpha.1`, [pre-release](https://github.com/hecbatista/luxium/releases/tag/v0.2.0-alpha.1) with `luxium-0.2.0-alpha.1.jar` (618,498 bytes, SHA-256 `58efa119…2235`, downloaded back and checked).
+- Merge trap: the entity shadow family registered shadowcolor0/1 as colortex geometry targets; with pack-breadth's size.buffer rule that kept colortex1 full size beside half-size colortex7 and Complementary's composite failed. Fixed in EntityTakeover.
+- Checks under validation, 0 messages: 151 unit tests, scoreboard 90/90, base scene, tour (walk, zoo, effects, menus, night, cave), menus + live toggle + Mod Menu, base scene on Photon, MakeUp, Mellow, Miniature, Bliss, Solas, BSL, Reimagined. Smoke test of the jar alone (Modrinth's Metallum 0.0.25 and Sodium): zoo stops, 0 messages.
+- Quick A/B: clearing both halves of cleared buffers (audit S3-04, as Iris) costs 0.6%; kept.
+- `discord-feedback.md` is kept out of the public repo (it paraphrases named Discord members).
