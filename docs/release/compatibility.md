@@ -9,6 +9,20 @@ one at a time with the flow in `mod/scripts/PACK-TESTING.md`:
 Earlier results (Complementary Unbound r5.10, Complementary Reimagined r5.9.3, Bliss v2.1.2,
 Solas v3.9) are in `docs/release/alpha.md`, "Fails safe".
 
+## Pinned 2026-11-25, not yet tested in game: the Metallum Discord's requests
+
+Pinned in `mod/scripts/testpacks.tsv` from Modrinth (version id + SHA-512), downloaded and
+hash-checked with `fetch-testpacks.sh`. Offline scoreboard only so far:
+
+| Pack (Modrinth slug, version) | Metal ok | Notes |
+|---|---|---|
+| Noble (`noble`, 1.9.9) | 160/160 | 8 compute programs (not translated); check whether options gate them. |
+| AstraLex (`astralex`, V93.0) | 86/86 | |
+| Super Duper Vanilla (`super-duper-vanilla`, 1.3.8) | 111/114 | 3 × glslang "SPIR-V requires location for user input/output". |
+| Sildur's Vibrant (`sildurs-vibrant-shaders`, 2.02 High) | 57/57 | Programs in the shaders root, no `world0/` (Iris falls back to the root). Each quality level is its own Modrinth version; High was pinned. |
+
+ProjectLuma has no shader project on Modrinth (searched by name and slug), so it isn't pinned.
+
 ## Rethinking Voxels r0.1-beta9 (2026-11-25): falls back to vanilla, on purpose
 
 - Offline: 232/232 programs preprocess; **78/78** vertex+fragment pairs reach Metal. Its 31 compute
