@@ -31,7 +31,7 @@ Shader packs are written for OpenGL. On a Mac, the [Metallum](https://github.com
 - 🌅 **runs the pack's render passes** on Metallum's Metal device: sky, terrain, water, entities, shadows, deferred and composite passes
 
 > [!NOTE]
-> Luxium is in **alpha** (0.2.0-alpha.1). It's tested on one Mac (M1 Max, macOS 27). Expect bugs, and back up your worlds.
+> Luxium is in **alpha** (0.2.0-alpha.2). It's tested on one Mac (M1 Max, macOS 27). Expect bugs, and back up your worlds.
 
 ## 📸 Screenshots
 
@@ -88,16 +88,16 @@ The render distance 12 rows were measured on 0.1.0; 0.2.0 is faster still, and i
 | **Minecraft** | 26.3 |
 | **Mod loader** | [Fabric Loader](https://fabricmc.net/) 0.19.5 or later |
 | **Java** | 25 or later |
-| **Required mods** | [Metallum](https://modrinth.com/mod/metallum-mc) 0.0.25 and [Sodium](https://modrinth.com/mod/sodium) 0.9.2 |
+| **Required mods** | [Metallum](https://modrinth.com/mod/metallum-mc) 0.0.25 and [Sodium](https://modrinth.com/mod/sodium) 0.9.2 or 0.9.3 |
 | **A shader pack** | An Iris / OptiFine-format pack, placed in `.minecraft/shaderpacks/` |
 
 ## 📥 Install
 
 1. **Install Fabric** for Minecraft 26.3, with the [Fabric installer](https://fabricmc.net/use/installer/) or in a launcher like Prism or Modrinth (create a new 26.3 Fabric instance).
 2. **Put three mods in your `mods` folder:**
-   - [Sodium](https://modrinth.com/mod/sodium) 0.9.2 for 26.3;
+   - [Sodium](https://modrinth.com/mod/sodium) 0.9.2 or 0.9.3 for 26.3;
    - [Metallum](https://modrinth.com/mod/metallum-mc) **0.0.25**, exactly that version: Luxium checks it at startup;
-   - Luxium, `luxium-0.2.0-alpha.1.jar` from [Releases](https://github.com/hecbatista/luxium/releases).
+   - Luxium, `luxium-0.2.0-alpha.2.jar` from [Releases](https://github.com/hecbatista/luxium/releases).
 
    Fabric API isn't needed.
 3. **Put a shader pack** (the `.zip`, unopened) in the `shaderpacks` folder next to `mods`. Complementary Unbound is the best-tested pack.

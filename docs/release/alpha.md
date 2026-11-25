@@ -94,3 +94,8 @@ What we can say honestly, measured the same way each time:
 - Checks under validation, 0 messages: 151 unit tests, scoreboard 90/90, base scene, tour (walk, zoo, effects, menus, night, cave), menus + live toggle + Mod Menu, base scene on Photon, MakeUp, Mellow, Miniature, Bliss, Solas, BSL, Reimagined. Smoke test of the jar alone (Modrinth's Metallum 0.0.25 and Sodium): zoo stops, 0 messages.
 - Quick A/B: clearing both halves of cleared buffers (audit S3-04, as Iris) costs 0.6%; kept.
 - `discord-feedback.md` is kept out of the public repo (it paraphrases named Discord members).
+
+## 0.2.0-alpha.2 (2026-11-25): Sodium 0.9.3
+- Reported by the user from the Modrinth App (Sodium 0.9.3, BSL): terrain red/pink, and magenta-black in the test. Sodium 0.9.3 added `vec3 u_CameraOffset` (the camera's fraction) after `u_FogColor` in `u_Globals` and moved the fraction out of the region offset; Luxium's terrain header had 0.9.2's layout, so `u_TexCoordShrink` and the rest were read 16 bytes off.
+- Fix: `ProgramTranslator.setSodiumCameraOffset`, chosen at startup from the loaded Sodium's version (`MetalShadersClient.sodiumHasCameraOffset`); the 0.9.3 header adds the field and subtracts it. Built against 0.9.2, runs on both.
+- Checks under validation, 0 messages: Sodium 0.9.3 with BSL, Complementary Unbound, menus and live toggle; 0.9.2 base scene; 152 unit tests; jar smoke test with 0.9.3 and BSL. SHA-256 `df7c7260…3389`.

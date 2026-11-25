@@ -445,7 +445,26 @@ public final class ProgramTranslator {
         return translate(vertexSource, fragmentSource, Mode.GBUFFERS, 1.0f, null, terrain, null);
     }
 
-    /** Terrain-mode header: Sodium's blocks and the decoding helpers (from sodium chunk_vertex.glsl). */
+    /**
+     * Sodium 0.9.3 split the camera position: the region offset (push constant) keeps the whole
+     * blocks and u_Globals gains u_CameraOffset (the fraction, CameraTransform.fracX/Y/Z) right after
+     * u_FogColor, which the vertex subtracts (0.9.3 block_layer_opaque.vsh and globals.glsl). 0.9.2
+     * has neither. Set once at startup from the Sodium that is loaded.
+     */
+    private static volatile boolean sodiumCameraOffset;
+
+    public static void setSodiumCameraOffset(boolean on) {
+        sodiumCameraOffset = on;
+    }
+
+    private static String terrainVertexHeader() {
+        return sodiumCameraOffset
+                ? TERRAIN_VERTEX_HEADER.replace("vec4 u_FogColor;\n", "vec4 u_FogColor;\n    vec3 u_CameraOffset;\n")
+                        .replace("+ luxium_draw_translation(a_LightAndData.w), 1.0);", "+ luxium_draw_translation(a_LightAndData.w) - u_CameraOffset, 1.0);")
+                : TERRAIN_VERTEX_HEADER;
+    }
+
+    /** Terrain-mode header: Sodium's blocks and the decoding helpers (from sodium chunk_vertex.glsl, 0.9.2). */
     private static final String TERRAIN_VERTEX_HEADER = """
             layout(std140) uniform u_Globals {
                 mat4 u_ProjectionMatrix;
@@ -1081,7 +1100,7 @@ public final class ProgramTranslator {
                 }
             }
             if (terrain != null) {
-                h.append(TERRAIN_VERTEX_HEADER);
+                h.append(terrainVertexHeader());
                 if (vertexInputs.containsKey("a_TexCoord")) {
                     h.append(TERRAIN_TEXCOORD);
                 }

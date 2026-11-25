@@ -50,6 +50,21 @@ class TerrainTranslationTest {
             """;
 
     @Test
+    void sodium093AddsTheCameraOffsetAfterTheFogColour() throws Exception {
+        try {
+            ProgramTranslator.setSodiumCameraOffset(true);
+            ProgramTranslator.Result r = ProgramTranslator.translateForTerrain(VERTEX, FRAGMENT, new ProgramTranslator.Terrain(0.5f, true));
+            assertTrue(r.vertex().contains("vec4 u_FogColor;\n    vec3 u_CameraOffset;\n    vec2 u_EnvironmentFog;"), r.vertex());
+            assertTrue(r.vertex().contains("luxium_draw_translation(a_LightAndData.w) - u_CameraOffset, 1.0);"), r.vertex());
+            compile("unit-sodium093", r);
+        } finally {
+            ProgramTranslator.setSodiumCameraOffset(false);
+        }
+        ProgramTranslator.Result old = ProgramTranslator.translateForTerrain(VERTEX, FRAGMENT, new ProgramTranslator.Terrain(0.5f, true));
+        assertFalse(old.vertex().contains("u_CameraOffset"), old.vertex());
+    }
+
+    @Test
     void decodesTheChunkVertexAndAddsTheCoverageOutput() throws Exception {
         ProgramTranslator.Result r = ProgramTranslator.translateForTerrain(VERTEX, FRAGMENT, new ProgramTranslator.Terrain(0.5f, true));
         List<String> inputs = r.vertexInputs().stream().map(ProgramTranslator.Slot::name).toList();

@@ -45,6 +45,18 @@ public final class MetalShadersClient implements ClientModInitializer {
     public static final String MOD_ID = "luxium";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
+    /** Sodium 0.9.3 and later put the camera's fraction in u_CameraOffset (see ProgramTranslator). */
+    static boolean sodiumHasCameraOffset(String version) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(\\d+)\\.(\\d+)\\.(\\d+)").matcher(version);
+        if (!m.find()) {
+            return false;
+        }
+        int major = Integer.parseInt(m.group(1));
+        int minor = Integer.parseInt(m.group(2));
+        int patch = Integer.parseInt(m.group(3));
+        return major > 0 || minor > 9 || (minor == 9 && patch >= 3);
+    }
+
     @Override
     public void onInitializeClient() {
         FabricLoader loader = FabricLoader.getInstance();
@@ -53,11 +65,16 @@ public final class MetalShadersClient implements ClientModInitializer {
                 .map(mod -> mod.getMetadata().getVersion().getFriendlyString())
                 .orElse("NOT FOUND");
 
+        String sodiumVersion = loader.getModContainer("sodium")
+                .map(mod -> mod.getMetadata().getVersion().getFriendlyString())
+                .orElse("NOT FOUND");
+        ProgramTranslator.setSodiumCameraOffset(sodiumHasCameraOffset(sodiumVersion));
+
         // Where Iris and OptiFine look for packs: a "shaderpacks" folder in the game directory.
         Path shaderpacks = loader.getGameDir().resolve("shaderpacks");
 
-        LOGGER.info("Luxium loaded. Metallum version: {}. Shader packs folder: {}",
-                metallumVersion, shaderpacks);
+        LOGGER.info("Luxium loaded. Metallum version: {}. Sodium version: {}. Shader packs folder: {}",
+                metallumVersion, sodiumVersion, shaderpacks);
 
         configFile = loader.getConfigDir().resolve("luxium.properties");
         try {
