@@ -455,6 +455,13 @@ GNU Lesser General Public License version 3
     .CommonTransformer.transform does; entityId/blockEntityId/currentRenderedItemId read the draw's
     ids whatever their declaration, as EntityPatcher.patchEntityId replaces every use of those names.
     Changed: rewritten on our token stream; the ids are Luxium's per-draw uniforms.
+  - glsl/ProgramTranslator.java (for Mellow 3.5): alphaTestRef reads the program's own alpha
+    test reference, as Iris's VanillaCoreTransformer/SodiumCoreTransformer rename it to
+    iris_currentAlphaTest. Changed: written as a constant of each variant. uniform/GameUniforms.java:
+    pi and anisotropicFiltering as net.irisshaders.iris.uniforms.CommonUniforms supplies them.
+  - render/CustomTextures.java: a namespace:path custom texture binds the game's own texture of
+    that name, as net.irisshaders.iris.pipeline.CustomTextureManager does for ResourceData
+    (without its PBR-suffix forms).
   - uniform/Formula.java: random() and random(min, max) as net.irisshaders.iris.parsing
     .IrisFunctions registers them.
   - render/CustomTextures.java reads the raw texture forms (<file> TEXTURE_2D|TEXTURE_3D

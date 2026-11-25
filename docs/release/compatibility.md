@@ -9,6 +9,35 @@ one at a time with the flow in `mod/scripts/PACK-TESTING.md`:
 Earlier results (Complementary Unbound r5.10, Complementary Reimagined r5.9.3, Bliss v2.1.2,
 Solas v3.9) are in `docs/release/alpha.md`, "Fails safe".
 
+## Mellow 3.5 (2026-11-25): renders, close to Iris on the zoo and beach stops
+
+- Offline: **104/104** reach Metal before and after (the scoreboard doesn't see game-only problems).
+- In game: 0 validation messages, no crash; 27 formulas load (22 and 5 dropped before).
+- What was wrong, in the order found:
+  - `deferred1` wouldn't link: it declares `ViewPos` and `Normal` inputs the vertex stage never
+    writes, read only through locals of the same name. A fragment input the vertex stage doesn't
+    write is now a zero global (OpenGL leaves it undefined), not just dropped when unmentioned.
+  - The gbuffers programs failed: a varying named `Normal` (the game's vertex element of that
+    name is declared by the translator), and a raw 3D texture (`texture.gbuffers.gaux3`) in
+    gbuffers programs, which only the full-screen passes rewrote. The game's element names are
+    now renamed in pack code (`luxium_pk_<name>`), and the gbuffers takeovers apply the volume
+    rewrite too.
+  - `minecraft:textures/environment/clouds.png` custom textures were skipped; they now bind the
+    game's own texture, as Iris does.
+  - Everything was dark (night light at noon): the day/night formulas read Iris's `pi` uniform.
+  - Cobwebs, plants and particles drew as solid squares: Mellow discards below Iris's
+    `alphaTestRef`, the program's alpha test reference, which read 0.
+- Side by side with Iris (`mod/build/compare/mellow/`): sky and clouds, sun light, shadows, water
+  and underwater, terrain, cutouts, entities, block entities, signs, End portal, nether portal,
+  particles and translucents match in kind.
+- Differences left:
+  - Walls, block entities and mobs are darker, with more contrast, under Luxium. Cause not found
+    (both use the pack's defaults; Mellow's profiles weren't applied on either side).
+  - The beach-sprint shot timing and mob poses, as with the other packs.
+- Not compared: night, caves, rain/snow, the Nether and the End.
+- Effect on Complementary Unbound: still 90/90; zoo stops unchanged (`mod/build/compare/cu-mellow/`).
+  Photon (which also reads `alphaTestRef`) unchanged on the zoo stops.
+
 ## MakeUp UltraFast 9.6a (2026-11-25): renders, matches Iris on the zoo and beach stops
 
 - Offline: **99/99** reach Metal (43/99 before: 56 × `'gl_FogFragCoord' : undeclared identifier`).

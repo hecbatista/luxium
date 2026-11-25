@@ -39,6 +39,7 @@ Status as of 2026-11-25, with each pack at its default settings:
 | Complementary Reimagined r5.10 | ✅ Works | Matches Iris on the zoo and beach test scenes; the End portal's starfield is dimmer (same as Unbound). r5.9.3 also loads. |
 | Bliss v2.1.2 (Chocapic13 edit) | ✅ Loads and renders | Matches Iris on the zoo and beach test scenes. Its optional floodfill light (compute) isn't supported. |
 | Solas v3.9 | ✅ Loads and renders | Iris can't run it on macOS, so it hasn't been compared. |
+| Mellow 3.5 | ✅ Loads and renders | Close to Iris on the zoo and beach test scenes; walls and mobs come out a little darker. |
 | MakeUp UltraFast 9.6a | ✅ Loads and renders | Matches Iris on the zoo and beach test scenes. |
 | Photon v1.4 | ✅ Loads and renders | Matches Iris on the zoo and beach test scenes (compared with cloud shadows off, which Iris on macOS needs). Its compute skylight (`SH_SKYLIGHT`) is switched off; Iris shows slightly more haze. |
 | BSL v10.1.8 | ✅ Loads and renders | Matches Iris on the zoo and beach test scenes (sky, light, shadows, water, clouds, entities, block entities, portals, glass). Night, caves, weather, Nether and End not compared yet. |

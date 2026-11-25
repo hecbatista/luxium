@@ -1038,9 +1038,18 @@ public final class PackChain {
      *
      * @param programSamplers every sampler of the program that reads it
      */
+    /** A gbuffers or shadow stage with its raw 3D textures as atlases (VolumeTextures, GBUFFERS stage). */
+    public static String gbufferVolumes(String source) {
+        return io.github.hecbatista.metalshaders.glsl.VolumeTextures.rewrite(source,
+                n -> CustomTextures.volume(CustomTextures.Stage.GBUFFERS, n));
+    }
+
     public static GpuTextureView inputView(String name, List<ProgramTranslator.Sampler> programSamplers) {
         // Every caller is a gbuffers or shadow program: Iris's GBUFFERS_AND_SHADOW texture stage.
-        GpuTextureView custom = CustomTextures.override(CustomTextures.Stage.GBUFFERS, name, java.util.Set.of());
+        GpuTextureView custom = CustomTextures.volumeView(CustomTextures.Stage.GBUFFERS, name);
+        if (custom == null) {
+            custom = CustomTextures.override(CustomTextures.Stage.GBUFFERS, name, java.util.Set.of());
+        }
         if (custom != null) {
             return custom;
         }

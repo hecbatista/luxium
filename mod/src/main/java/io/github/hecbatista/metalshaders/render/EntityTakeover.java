@@ -221,7 +221,7 @@ public final class EntityTakeover {
                     drawElements = new HashSet<>(elements);
                     drawElements.add("UV3");
                 }
-                ProgramTranslator.Result r = ProgramTranslator.translateForDraw(glsl[0], glsl[1], drawElements,
+                ProgramTranslator.Result r = ProgramTranslator.translateForDraw(PackChain.gbufferVolumes(glsl[0]), PackChain.gbufferVolumes(glsl[1]), drawElements,
                         new ProgramTranslator.Format(alpha, coverage(), RENAMES, hand, overlay, shadow, glint != Glint.NONE));
                 Map<String, String> defaults = new HashMap<>();
                 r.uniforms().forEach(u -> {

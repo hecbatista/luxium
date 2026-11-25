@@ -114,7 +114,7 @@ public final class SkyTakeover {
     private static void add(RenderPipeline vanilla, String program, String[] glsl) throws Exception {
         Set<String> elements = new java.util.HashSet<>();
         vanilla.getVertexFormatBindings().getFirst().getElements().forEach(e -> elements.add(e.name()));
-        ProgramTranslator.Result r = ProgramTranslator.translateForFormat(glsl[0], glsl[1], elements);
+        ProgramTranslator.Result r = ProgramTranslator.translateForFormat(PackChain.gbufferVolumes(glsl[0]), PackChain.gbufferVolumes(glsl[1]), elements);
         List<Integer> writes = r.drawBuffers().isEmpty() ? List.of(0) : r.drawBuffers();
         // One pass draws every piece, so they must agree on their buffers (MakeUp's sky writes
         // colortex1, its scene buffer; Iris binds each program's own).

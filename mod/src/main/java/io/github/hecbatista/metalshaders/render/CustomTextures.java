@@ -46,16 +46,23 @@ import java.util.Set;
  * {@code customTexture.<sampler>=<png>} (Solas: {@code milkyWayTex}) binds the image to that
  * sampler name in every program, wherever the name isn't a render target (Iris
  * {@code IrisSamplers.addCustomTextures}).
- * Iris's raw-texture form ({@code texture.<stage>.<name>=<file> TEXTURE_2D ...}) and
- * {@code minecraft:} resource paths aren't supported yet, for either directive; they are logged
- * and skipped.
+ * Iris's raw-texture forms (TEXTURE_2D, TEXTURE_3D) and {@code minecraft:} resource paths are
+ * read too (loadRaw, gameTexture).
  */
 public final class CustomTextures {
     public enum Stage { SETUP, BEGIN, SHADOWCOMP, PREPARE, GBUFFERS, DEFERRED, COMPOSITE }
 
-    private record Entry(GpuTexture texture, GpuTextureView view, GpuSampler sampler, VolumeTextures.@Nullable Volume volume) {
+    /** texture is null for the game's own textures ({@code minecraft:...}), which aren't ours to close. */
+    private record Entry(@Nullable GpuTexture texture, GpuTextureView view, GpuSampler sampler, VolumeTextures.@Nullable Volume volume) {
         Entry(GpuTexture texture, GpuTextureView view, GpuSampler sampler) {
             this(texture, view, sampler, null);
+        }
+
+        void close() {
+            if (texture != null) {
+                view.close();
+                texture.close();
+            }
         }
     }
 
@@ -127,12 +134,8 @@ public final class CustomTextures {
             // Iris: "TODO: Is there a better way" -- the sampler name is cut at its first dot.
             String sampler = parts[2].split("\\.")[0];
             String value = props.getProperty(name).strip();
-            if (!value.contains(" ") && value.contains(":")) {
-                MetalShadersClient.LOGGER.warn("Custom texture {} = {}: resource-pack textures aren't supported yet, skipped", name, value);
-                continue;
-            }
             try {
-                Entry e = value.contains(" ") ? loadRaw(device, pack, value) : loadPng(device, pack, value);
+                Entry e = value.contains(" ") ? loadRaw(device, pack, value) : value.contains(":") ? gameTexture(value) : loadPng(device, pack, value);
                 if (e == null) {
                     MetalShadersClient.LOGGER.warn("Custom texture {} = {}: no such file in the pack, skipped", name, value);
                     continue;
@@ -150,12 +153,8 @@ public final class CustomTextures {
             // Iris ShaderProperties: the sampler name is everything after the prefix, uncut.
             String sampler = name.substring("customTexture.".length());
             String value = props.getProperty(name).strip();
-            if (!value.contains(" ") && value.contains(":")) {
-                MetalShadersClient.LOGGER.warn("Custom texture {} = {}: resource-pack textures aren't supported yet, skipped", name, value);
-                continue;
-            }
             try {
-                Entry e = value.contains(" ") ? loadRaw(device, pack, value) : loadPng(device, pack, value);
+                Entry e = value.contains(" ") ? loadRaw(device, pack, value) : value.contains(":") ? gameTexture(value) : loadPng(device, pack, value);
                 if (e == null) {
                     MetalShadersClient.LOGGER.warn("Custom texture {} = {}: no such file in the pack, skipped", name, value);
                     continue;
@@ -198,6 +197,18 @@ public final class CustomTextures {
             samplerOf.put(v, s);
             return new Entry(t, v, s);
         }
+    }
+
+    /**
+     * A {@code namespace:path} value (Mellow: {@code minecraft:textures/environment/clouds.png}): the
+     * game's own texture of that name, with its own sampler, as Iris's CustomTextureManager binds
+     * ResourceData (its PBR-suffix forms aren't handled). Looked up once, when the pack loads.
+     */
+    private static Entry gameTexture(String value) {
+        net.minecraft.resources.Identifier id = net.minecraft.resources.Identifier.parse(value);
+        net.minecraft.client.renderer.texture.AbstractTexture t = net.minecraft.client.Minecraft.getInstance().getTextureManager().getTexture(id);
+        samplerOf.put(t.getTextureView(), t.getSampler());
+        return new Entry(null, t.getTextureView(), t.getSampler(), null);
     }
 
     /**
@@ -471,26 +482,22 @@ public final class CustomTextures {
     static void unload() {
         for (Map<String, Entry> m : byStage.values()) {
             for (Entry e : m.values()) {
-                e.view().close();
-                e.texture().close();
+                e.close();
             }
         }
         byStage.clear();
         for (Entry e : byName.values()) {
-            e.view().close();
-            e.texture().close();
+            e.close();
         }
         byName.clear();
         for (Map<String, Entry> m : volumesByStage.values()) {
             for (Entry e : m.values()) {
-                e.view().close();
-                e.texture().close();
+                e.close();
             }
         }
         volumesByStage.clear();
         for (Entry e : volumesByName.values()) {
-            e.view().close();
-            e.texture().close();
+            e.close();
         }
         volumesByName.clear();
         samplerOf.clear();   // noisetex's too: PackChain registers it again with the next world's

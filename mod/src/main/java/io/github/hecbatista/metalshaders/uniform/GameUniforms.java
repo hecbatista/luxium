@@ -110,6 +110,10 @@ public final class GameUniforms {
 
         // CommonUniforms.screenBrightness: the gamma option.
         values.put("screenBrightness", mc.options.gamma().get().floatValue());
+        // Iris CommonUniforms: pi (Mellow's day/night formulas read it) and anisotropicFiltering.
+        values.put("pi", (float) Math.PI);
+        values.put("anisotropicFiltering", mc.options.textureFiltering().get() == net.minecraft.client.TextureFilteringMethod.ANISOTROPIC
+                ? mc.options.maxAnisotropyValue() : 0);
 
         ClientLevel level = mc.level;
         Camera cam = mc.gameRenderer.mainCamera();

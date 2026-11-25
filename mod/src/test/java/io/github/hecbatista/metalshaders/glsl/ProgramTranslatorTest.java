@@ -190,7 +190,7 @@ class ProgramTranslatorTest {
     }
 
     @Test
-    void unusedFragmentInputTheVertexNeverWritesIsDropped() throws Exception {
+    void fragmentInputTheVertexNeverWritesBecomesAZeroGlobal() throws Exception {
         // Bliss v2.1.2's gbuffers_water: flat varying float Flashing, declared and never used.
         ProgramTranslator.Result r = ProgramTranslator.translate("""
                 #version 120
@@ -203,8 +203,10 @@ class ProgramTranslatorTest {
                 varying float used;
                 void main() { gl_FragData[0] = vec4(uv, used, 1.0); }
                 """);
-        assertFalse(r.fragment().contains("Flashing"), r.fragment());
-        assertTrue(r.fragment().contains(" in vec2 uv;") && r.fragment().contains(" in float used;"), r.fragment());
+        // Inputs the vertex stage never writes become zero globals (Metal won't link them).
+        assertFalse(r.fragment().contains("in float Flashing"), r.fragment());
+        assertTrue(r.fragment().contains("float used = float(0);"), r.fragment());
+        assertTrue(r.fragment().contains(" in vec2 uv;"), r.fragment());
     }
 
     @Test

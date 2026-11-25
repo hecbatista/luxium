@@ -332,7 +332,7 @@ public final class TerrainTakeover {
     /** Translates and builds one terrain pipeline, and starts its compile on {@link PipelineCompiler}'s pool. */
     private static Started start(TerrainRenderPass pass, String program, String name, String[] glsl, float alphaTest, int stage,
                                  boolean coverage, java.util.Properties properties, boolean shadow) throws Exception {
-        ProgramTranslator.Result r = ProgramTranslator.translateForTerrain(glsl[0], glsl[1], new ProgramTranslator.Terrain(alphaTest, coverage, shadow));
+        ProgramTranslator.Result r = ProgramTranslator.translateForTerrain(PackChain.gbufferVolumes(glsl[0]), PackChain.gbufferVolumes(glsl[1]), new ProgramTranslator.Terrain(alphaTest, coverage, shadow));
         List<Integer> writes = r.drawBuffers().isEmpty() ? List.of(0) : r.drawBuffers();
         if (coverage) {
             int coverageAt = r.fragmentOutputs().stream().filter(s -> s.name().equals(ProgramTranslator.COVERAGE_OUTPUT))

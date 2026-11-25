@@ -762,12 +762,16 @@ public final class ProgramTranslator {
                 }
             }
         }
-        // A fragment input the vertex stage never writes and the fragment stage never reads is
-        // dropped: OpenGL only rejects inputs that are used (Bliss's water declares a Flashing
-        // varying it never uses), but Metal won't link a fragment input with no vertex output.
+        // A fragment input the vertex stage never writes becomes a plain global of the fragment
+        // stage, zero: Metal won't link a fragment input with no vertex output, while OpenGL only
+        // rejects one the fragment stage really reads, and leaves it undefined otherwise. Bliss's
+        // water declares a Flashing varying it never uses; Mellow's deferred1 declares ViewPos and
+        // Normal inputs that only locals of the same name are read through.
+        Set<String> zeroInputs = new LinkedHashSet<>();
         for (String name : fragmentIn) {
-            if (!vertexOut.contains(name) && !fs.mentions(name)) {
+            if (!vertexOut.contains(name)) {
                 varyingTypes.remove(name);
+                zeroInputs.add(name);
             }
         }
         Map<String, Slot> varyings = new LinkedHashMap<>();
@@ -786,8 +790,8 @@ public final class ProgramTranslator {
 
         // 4. Rewrite each stage.
         List<Slot> fragmentOutputs = new ArrayList<>();
-        String vertex = rewrite(vs, mode, scale, elements, terrain, format, uniforms, vertexInputs, varyings, fragmentOutputs, warnings);
-        String fragment = rewrite(fs, mode, scale, elements, terrain, format, uniforms, vertexInputs, varyings, fragmentOutputs, warnings);
+        String vertex = rewrite(vs, mode, scale, elements, terrain, format, uniforms, vertexInputs, varyings, zeroInputs, fragmentOutputs, warnings);
+        String fragment = rewrite(fs, mode, scale, elements, terrain, format, uniforms, vertexInputs, varyings, zeroInputs, fragmentOutputs, warnings);
 
         return new Result(vertex, fragment, List.copyOf(uniforms.values()), List.copyOf(vertexInputs.values()),
                 List.copyOf(varyings.values()), List.copyOf(fragmentOutputs), drawBuffers(fs.tokens),
@@ -796,7 +800,7 @@ public final class ProgramTranslator {
 
     private static String rewrite(StageScan s, Mode mode, float scale, Set<String> elements, Terrain terrain, Format format,
                                   Map<String, Uniform> uniforms, Map<String, Slot> vertexInputs,
-                                  Map<String, Slot> varyings, List<Slot> fragmentOutputs, List<String> warnings)
+                                  Map<String, Slot> varyings, Set<String> zeroInputs, List<Slot> fragmentOutputs, List<String> warnings)
             throws TranslationException {
         List<Token> t = s.tokens;
         boolean vertex = s.stage == Stage.VERTEX;
@@ -829,9 +833,9 @@ public final class ProgramTranslator {
                 // Loose uniforms move into the block; samplers stay, minus the ones this stage never mentions.
                 case "uniform" -> isOpaque(d.type()) ? mentionedSamplers(d, s, renames) : "";
                 case "attribute", "in" -> vertex ? (terrain != null ? terrainAttributes(d) : elements != null ? formatInputs(d, vertexInputs) : slotDeclarations(d, "in", vertexInputs))
-                        : slotDeclarations(d, "in", varyings);
+                        : slotDeclarations(d, "in", varyings, zeroInputs);
                 case "out", "varying" -> vertex ? slotDeclarations(d, "out", varyings)
-                        : d.storage().equals("varying") ? slotDeclarations(d, "in", varyings) : null;
+                        : d.storage().equals("varying") ? slotDeclarations(d, "in", varyings, zeroInputs) : null;
                 default -> null;
             };
             if (replacement != null) {
@@ -969,6 +973,14 @@ public final class ProgramTranslator {
             }
             if (renamed == null && vertex && BUILTIN_INPUTS.containsKey(name)) {
                 renamed = BUILTIN_INPUTS.get(name).name();
+            }
+            if (name.equals("alphaTestRef")) {
+                // Iris's alphaTestRef (renamed to iris_currentAlphaTest): the program's own alpha
+                // test reference. Mellow discards cutout pixels below it; read as 0, its cobwebs,
+                // plants and particles drew as solid squares.
+                float ref = out != null && !Float.isNaN(out.alphaTest()) ? out.alphaTest() : 0f;
+                t.set(i, new Token(Kind.IDENT, "(" + ref + ")"));
+                continue;
             }
             if (name.equals("gl_VertexID")) {
                 renamed = "gl_VertexIndex";
@@ -1259,10 +1271,20 @@ public final class ProgramTranslator {
 
     /** Re-declares each name of an in/out declaration on its own, with its location. */
     private static String slotDeclarations(Declaration d, String direction, Map<String, Slot> table) {
+        return slotDeclarations(d, direction, table, Set.of());
+    }
+
+    /** As above; a name in {@code zero} becomes a plain global set to zero instead. */
+    private static String slotDeclarations(Declaration d, String direction, Map<String, Slot> table, Set<String> zero) {
         StringBuilder sb = new StringBuilder();
         for (Declarator x : d.declarators()) {
             Slot slot = table.get(x.name());
             if (slot == null) {
+                if (zero.contains(x.name()) && x.arraySuffix().isEmpty()) {
+                    sb.append(d.type()).append(' ').append(x.name()).append(" = ").append(d.type()).append("(0);\n");
+                } else if (zero.contains(x.name())) {
+                    sb.append(d.type()).append(' ').append(x.name()).append(x.arraySuffix()).append(";\n");
+                }
                 continue;
             }
             sb.append("layout(location = ").append(slot.location()).append(") ");

@@ -99,6 +99,15 @@ public final class NameFixes {
 
     static final String PREFIX = "luxium_";
 
+    /**
+     * The game's vertex-element names. The game binds a shader input to the element of the same
+     * name (PipelineBuilder), and the translator declares those inputs, so a pack identifier of
+     * that name (Mellow's {@code out vec3 Normal;}) would redefine one. Renamed with their own
+     * prefix: {@code luxium_Normal} and {@code luxium_Color} are already the translator's.
+     */
+    private static final Set<String> ELEMENT_WORDS = Set.of("Position", "Color", "UV0", "UV1", "UV2", "UV3", "Normal");
+    static final String ELEMENT_PREFIX = "luxium_pk_";
+
     private NameFixes() {
     }
 
@@ -127,6 +136,8 @@ public final class NameFixes {
             String name = tok.text();
             if (renameTexture && name.equals("texture") && !isCall(t, i)) {
                 t.set(i, new Token(Kind.IDENT, "gtexture"));
+            } else if (ELEMENT_WORDS.contains(name)) {
+                t.set(i, new Token(Kind.IDENT, ELEMENT_PREFIX + name));
             } else if (isReserved(name) || hidden.contains(name)) {
                 t.set(i, new Token(Kind.IDENT, PREFIX + name));
             }
@@ -139,6 +150,9 @@ public final class NameFixes {
      * {@code luxium_and} in the block, but its value is looked up as {@code and}).
      */
     public static String packName(String name) {
+        if (name.startsWith(ELEMENT_PREFIX) && ELEMENT_WORDS.contains(name.substring(ELEMENT_PREFIX.length()))) {
+            return name.substring(ELEMENT_PREFIX.length());
+        }
         if (name.startsWith(PREFIX) && isReserved(name.substring(PREFIX.length()))) {
             return name.substring(PREFIX.length());
         }
