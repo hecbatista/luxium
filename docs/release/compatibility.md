@@ -9,6 +9,22 @@ one at a time with the flow in `mod/scripts/PACK-TESTING.md`:
 Earlier results (Complementary Unbound r5.10, Complementary Reimagined r5.9.3, Bliss v2.1.2,
 Solas v3.9) are in `docs/release/alpha.md`, "Fails safe".
 
+## Miniature 2.19 (2026-11-25): renders, matches Iris on the zoo and beach stops
+
+- Offline: **29/29** reach Metal before and after.
+- In game: 0 validation messages, no crash (no formulas).
+- What was wrong: terrain was nearly black. Its ambient light comes from the game's lightmap
+  (`texture2D(lightmap, ...)` in `getAmbientColor`), and outside the game's own draws (which bind
+  it as Sampler2) the `lightmap` sampler read a black placeholder. It now reads the game's lightmap
+  (`render/PackChain.input`). Found with a debug copy of the pack (never committed) that painted
+  the light coordinates, shadow term and ambient term as colours.
+- Side by side with Iris (`mod/build/compare/miniature/`): sky and sun, terrain, shadows, water and
+  underwater plants, entities, block entities, signs, portals and translucents match.
+- Differences left: the beach-sprint shot timing and mob poses, as with the other packs.
+- Not compared: night, caves, rain/snow, the Nether and the End.
+- Effect on other packs: MakeUp also samples `lightmap`; its grass now matches Iris. Complementary,
+  Photon and Mellow don't use it.
+
 ## Mellow 3.5 (2026-11-25): renders, close to Iris on the zoo and beach stops
 
 - Offline: **104/104** reach Metal before and after (the scoreboard doesn't see game-only problems).
@@ -62,7 +78,8 @@ Solas v3.9) are in `docs/release/alpha.md`, "Fails safe".
 - Side by side with Iris (`mod/build/compare/makeup/`): sky and clouds, sun light, shadows,
   water, terrain, entities, block entities, signs, End portal, nether portal and translucents match.
 - Differences left:
-  - Luxium's grass is a touch lighter. Cause not looked into.
+  - ~~Luxium's grass is a touch lighter.~~ Fixed with Miniature's lightmap fix: MakeUp samples the
+    `lightmap` sampler, which read a black placeholder outside game draws.
   - The End portal's starfield colour cycles with `frameTimeCounter`, so the two runs catch it at
     different colours (purple vs teal); same for the gateway beam. Not a difference in rendering.
   - The beach-sprint shot timing and mob poses, as with the other packs.

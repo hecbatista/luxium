@@ -1082,6 +1082,12 @@ public final class PackChain {
         if (name.equals("noisetex") && noise != null) {
             return noise;
         }
+        // The game's lightmap (Iris's "lightmap" sampler). Game draws bind it themselves as
+        // Sampler2 (EntityTakeover's renames); terrain and others read it here. Miniature's
+        // terrain takes its whole ambient light from it: as the black placeholder, terrain was black.
+        if (name.equals("lightmap")) {
+            return net.minecraft.client.Minecraft.getInstance().gameRenderer.lightmap();
+        }
         if (name.startsWith("shadowtex")) {
             return solid(device, encoder, 0xFFFFFFFF);
         }
