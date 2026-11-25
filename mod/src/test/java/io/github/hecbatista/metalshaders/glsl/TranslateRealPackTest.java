@@ -34,7 +34,44 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class TranslateRealPackTest {
     /** Programs that only run with mods we don't have, so a failure there means nothing yet. */
     static boolean needsMissingMod(String name) {
-        return name.startsWith("dh_") || name.startsWith("clrwl_") || name.startsWith("voxy");
+        // gbuffers_voxels and shadow_voxels are the Photonics mod's (Photon calls its RayJob API);
+        // Iris has no such programs.
+        return name.startsWith("dh_") || name.startsWith("clrwl_") || name.startsWith("voxy") || name.endsWith("_voxels");
+    }
+
+    private static final java.util.regex.Pattern SAMPLER_ARGUMENT =
+            java.util.regex.Pattern.compile(",\\s*sampler (\\w+) \\[\\[sampler\\((\\d+)\\)\\]\\]");
+
+    /**
+     * What MetalSamplerSlotsMixin does inside the game, for the command-line chain: when a sampler
+     * sits in slot 16 or up, every sampler becomes one built into the function (linear, clamped).
+     */
+    static String constexprSamplersAbove15(String msl) {
+        java.util.regex.Matcher scan = SAMPLER_ARGUMENT.matcher(msl);
+        boolean over = false;
+        while (scan.find()) {
+            over |= Integer.parseInt(scan.group(2)) >= 16;
+        }
+        if (!over) {
+            return msl;
+        }
+        java.util.regex.Matcher m = SAMPLER_ARGUMENT.matcher(msl);
+        StringBuilder body = new StringBuilder();
+        StringBuilder out = new StringBuilder();
+        while (m.find()) {
+            if (true) {
+                body.append("    constexpr sampler ").append(m.group(1)).append("(filter::linear, address::clamp_to_edge);\n");
+                m.appendReplacement(out, "");
+            } else {
+                m.appendReplacement(out, java.util.regex.Matcher.quoteReplacement(m.group()));
+            }
+        }
+        m.appendTail(out);
+        if (body.isEmpty()) {
+            return msl;
+        }
+        java.util.regex.Matcher entry = java.util.regex.Pattern.compile("\\b(fragment|vertex) [^{;]*\\)\\s*\\{\\n").matcher(out);
+        return entry.find() ? out.insert(entry.end(), body).toString() : out.toString();
     }
 
     record Outcome(String program, String failedAt, String error) {
@@ -116,6 +153,8 @@ class TranslateRealPackTest {
                 if (err != null) {
                     return new Outcome(name, "3-spirv-cross-" + stage, firstError(err));
                 }
+                Path metal = Path.of(base + "." + stage + ".metal");
+                Files.writeString(metal, constexprSamplersAbove15(Files.readString(metal)));
                 err = exec(List.of("xcrun", "metal", "-std=metal4.0", "-c", base + "." + stage + ".metal",
                         "-o", base + "." + stage + ".air"));
                 if (err != null) {

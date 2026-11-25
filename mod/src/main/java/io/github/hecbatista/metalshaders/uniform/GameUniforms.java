@@ -222,7 +222,8 @@ public final class GameUniforms {
         values.put("endFlashIntensity", endFlash == null ? 0f : endFlash.getIntensity(partialTick));
         values.put("lightningBoltPosition", lightningBolt(mc, level));
 
-        // BiomeUniforms: the biome at the player's block, and its precipitation (0 none, 1 rain, 2 snow).
+        // BiomeUniforms: the biome at the player's block, its precipitation (0 none, 1 rain, 2 snow),
+        // category (Iris's tag tests), downfall and base temperature.
         LocalPlayer player = mc.player;
         if (player != null) {
             var biome = player.level().getBiome(player.blockPosition());
@@ -232,9 +233,15 @@ public final class GameUniforms {
                 case RAIN -> 1;
                 case SNOW -> 2;
             });
+            values.put("biome_category", BiomeIds.category(biome).ordinal());
+            values.put("rainfall", BiomeIds.downfall(biome.value()));
+            values.put("temperature", biome.value().getBaseTemperature());
         } else {
             values.put("biome", 0);
             values.put("biome_precipitation", 0);
+            values.put("biome_category", 0);
+            values.put("rainfall", 0f);
+            values.put("temperature", 0f);
         }
 
         // IdMapUniforms: held items, numbered by the pack's item.properties.

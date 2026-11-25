@@ -57,7 +57,17 @@ public final class NameFixes {
             "texture_buffer", "depth2d", "depth2d_array", "depth2d_ms", "depthcube", "depthcube_array",
             // Sampling options spirv-cross writes as calls (sample(s, uv, bias(b))): a pack function
             // of the same name is ambiguous with metal::bias (Bliss's float bias()).
-            "bias", "level", "gradient2d", "gradient3d", "gradientcube", "min_lod_clamp");
+            "bias", "level", "gradient2d", "gradient3d", "gradientcube", "min_lod_clamp",
+            // Metal standard library functions that aren't GLSL built-ins (MSL spec 6.2-6.5 and
+            // 6.13): a pack function of the same name is ambiguous with the metal:: one once
+            // spirv-cross's 'using namespace metal' is in scope (Photon's length_squared).
+            "saturate", "length_squared", "distance_squared", "acospi", "asinpi", "atanpi", "atan2",
+            "atan2pi", "cospi", "sinpi", "tanpi", "sincos", "divide", "exp10", "log10", "fdim", "fmax",
+            "fmin", "fmod", "fmax3", "fmin3", "fmedian3", "max3", "min3", "median3", "ilogb", "nextafter",
+            "powr", "rint", "rsqrt", "copysign", "isfinite", "isnormal", "isordered", "isunordered",
+            "signbit", "select", "absdiff", "addsat", "subsat", "clz", "ctz", "popcount", "rotate", "hadd",
+            "rhadd", "mad24", "mul24", "madhi", "madsat", "mulhi", "extract_bits", "insert_bits",
+            "reverse_bits");
 
     /**
      * Type words of Vulkan GLSL (GL_KHR_vulkan_glsl) that OpenGL GLSL doesn't reserve, so packs use

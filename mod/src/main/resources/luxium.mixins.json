@@ -34,6 +34,8 @@
     "WeatherEffectRendererMixin",
     "metallum.MetalCrossShaderCompilerMixin",
     "metallum.MetallumCompiledAccessor",
+    "metallum.MetalRenderPassSamplerMixin",
+    "metallum.MetalSamplerSlotsMixin",
     "sodium.BlockRendererMixin",
     "sodium.ChunkMeshFormatsMixin",
     "sodium.ChunkVertexMixin",

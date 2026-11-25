@@ -103,6 +103,36 @@ public final class PackChain {
         cloudsOff = off;
     }
 
+    /**
+     * The pack's {@code size.buffer.<buffer> = <x> <y>} (shaders.properties), by colortex number:
+     * Iris's TextureScaleOverride, where a value with a '.' is a fraction of the screen and one
+     * without is a size in pixels (Photon: colortex4 192 108, its clouds and fog at 0.5).
+     */
+    private static final Map<Integer, String[]> bufferSizes = new HashMap<>();
+
+    public static void setBufferSizes(Map<Integer, String[]> sizes) {
+        bufferSizes.clear();
+        bufferSizes.putAll(sizes);
+        width = -1;
+    }
+
+    /**
+     * A target's size for a w x h screen. A buffer pack geometry writes keeps the screen's size:
+     * it shares the scene's depth attachment. Full-screen passes draw one triangle over their
+     * attachments, so a smaller target is simply drawn whole, as Iris sets the viewport to it.
+     */
+    private static int[] targetSize(int index, int w, int h) {
+        String[] size = bufferSizes.get(index);
+        if (size == null || geometryTargets.contains(index)) {
+            return new int[] {w, h};
+        }
+        return new int[] {Math.max(1, axis(size[0], w)), Math.max(1, axis(size[1], h))};
+    }
+
+    private static int axis(String value, int screen) {
+        return value.contains(".") ? (int) (screen * Float.parseFloat(value)) : Integer.parseInt(value);
+    }
+
     public static boolean cloudsOff() {
         return cloudsOff && ready();
     }
@@ -142,7 +172,13 @@ public final class PackChain {
             float scale = scales.getOrDefault(name, 1.0f);
             ProgramTranslator.Result r;
             try {
-                r = ProgramTranslator.translate(p.getValue()[0], p.getValue()[1], ProgramTranslator.Mode.FULLSCREEN, scale);
+                // Raw 3D textures of this pass's stage become 2D atlases (VolumeTextures).
+                CustomTextures.Stage stage = CustomTextures.stageOfPass(name);
+                java.util.function.Function<String, io.github.hecbatista.metalshaders.glsl.VolumeTextures.Volume> volumes =
+                        n -> CustomTextures.volume(stage, n);
+                r = ProgramTranslator.translate(io.github.hecbatista.metalshaders.glsl.VolumeTextures.rewrite(p.getValue()[0], volumes),
+                        io.github.hecbatista.metalshaders.glsl.VolumeTextures.rewrite(p.getValue()[1], volumes),
+                        ProgramTranslator.Mode.FULLSCREEN, scale);
             } catch (ProgramTranslator.TranslationException e) {
                 discard(started);
                 fail(name + ": translation failed: " + e.getMessage(), null);
@@ -631,7 +667,10 @@ public final class PackChain {
             }
             Map<String, GpuTextureView> inputs = new HashMap<>();
             for (ProgramTranslator.Sampler s : pass.program().samplers()) {
-                GpuTextureView custom = CustomTextures.override(stage, s.name(), writtenThisStage);
+                GpuTextureView custom = CustomTextures.volumeView(stage, s.name());
+                if (custom == null) {
+                    custom = CustomTextures.override(stage, s.name(), writtenThisStage);
+                }
                 inputs.put(s.name(), custom != null ? custom : input(device, encoder, s.name(), readsWaterShadow(pass.program().samplers())));
             }
             if (pass.ubo() != null) {
@@ -650,8 +689,11 @@ public final class PackChain {
             if (pass.writes().isEmpty() && !pass.name().equals("final")) {
                 continue;   // a pass that writes nowhere (no DRAWBUFFERS): Vitrail leaves it empty too
             }
-            RenderPassDescriptor descriptor = d.withRenderArea(new RenderPass.RenderArea(0, 0,
-                    pass.name().equals("final") ? target.width : width, pass.name().equals("final") ? target.height : height)).build();
+            // The pass covers its attachments, which a size.buffer directive may have made smaller
+            // than the screen (Iris CompositeRenderer: the viewport is the draw buffers' size).
+            int[] area = pass.name().equals("final") ? new int[] {target.width, target.height}
+                    : targetSize(pass.writes().get(0), width, height);
+            RenderPassDescriptor descriptor = d.withRenderArea(new RenderPass.RenderArea(0, 0, area[0], area[1])).build();
             try (RenderPass rp = encoder.createRenderPass(descriptor)) {
                 rp.setPipeline(pass.pipeline());
                 if (pass.ubo() != null) {
@@ -1013,7 +1055,7 @@ public final class PackChain {
         return solid(device, encoder, 0xFF000000);
     }
 
-    static Integer targetIndex(String name) {
+    public static Integer targetIndex(String name) {
         if (name.startsWith("colortex")) {
             try {
                 return Integer.parseInt(name.substring("colortex".length()));
@@ -1080,8 +1122,9 @@ public final class PackChain {
         int usage = GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_COPY_SRC | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT;
         for (int i : used) {
             RenderTargetPlan.Target t = plan.target(i);
-            GpuTexture a = device.createTexture("Luxium colortex" + i + " A", usage, t.format(), w, h, 1, 1);
-            GpuTexture b = device.createTexture("Luxium colortex" + i + " B", usage, t.format(), w, h, 1, 1);
+            int[] size = targetSize(i, w, h);
+            GpuTexture a = device.createTexture("Luxium colortex" + i + " A", usage, t.format(), size[0], size[1], 1, 1);
+            GpuTexture b = device.createTexture("Luxium colortex" + i + " B", usage, t.format(), size[0], size[1], 1, 1);
             halves.put(i, new GpuTexture[]{a, b});
             halfViews.put(i, new GpuTextureView[]{device.createTextureView(a), device.createTextureView(b)});
             current.putIfAbsent(i, 0);

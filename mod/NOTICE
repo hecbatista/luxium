@@ -444,6 +444,18 @@ GNU Lesser General Public License version 3
   - render/ShadowTargets.java binds the shadow sampler as net.irisshaders.iris.samplers
     .IrisSamplers.addShadowSamplers does: shadowtex0, or shadowtex1 when the same program
     declares watershadow.
+  - uniform/BiomeIds.java and uniform/GameUniforms.java (for Photon v1.4): the biome_category,
+    rainfall and temperature uniforms and the CAT_<name> and PPT_NONE/RAIN/SNOW defines follow
+    net.irisshaders.iris.uniforms.BiomeUniforms, net.irisshaders.iris.parsing.BiomeCategories
+    and net.irisshaders.iris.shaderpack.IrisDefines.createIrisReplacements: the same category
+    list and order, the same biome-tag tests in the same order. Changed: the downfall is read by
+    reflection instead of Iris's ExtendedBiome mixin.
+  - render/CustomTextures.java reads the raw texture forms (<file> TEXTURE_2D|TEXTURE_3D
+    <internal format> <sizes> <pixel format> <pixel type>) as net.irisshaders.iris.shaderpack
+    .properties.ShaderProperties parses them, with Iris's defaults from net.irisshaders.iris
+    .shaderpack.ShaderPack (a raw texture is blurred and clamped unless its .mcmeta says
+    otherwise). Changed: a 3D texture becomes a 2D atlas of bordered slices read by
+    glsl/VolumeTextures.java (our own code), since the game has no 3D textures.
 
 JCPP, https://github.com/shevek/jcpp (org.anarres:jcpp 1.4.14)
 Apache License 2.0

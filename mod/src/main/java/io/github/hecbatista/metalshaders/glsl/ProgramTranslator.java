@@ -285,8 +285,13 @@ public final class ProgramTranslator {
         return names;
     }
 
-    /** Metal's sampler slots per stage ([[sampler(0..15)]]). */
-    static final int MAX_SAMPLERS_PER_STAGE = 16;
+    /**
+     * Textures one program may use. Metallum numbers a pipeline's textures across both stages
+     * and gives each the sampler slot of the same number; Metal has 31 texture slots per stage
+     * but only 16 sampler slots, so textures from the 17th on read a sampler built into the
+     * shader (MetalSamplerSlotsMixin).
+     */
+    static final int MAX_TEXTURES_PER_PIPELINE = 31;
 
     public static Result translate(String vertexSource, String fragmentSource) throws TranslationException {
         return translate(vertexSource, fragmentSource, Mode.GBUFFERS);
@@ -537,6 +542,9 @@ public final class ProgramTranslator {
                                     Format format) throws TranslationException {
         boolean dynamic = format != null;
         Map<String, String> renames = format == null ? Map.of() : format.samplerRenames();
+        String[] flat = StructVaryings.flatten(vertexSource, fragmentSource);   // the game refuses struct varyings
+        vertexSource = flat[0];
+        fragmentSource = FragmentOutputs.widen(flat[1]);   // Metal wants every colour component written
         StageScan vs = new StageScan(Stage.VERTEX, vertexSource);
         StageScan fs = new StageScan(Stage.FRAGMENT, fragmentSource);
         // entityColor (the hit flash) from the overlay texture, as Iris's EntityPatcher does: a
@@ -557,14 +565,12 @@ public final class ProgramTranslator {
         //    all of them; unmentioned ones are dropped from the source in rewrite()).
         Map<String, Sampler> samplers = new TreeMap<>();
         for (StageScan s : List.of(vs, fs)) {
-            int inStage = 0;
             for (Declaration d : s.declarations) {
                 if (d.storage().equals("uniform") && isOpaque(d.type())) {
                     for (Declarator x : d.declarators()) {
                         if (!s.mentions(x.name())) {
                             continue;
                         }
-                        inStage++;
                         String sname = renames.getOrDefault(x.name(), x.name());
                         Sampler old = samplers.putIfAbsent(sname, new Sampler(d.type(), sname));
                         if (old != null && !old.type().equals(d.type())) {
@@ -574,21 +580,19 @@ public final class ProgramTranslator {
                     }
                 }
             }
-            if (inStage > MAX_SAMPLERS_PER_STAGE) {
-                throw new TranslationException("The " + s.stage.name().toLowerCase() + " stage uses " + inStage
-                        + " textures; Metal allows " + MAX_SAMPLERS_PER_STAGE + " per stage");
-            }
+        }
+        if (samplers.size() > MAX_TEXTURES_PER_PIPELINE) {
+            throw new TranslationException("The program uses " + samplers.size() + " textures; Luxium allows "
+                    + MAX_TEXTURES_PER_PIPELINE + " (Metal's texture slots per stage)");
         }
 
         if (overlay) {
             samplers.putIfAbsent(OVERLAY_SAMPLER, new Sampler("sampler2D", OVERLAY_SAMPLER));
         }
         if (glintSampling) {
-            long inFragment = fs.declarations.stream().filter(d -> d.storage().equals("uniform") && isOpaque(d.type()))
-                    .flatMap(d -> d.declarators().stream()).filter(x -> fs.mentions(x.name())).count();
-            if (inFragment + 1 > MAX_SAMPLERS_PER_STAGE) {
-                throw new TranslationException("The fragment stage uses " + inFragment + " textures plus the glint; Metal allows "
-                        + MAX_SAMPLERS_PER_STAGE + " per stage");
+            if (samplers.size() + 1 > MAX_TEXTURES_PER_PIPELINE) {
+                throw new TranslationException("The program uses " + samplers.size() + " textures plus the glint; Luxium allows "
+                        + MAX_TEXTURES_PER_PIPELINE);
             }
             samplers.putIfAbsent(GLINT_SAMPLER, new Sampler("sampler2D", GLINT_SAMPLER));
         }
@@ -766,10 +770,12 @@ public final class ProgramTranslator {
             }
         }
         Map<String, Slot> varyings = new LinkedHashMap<>();
+        Map<String, Integer> structSlots = structSlots(vs.tokens, warnings);
+        structSlots.putAll(structSlots(fs.tokens, warnings));
         int nextVarying = 0;
         for (Slot v : varyingTypes.values()) {
             varyings.put(v.name(), new Slot(v.name(), v.type(), v.array(), nextVarying));
-            nextVarying += slots(v.type(), v.array(), warnings);
+            nextVarying += slots(v.type(), v.array(), warnings, structSlots);
         }
         for (String name : fragmentIn) {
             if (!vertexOut.contains(name)) {
@@ -802,8 +808,22 @@ public final class ProgramTranslator {
 
         // a) Replace declarations, last first so earlier indices stay valid.
         List<Declaration> ds = new ArrayList<>(s.declarations);
+        int drawCount = vertex ? 0 : drawBuffers(s.tokens).size();
         for (int k = ds.size() - 1; k >= 0; k--) {
             Declaration d = ds.get(k);
+            if (!vertex && d.storage().equals("out") && drawCount > 0 && outputPastDrawBuffers(d, drawCount)) {
+                // An output at a location the pack's draw buffers don't reach writes nowhere in
+                // OpenGL (Photon declares gbuffer_data_1 at location 1 under RENDERTARGETS: 1):
+                // a plain variable here, so it can't collide with Luxium's coverage output.
+                StringBuilder plain = new StringBuilder();
+                for (Declarator x : d.declarators()) {
+                    plain.append(d.type()).append(' ').append(x.name()).append(x.arraySuffix()).append(";\n");
+                }
+                List<Token> sub = t.subList(d.start(), d.end() + 1);
+                sub.clear();
+                sub.add(new Token(Kind.SPACE, plain.toString()));
+                continue;
+            }
             String replacement = switch (d.storage()) {
                 // Loose uniforms move into the block; samplers stay, minus the ones this stage never mentions.
                 case "uniform" -> isOpaque(d.type()) ? mentionedSamplers(d, s, renames) : "";
@@ -1024,7 +1044,9 @@ public final class ProgramTranslator {
         }
         if (vertex) {
             for (Slot in : vertexInputs.values()) {
-                if (in.name().startsWith("luxium_") || CORE_INPUTS.containsKey(in.name()) || terrain != null
+                // A core input the pack declares itself (Photon: in vec4 vaColor) keeps the pack's line.
+                if (in.name().startsWith("luxium_") || (CORE_INPUTS.containsKey(in.name()) && !s.declaredNames.contains(in.name()))
+                        || terrain != null
                         || (elements != null && ELEMENT_TYPES.containsKey(in.name()))) {
                     h.append("layout(location = ").append(in.location()).append(") in ")
                             .append(in.type()).append(' ').append(in.name()).append(in.array()).append(";\n");
@@ -1173,6 +1195,12 @@ public final class ProgramTranslator {
         return false;
     }
 
+    /** Whether a fragment output declaration sits at or past location {@code drawCount}. */
+    private static boolean outputPastDrawBuffers(Declaration d, int drawCount) {
+        Matcher m = Pattern.compile("location\\s*=\\s*(\\d+)").matcher(d.layout());
+        return m.find() && Integer.parseInt(m.group(1)) >= drawCount;
+    }
+
     /** Where the coverage output goes: after the pack's draw buffers and after every output it writes. */
     private static int coverageLocation(List<Token> tokens, Set<Integer> outputsUsed) {
         int after = drawBuffers(tokens).size();
@@ -1252,10 +1280,22 @@ public final class ProgramTranslator {
 
     /** How many locations a value takes: a mat4 takes 4, an array of 3 vec2 takes 3. */
     static int slots(String type, String array, List<String> warnings) {
+        return slots(type, array, warnings, Map.of());
+    }
+
+    /**
+     * As above, where a struct takes one location per member location (GLSL 4.60 section 4.4.1:
+     * a struct's members get consecutive locations). {@code structs} gives each struct's count.
+     */
+    static int slots(String type, String array, List<String> warnings, Map<String, Integer> structs) {
         int per = 1;
         Matcher m = Pattern.compile("^d?mat(\\d)").matcher(type);
         if (m.find()) {
             per = Integer.parseInt(m.group(1));
+        }
+        String base = type.replaceAll("\\[.*$", "");
+        if (structs.containsKey(base)) {
+            per = structs.get(base);
         }
         int count = 1;
         Matcher a = Pattern.compile("\\[(\\d+)]").matcher(array + type.replaceAll("^[^\\[]*", ""));
@@ -1266,6 +1306,84 @@ public final class ProgramTranslator {
             warnings.add("Array size isn't a plain number (" + type + array + "); counted as 1 location");
         }
         return per * count;
+    }
+
+    /**
+     * The number of locations each file-scope struct of a stage takes as a varying: the sum of its
+     * members' locations ({@code struct F { vec3 a; vec3 b; vec3 c; }} takes 3). Photon passes
+     * such structs between stages; counted as 1, the next varying overlapped them.
+     */
+    static Map<String, Integer> structSlots(List<Token> tokens, List<String> warnings) {
+        Map<String, Integer> out = new java.util.HashMap<>();
+        List<Token> code = new ArrayList<>();
+        for (Token t : tokens) {
+            if (!t.trivia() && t.kind() != Kind.DIRECTIVE && !t.text().isEmpty()) {
+                code.add(t);
+            }
+        }
+        int depth = 0;
+        for (int i = 0; i < code.size(); i++) {
+            Token t = code.get(i);
+            if (t.is("{")) {
+                depth++;
+            } else if (t.is("}")) {
+                depth = Math.max(0, depth - 1);
+            } else if (depth == 0 && t.is("struct") && i + 2 < code.size() && code.get(i + 1).kind() == Kind.IDENT
+                    && code.get(i + 2).is("{")) {
+                String name = code.get(i + 1).text();
+                int total = 0;
+                int j = i + 3;
+                List<String> member = new ArrayList<>();
+                while (j < code.size() && !code.get(j).is("}")) {
+                    Token m = code.get(j);
+                    if (m.is(";")) {
+                        total += memberSlots(member, warnings, out);
+                        member.clear();
+                    } else {
+                        member.add(m.text());
+                    }
+                    j++;
+                }
+                out.put(name, Math.max(1, total));
+                i = j;   // the struct's closing brace: depth stays 0
+            }
+        }
+        return out;
+    }
+
+    /** Locations of one struct member declaration ({@code [qualifiers] type a, b[2]}). */
+    private static int memberSlots(List<String> words, List<String> warnings, Map<String, Integer> structs) {
+        int typeAt = -1;
+        for (int k = 0; k < words.size(); k++) {
+            if (!Set.of("flat", "smooth", "noperspective", "highp", "mediump", "lowp", "precise").contains(words.get(k))) {
+                typeAt = k;
+                break;
+            }
+        }
+        if (typeAt < 0 || typeAt + 1 >= words.size()) {
+            return 0;
+        }
+        String type = words.get(typeAt);
+        int total = 0;
+        StringBuilder array = new StringBuilder();
+        boolean named = false;
+        for (int k = typeAt + 1; k <= words.size(); k++) {
+            String w = k < words.size() ? words.get(k) : ",";
+            if (w.equals(",")) {
+                if (named) {
+                    total += slots(type, array.toString(), warnings, structs);
+                }
+                array.setLength(0);
+                named = false;
+            } else if (w.equals("[") || w.equals("]") || w.matches("\\d+")) {
+                if (named) {
+                    array.append(w);
+                }
+            } else {
+                named = true;
+            }
+        }
+        return total;
     }
 
     private static int nextCode(List<Token> t, int from) {

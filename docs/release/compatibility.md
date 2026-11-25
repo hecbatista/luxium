@@ -9,6 +9,56 @@ one at a time with the flow in `mod/scripts/PACK-TESTING.md`:
 Earlier results (Complementary Unbound r5.10, Complementary Reimagined r5.9.3, Bliss v2.1.2,
 Solas v3.9) are in `docs/release/alpha.md`, "Fails safe".
 
+## Photon v1.4 (2026-11-25): renders, matches Iris on the zoo and beach stops
+
+- Offline: **165/165** reach Metal (128/171 before; the 6 `gbuffers_voxels`/`shadow_voxels`
+  programs belong to the Photonics mod, which Iris doesn't know, and are now left out like other
+  mod programs).
+- In game: 0 validation messages, no crash; 70 formulas load, 0 dropped (60 and 10 before).
+- What was wrong, in the order found:
+  - Didn't compile: a pack function named `length_squared` (ambiguous with Metal's); struct
+    varyings (`flat out OverworldFogParameters fog_params`) took one location, so the next one
+    overlapped; `in vec4 vaColor` declared twice; deferred4 reads 17 textures (Luxium allowed 16).
+  - The game refuses struct varyings and 3D samplers outright. Struct varyings are now split into
+    one varying per member (`glsl/StructVaryings.java`). Raw 3D textures (`texture.deferred.depthtex0
+    = scattering.dat TEXTURE_3D RGB16F 32 64 32 ...`: the atmosphere LUT and two cloud noises) are
+    loaded as 2D atlases of bordered slices and the pack's 3D lookups rewritten to blend two
+    slices (`glsl/VolumeTextures.java`, `render/CustomTextures.java`). As in Iris, such a texture
+    binds only where a program declares that sampler as 3D (it gets its own name): Photon's
+    `composite1` reads `colortex0` as the scene while `composite` reads it as 3D noise, which first
+    gave an all-red picture.
+  - Metal allows 16 samplers per function, counting every sampler argument and every built-in
+    sampler it samples with. A program with more than 16 textures now gets built-in samplers
+    only, so only the ones it filters with count (`mixin/metallum/MetalSamplerSlotsMixin.java`,
+    `MetalRenderPassSamplerMixin.java`); deferred4 filters 9 of its 17.
+  - `vec3` fragment outputs: Metal won't build a pipeline that writes fewer components than the
+    target has; they're widened to vec4 (`glsl/FragmentOutputs.java`). An output declared past the
+    pass's RENDERTARGETS writes nowhere, as in OpenGL (it collided with the coverage output).
+  - The default `SH_SKYLIGHT` turns on a compute pass (`deferred4_a.csh`). Luxium can't run
+    compute, so an on/off option whose only job is switching on a compute program is now switched
+    off, and the pack takes its own path without it (`pack/PackOptions.java`, logged).
+  - Formulas: Iris's `biome_category`, `temperature`, `rainfall` uniforms and the `CAT_*`/`PPT_*`
+    defines were missing (`uniform/BiomeIds.java`).
+  - Clouds missing toward the horizon: `size.buffer.<buffer>` wasn't read, so the half- and
+    quarter-size cloud and fog buffers were full size. Targets are now allocated at that size
+    (Iris's TextureScaleOverride rules) unless geometry writes them.
+- Under Iris: **Iris 1.11.7 can't run Photon's defaults on this Mac** ("Implementation limit of 16
+  active fragment shader samplers exceeded, fragment shader uses 17"), and it can't run compute on
+  macOS's OpenGL either. Both runtimes were compared with `CLOUD_SHADOWS=false` and
+  `SH_SKYLIGHT=false` (`mod/run/testpacks-iris/photon/photon_v1.4.zip.txt`), which Iris runs.
+- Side by side (`mod/build/compare/photon/`): sky, clouds (the same shapes straight up), sun light,
+  shadows, water, terrain, entities, block entities, glowing sign text, End portal and gateway,
+  nether portal and translucents match.
+- Differences left:
+  - Iris shows a little more haze toward the horizon and a bright fog bank by the zoo; cloud
+    undersides are a little greyer under Iris. Cause not found; Photon's volumetric fog pass gives
+    almost no fog at noon on both.
+  - The beach-sprint shot: Luxium is further along the sprint (the runner timing difference seen
+    with BSL and Bliss). Mob poses differ by timing.
+- Not compared: night, caves, rain/snow, the Nether and the End; `CLOUD_SHADOWS` on (Luxium runs
+  it, Iris on macOS can't).
+- Effect on Complementary Unbound: still 90/90; the zoo stops are unchanged (`mod/build/compare/cu-photon/`).
+
 ## Bliss v2.1.2, Chocapic13 edit (2026-11-23): works, matches Iris on the zoo and beach stops
 
 - Offline: 244/244 programs preprocess; **103/103** reach Metal (48/112 before; the scoreboard now

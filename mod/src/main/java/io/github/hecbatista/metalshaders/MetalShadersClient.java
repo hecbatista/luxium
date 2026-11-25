@@ -242,6 +242,10 @@ public final class MetalShadersClient implements ClientModInitializer {
         if (!options.ignored().isEmpty()) {
             LOGGER.warn("Pack settings ignored: {}", options.ignored());
         }
+        if (!options.computeOff().isEmpty()) {
+            LOGGER.info("Pack settings switched off because they turn on compute programs, which Luxium can't run: {}",
+                    options.computeOff());
+        }
         if (!options.ambiguous().isEmpty()) {
             LOGGER.info("Pack settings dropped as ambiguous (two different defaults), as Iris does: {}", options.ambiguous());
         }
@@ -544,6 +548,23 @@ public final class MetalShadersClient implements ClientModInitializer {
             }
         }
         LOGGER.info("Chain: {} passes in order {}, scales {}", programs.size(), programs.stream().map(Map.Entry::getKey).toList(), scales);
+        Map<Integer, String[]> bufferSizes = new HashMap<>();
+        for (String key : props.stringPropertyNames()) {
+            if (key.startsWith("size.buffer.")) {
+                Integer index = PackChain.targetIndex(key.substring("size.buffer.".length()));
+                String[] parts = props.getProperty(key).strip().split("\\s+");
+                if (index != null && parts.length == 2) {
+                    bufferSizes.put(index, parts);
+                } else {
+                    LOGGER.warn("Chain: {} = {} not understood, ignored", key, props.getProperty(key));
+                }
+            }
+        }
+        PackChain.setBufferSizes(bufferSizes);
+        if (!bufferSizes.isEmpty()) {
+            LOGGER.info("Chain: buffer sizes {}", bufferSizes.entrySet().stream()
+                    .map(e -> "colortex" + e.getKey() + "=" + String.join("x", e.getValue())).toList());
+        }
         String clouds = props.getProperty("clouds", "").strip();
         PackChain.setCloudsOff(clouds.equals("off"));
         LOGGER.info("Chain: clouds={} (the game's clouds are {})", clouds.isEmpty() ? "(not set)" : clouds, clouds.equals("off") ? "hidden" : "drawn");

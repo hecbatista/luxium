@@ -212,4 +212,73 @@ class ProgramTranslatorTest {
         assertThrows(ProgramTranslator.TranslationException.class, () -> ProgramTranslator.translate(
                 "uniform float x;\nvoid main() {}", "uniform int x;\nvoid main() {}"));
     }
+
+    @Test
+    void structVaryingIsSplitIntoItsMembers() throws Exception {
+        // Photon v1.4: flat out OverworldFogParameters fog_params (three vec3) before light_levels.
+        String struct = "struct Fog { vec3 a; vec3 b; vec3 c; };\n";
+        ProgramTranslator.Result r = ProgramTranslator.translate("#version 400\n" + struct + """
+                flat out Fog fog;
+                out vec2 light;
+                void main() { fog.a = vec3(0.0); fog.b = vec3(0.0); fog.c = vec3(0.0); light = vec2(0.0); gl_Position = vec4(0.0); }
+                """, "#version 400\n" + struct + """
+                flat in Fog fog;
+                in vec2 light;
+                layout(location = 0) out vec4 c;
+                void main() { c = vec4(fog.a + fog.b + fog.c, light.x); }
+                """);
+        // The game refuses struct varyings: one flat varying per member, copied in main.
+        assertFalse(r.vertex().contains("out Fog"), r.vertex());
+        assertTrue(r.vertex().contains("flat out vec3 luxium_sv_fog_a;"), r.vertex());
+        assertTrue(r.vertex().contains("luxium_sv_fog_c = fog.c;"), r.vertex());
+        assertTrue(r.fragment().contains("fog.b = luxium_sv_fog_b;"), r.fragment());
+    }
+
+    @Test
+    void packFunctionNamedLikeAMetalBuiltInIsRenamed() throws Exception {
+        // Photon v1.4: float length_squared(vec3 v), ambiguous with metal::length_squared.
+        ProgramTranslator.Result r = ProgramTranslator.translate("""
+                #version 400
+                void main() { gl_Position = vec4(0.0); }
+                """, """
+                #version 400
+                float length_squared(vec3 v) { return dot(v, v); }
+                layout(location = 0) out vec4 c;
+                void main() { c = vec4(length_squared(vec3(1.0))); }
+                """);
+        assertTrue(r.fragment().contains("luxium_length_squared(vec3(1.0))"), r.fragment());
+    }
+
+    @Test
+    void coreInputThePackDeclaresIsDeclaredOnce() throws Exception {
+        // Photon v1.4's gbuffers_basic: in vec4 vaColor.
+        ProgramTranslator.Result r = ProgramTranslator.translate("""
+                #version 400
+                in vec4 vaColor;
+                out vec4 tint;
+                void main() { tint = vaColor; gl_Position = vec4(0.0); }
+                """, """
+                #version 400
+                in vec4 tint;
+                layout(location = 0) out vec4 c;
+                void main() { c = tint; }
+                """);
+        assertEquals(1, r.vertex().split("in vec4 vaColor;", -1).length - 1, r.vertex());
+    }
+
+    @Test
+    void narrowFragmentOutputIsWidenedToFourComponents() throws Exception {
+        // Photon v1.4's final: layout(location = 0) out vec3 fragment_color (Metal refuses the pipeline).
+        ProgramTranslator.Result r = ProgramTranslator.translate("""
+                #version 400
+                void main() { gl_Position = vec4(0.0); }
+                """, """
+                #version 400
+                layout(location = 0) out vec3 fragment_color;
+                void main() { fragment_color = vec3(1.0); }
+                """, ProgramTranslator.Mode.FULLSCREEN);
+        assertTrue(r.fragment().contains("out vec4 luxium_po_fragment_color;"), r.fragment());
+        assertTrue(r.fragment().contains("luxium_po_fragment_color = vec4(fragment_color, float(1));"), r.fragment());
+        assertFalse(r.fragment().contains("out vec3"), r.fragment());
+    }
 }
