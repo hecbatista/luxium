@@ -189,7 +189,7 @@ public final class MetalShadersClient implements ClientModInitializer {
             String properties = PackReader.open(chosen, (name, root, shaders) ->
                     PackReader.readText(shaders, "/shaders.properties").orElse(""));
             java.util.Properties props = new java.util.Properties();
-            Map<String, String> shaderPropertyDefines = new LinkedHashMap<>(StandardDefines.forMac());
+            Map<String, String> shaderPropertyDefines = new LinkedHashMap<>(StandardDefines.forProperties());
             shaderPropertyDefines.putAll(BiomeIds.defines());
             props.load(new java.io.StringReader(PropertiesPreprocessor.preprocess(properties,
                     packOptions.propertyDefines(shaderPropertyDefines))));
@@ -338,7 +338,7 @@ public final class MetalShadersClient implements ClientModInitializer {
             if (packOptions == null) {
                 packOptions = loadOptions(pack);
             }
-            Map<String, String> gameDefines = new LinkedHashMap<>(StandardDefines.forMac());
+            Map<String, String> gameDefines = new LinkedHashMap<>(StandardDefines.forProperties());
             gameDefines.putAll(BiomeIds.defines());
             // The pack's settings, so `#if WORLD_BLUR == -1` and friends work in .properties (as in Iris).
             Map<String, String> propertyDefines = packOptions.propertyDefines(gameDefines);
@@ -474,6 +474,7 @@ public final class MetalShadersClient implements ClientModInitializer {
     private static void prepareChain(Path pack, String folder, Map<String, String> defines, String properties) throws Exception {
         java.util.Properties props = new java.util.Properties();
         props.load(new java.io.StringReader(properties));
+        io.github.hecbatista.metalshaders.render.PackChain.setSizeOverrides(props);
 
         List<String> fragmentSources = new java.util.ArrayList<>();
         for (String program : PackDirectives.foldOrder(pack, folder)) {

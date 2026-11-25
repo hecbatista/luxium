@@ -776,9 +776,12 @@ public class PlaytestTour implements FabricClientGameTest {
         double median = sorted[sorted.length / 2];
         double p99 = sorted[(int) Math.min(sorted.length - 1, Math.floor(sorted.length * 0.99))];
         double max = sorted[sorted.length - 1];
+        // The F3 entity line (LevelExtractor.entityStatistics): mobs spawn differently per launch, and
+        // their cost is part of the frame, so each result says how many were drawn.
+        String entities = context.computeOnClient(mc -> mc.levelExtractor.entityStatistics());
         log(String.format(java.util.Locale.ROOT,
-                "bench %s: %d frames in %.1f s, avg %.1f fps, median %.2f ms, 1%% low %.1f fps (p99 %.2f ms), worst %.1f ms",
-                scene, n, seconds, (n - 1) / seconds, median, 1000.0 / p99, p99, max));
+                "bench %s: %d frames in %.1f s, avg %.1f fps, median %.2f ms, 1%% low %.1f fps (p99 %.2f ms), worst %.1f ms; %s",
+                scene, n, seconds, (n - 1) / seconds, median, 1000.0 / p99, p99, max, entities));
     }
 
     /** A carved cave 60 blocks under spawn: torches, glow lichen, lava, ores. No sky light. */

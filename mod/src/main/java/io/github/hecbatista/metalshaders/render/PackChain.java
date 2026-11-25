@@ -86,6 +86,58 @@ public final class PackChain {
     private static final java.util.regex.Pattern MIPMAP_DIRECTIVE = java.util.regex.Pattern.compile(
             "\\bconst\\s+bool\\s+(colortex\\d+|gcolor|gdepth|gnormal|composite|gaux[1-4])MipmapEnabled\\s*=\\s*(true|false)\\s*;");
 
+    /**
+     * size.buffer.<name> = <x> <y> (Iris ShaderProperties and TextureScaleOverride, see NOTICE): a
+     * value with a '.' is a fraction of the screen, else pixels. Buffer index -> {x, y} as given.
+     */
+    private static final Map<Integer, String[]> sizeOverrides = new HashMap<>();
+
+    public static void setSizeOverrides(java.util.Properties props) {
+        sizeOverrides.clear();
+        for (String key : props.stringPropertyNames()) {
+            if (!key.startsWith("size.buffer.")) {
+                continue;
+            }
+            Integer index = targetIndex(key.substring("size.buffer.".length()));
+            String[] parts = props.getProperty(key).strip().split("\\s+");
+            if (index == null || parts.length != 2) {
+                MetalShadersClient.LOGGER.warn("Ignoring {} = {} (expected size.buffer.<buffer> = <x> <y>)", key, props.getProperty(key));
+                continue;
+            }
+            sizeOverrides.put(index, parts);
+        }
+        if (!sizeOverrides.isEmpty()) {
+            MetalShadersClient.LOGGER.info("Buffer sizes: {}", sizeOverrides.entrySet().stream()
+                    .map(e -> "colortex" + e.getKey() + " " + String.join(" ", e.getValue())).toList());
+        }
+    }
+
+    /** One axis of a size.buffer value, as Iris's TextureScaleOverride.getX/getY. */
+    static int sizeAxis(String value, int screen) {
+        int n = value.contains(".") ? (int) (screen * Float.parseFloat(value)) : Integer.parseInt(value);
+        return Math.max(1, n);
+    }
+
+    /**
+     * luxium.fullSizeBuffers=true (system property, read every frame, for the quick A/B): ignore
+     * size.buffer.*; the buffers are rebuilt when it flips.
+     */
+    private static boolean fullSizeBuffers() {
+        return Boolean.getBoolean("luxium.fullSizeBuffers");
+    }
+
+    private static boolean builtFullSize;
+
+    private static int targetWidth(int index) {
+        String[] o = fullSizeBuffers() ? null : sizeOverrides.get(index);
+        return o == null ? width : sizeAxis(o[0], width);
+    }
+
+    private static int targetHeight(int index) {
+        String[] o = fullSizeBuffers() ? null : sizeOverrides.get(index);
+        return o == null ? height : sizeAxis(o[1], height);
+    }
+
     private static final Map<String, Integer> LEGACY = Map.of(
             "gcolor", 0, "gdepth", 1, "gnormal", 2, "composite", 3, "gaux1", 4, "gaux2", 5, "gaux3", 6, "gaux4", 7);
 
@@ -296,13 +348,14 @@ public final class PackChain {
         noiseTexture = null;
         noise = null;
         // These depend on colortex0's format, which the next world may change.
-        for (CompiledRenderPipeline c : new CompiledRenderPipeline[]{seedPipeline, depthPipeline, composePipeline}) {
+        for (CompiledRenderPipeline c : new CompiledRenderPipeline[]{seedPipeline, depthPipeline, depthBothPipeline, composePipeline}) {
             if (c != null) {
                 c.close();
             }
         }
         seedPipeline = null;
         depthPipeline = null;
+        depthBothPipeline = null;
         composePipeline = null;
         plan = null;
         width = 0;
@@ -389,6 +442,59 @@ public final class PackChain {
         if (depthPipeline == null) {
             fail("depth conversion pass failed to compile", null);
         }
+        // The same conversion into depthtex0 and depthtex1/2 at once (the deferred split point,
+        // where both are the opaque depth): one pass instead of a pass and a copy.
+        String depthBothFragment = """
+                #version 450
+                uniform sampler2D reversedDepth;
+                layout(location = 0) in vec2 uv;
+                layout(location = 0) out vec4 depth0;
+                layout(location = 1) out vec4 depth1;
+                void main() { float d = 1.0 - texture(reversedDepth, uv).r; depth0 = vec4(d); depth1 = vec4(d); }
+                """;
+        Identifier depthBothShader = Identifier.fromNamespaceAndPath("luxium", "pack/depth_convert_both");
+        depthBothPipeline = device.compilePipeline(RenderPipeline.builder()
+                        .withLocation(Identifier.fromNamespaceAndPath("luxium", "pipeline/depth_convert_both"))
+                        .withVertexShader(depthBothShader).withFragmentShader(depthBothShader)
+                        .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+                        .withBindGroupLayout(BindGroupLayout.builder().withUniform("reversedDepth", UniformType.COMBINED_IMAGE_SAMPLER).build())
+                        .withColorTargetState(0, new ColorTargetState(Optional.empty(), GpuFormat.R32_FLOAT, ColorTargetState.WRITE_ALL))
+                        .withColorTargetState(1, new ColorTargetState(Optional.empty(), GpuFormat.R32_FLOAT, ColorTargetState.WRITE_ALL))
+                        .build(),
+                new LuxiumShaderSource().put(depthBothShader, ShaderType.VERTEX, vertex).put(depthBothShader, ShaderType.FRAGMENT, depthBothFragment),
+                Runnable::run).join().finishCompile();
+    }
+
+    private static CompiledRenderPipeline depthBothPipeline;
+
+    /**
+     * luxium.oldDepthPath=true (system property, read every frame, for the quick A/B) or
+     * LUXIUM_OLD_DEPTH_PATH=1: the depth path before 2026-11-24 (convert then copy; merge the hand
+     * per texture through a scratch image and copy back).
+     */
+    private static boolean oldDepthPath() {
+        return OLD_DEPTH_PATH_ENV || Boolean.getBoolean("luxium.oldDepthPath");
+    }
+
+    private static final boolean OLD_DEPTH_PATH_ENV = System.getenv("LUXIUM_OLD_DEPTH_PATH") != null;
+
+    /** depthtex0 and depthtex1/2 both = the game's depth, converted (the deferred split point). */
+    private static void convertDepthBoth(CommandEncoder encoder, RenderTarget target) {
+        if (oldDepthPath() || depthBothPipeline == null) {
+            convertDepth(encoder, target, depthConvertedView);
+            encoder.copyTextureToTexture(depthConverted, depthPre, 0, 0, 0, 0, 0, width, height);
+            return;
+        }
+        encoder.copyTextureToTexture(target.getDepthTexture(), depthCopy, 0, 0, 0, 0, 0, width, height);
+        probeDepth(RenderSystem.getDevice(), encoder, target);
+        RenderPassDescriptor d = RenderPassDescriptor.builder(() -> "Luxium depth to OpenGL convention (depthtex0 and 1/2)")
+                .withColorAttachment(depthConvertedView).withColorAttachment(depthPreView)
+                .withRenderArea(new RenderPass.RenderArea(0, 0, width, height)).build();
+        try (RenderPass convert = encoder.createRenderPass(d)) {
+            convert.setPipeline(depthBothPipeline);
+            convert.setUniform("reversedDepth", depthCopyView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
+            convert.draw(3, 1, 0, 0);
+        }
     }
 
     /**
@@ -461,8 +567,7 @@ public final class PackChain {
             GpuDevice device = RenderSystem.getDevice();
             CommandEncoder encoder = device.createCommandEncoder();
             ensureTargets(device, target.width, target.height);
-            convertDepth(encoder, target, depthConvertedView);
-            encoder.copyTextureToTexture(depthConverted, depthPre, 0, 0, 0, 0, 0, width, height);
+            convertDepthBoth(encoder, target);
             seed(device, encoder, target);
             deferredRan = true;
             runPasses(device, encoder, target, values, true);
@@ -498,8 +603,7 @@ public final class PackChain {
             CommandEncoder encoder = device.createCommandEncoder();
             ensureTargets(device, target.width, target.height);
             if (!deferredRan) {
-                convertDepth(encoder, target, depthConvertedView);
-                encoder.copyTextureToTexture(depthConverted, depthPre, 0, 0, 0, 0, 0, width, height);
+                convertDepthBoth(encoder, target);
                 seed(device, encoder, target);
                 runPasses(device, encoder, target, values, true);
             } else {
@@ -535,8 +639,12 @@ public final class PackChain {
             CommandEncoder encoder = device.createCommandEncoder();
             if (handDepth != null && handDepth.getWidth(0) == width && handDepth.getHeight(0) == height) {
                 encoder.copyTextureToTexture(handDepth, depthCopy, 0, 0, 0, 0, 0, width, height);
-                mergeHand(device, encoder, depthConverted, depthConvertedView);
-                mergeHand(device, encoder, depthPre, depthPreView);
+                if (oldDepthPath()) {
+                    mergeHand(device, encoder, depthConverted, depthConvertedView);
+                    mergeHand(device, encoder, depthPre, depthPreView);
+                } else {
+                    mergeHandBoth(device, encoder);
+                }
             }
             runPasses(device, encoder, target, values, false);
             FlashProbe.capture(device, encoder, target.getColorTexture());
@@ -608,6 +716,106 @@ public final class PackChain {
         }
         encoder.copyTextureToTexture(mergeScratch, into, 0, 0, 0, 0, 0, width, height);
     }
+
+    private static CompiledRenderPipeline mergeBothPipeline;
+    /** The other half of depthtex0 and of depthtex1/2: the merge writes there, then they swap. */
+    private static GpuTexture spareConverted;
+    private static GpuTextureView spareConvertedView;
+    private static GpuTexture spareDepthPre;
+    private static GpuTextureView spareDepthPreView;
+
+    /**
+     * The hand's depth into depthtex0 and depthtex1/2 in one pass with two attachments, written into
+     * the spare images, which then become depthtex0 and depthtex1/2 (no copy back). Same rule as
+     * {@link #mergeHand}: 1 - hand depth where the hand drew, else as it was.
+     */
+    private static void mergeHandBoth(GpuDevice device, CommandEncoder encoder) {
+        if (mergeBothPipeline == null) {
+            Identifier shader = Identifier.fromNamespaceAndPath("luxium", "pack/merge_hand_depth_both");
+            String vertex = """
+                    #version 450
+                    layout(location = 0) out vec2 uv;
+                    void main() {
+                        vec2 p = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
+                        uv = p;
+                        gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+                    }
+                    """;
+            String fragment = """
+                    #version 450
+                    uniform sampler2D previous0;
+                    uniform sampler2D previous1;
+                    uniform sampler2D handDepth;
+                    layout(location = 0) in vec2 uv;
+                    layout(location = 0) out vec4 depth0;
+                    layout(location = 1) out vec4 depth1;
+                    void main() {
+                        float h = texture(handDepth, uv).r;
+                        depth0 = vec4(h > 0.0 ? 1.0 - h : texture(previous0, uv).r);
+                        depth1 = vec4(h > 0.0 ? 1.0 - h : texture(previous1, uv).r);
+                    }
+                    """;
+            mergeBothPipeline = device.compilePipeline(RenderPipeline.builder()
+                            .withLocation(Identifier.fromNamespaceAndPath("luxium", "pipeline/merge_hand_depth_both"))
+                            .withVertexShader(shader).withFragmentShader(shader)
+                            .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+                            .withBindGroupLayout(BindGroupLayout.builder().withUniform("previous0", UniformType.COMBINED_IMAGE_SAMPLER)
+                                    .withUniform("previous1", UniformType.COMBINED_IMAGE_SAMPLER)
+                                    .withUniform("handDepth", UniformType.COMBINED_IMAGE_SAMPLER).build())
+                            .withColorTargetState(0, new ColorTargetState(Optional.empty(), GpuFormat.R32_FLOAT, ColorTargetState.WRITE_ALL))
+                            .withColorTargetState(1, new ColorTargetState(Optional.empty(), GpuFormat.R32_FLOAT, ColorTargetState.WRITE_ALL))
+                            .build(),
+                    new LuxiumShaderSource().put(shader, ShaderType.VERTEX, vertex).put(shader, ShaderType.FRAGMENT, fragment),
+                    Runnable::run).join().finishCompile();
+        }
+        if (spareConverted == null || spareConverted.getWidth(0) != width || spareConverted.getHeight(0) != height) {
+            closeSpareDepth();
+            spareConverted = device.createTexture("Luxium depthtex0 (OpenGL convention) B", DEPTH_IMAGE_USAGE, GpuFormat.R32_FLOAT, width, height, 1, 1);
+            spareConvertedView = device.createTextureView(spareConverted);
+            spareDepthPre = device.createTexture("Luxium depthtex1/2 (before translucents) B", DEPTH_IMAGE_USAGE, GpuFormat.R32_FLOAT, width, height, 1, 1);
+            spareDepthPreView = device.createTextureView(spareDepthPre);
+        }
+        RenderPassDescriptor d = RenderPassDescriptor.builder(() -> "Luxium merge hand depth (depthtex0 and 1/2)")
+                .withColorAttachment(spareConvertedView).withColorAttachment(spareDepthPreView)
+                .withRenderArea(new RenderPass.RenderArea(0, 0, width, height)).build();
+        try (RenderPass rp = encoder.createRenderPass(d)) {
+            rp.setPipeline(mergeBothPipeline);
+            var nearest = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST);
+            rp.setUniform("previous0", depthConvertedView, nearest);
+            rp.setUniform("previous1", depthPreView, nearest);
+            rp.setUniform("handDepth", depthCopyView, nearest);
+            rp.draw(3, 1, 0, 0);
+        }
+        GpuTexture t = depthConverted;
+        GpuTextureView v = depthConvertedView;
+        depthConverted = spareConverted;
+        depthConvertedView = spareConvertedView;
+        spareConverted = t;
+        spareConvertedView = v;
+        t = depthPre;
+        v = depthPreView;
+        depthPre = spareDepthPre;
+        depthPreView = spareDepthPreView;
+        spareDepthPre = t;
+        spareDepthPreView = v;
+    }
+
+    private static void closeSpareDepth() {
+        if (spareConverted != null) {
+            spareConvertedView.close();
+            spareConverted.close();
+            spareDepthPreView.close();
+            spareDepthPre.close();
+        }
+        spareConverted = null;
+        spareConvertedView = null;
+        spareDepthPre = null;
+        spareDepthPreView = null;
+    }
+
+    /** Both depthtex images and their spares: sampled, drawn into (convert, merge) and copied. */
+    private static final int DEPTH_IMAGE_USAGE = GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT
+            | GpuTexture.USAGE_COPY_SRC | GpuTexture.USAGE_COPY_DST;
 
     /** The game's depth, copied and converted to the OpenGL convention into {@code into}. */
     private static void convertDepth(CommandEncoder encoder, RenderTarget target, GpuTextureView into) {
@@ -699,8 +907,12 @@ public final class PackChain {
             // the corner is row 0 in Metal's coordinates.
             boolean isFinal = pass.name().equals("final");
             float areaScale = isFinal || System.getenv("LUXIUM_NO_SCALE_SCISSOR") != null || Boolean.getBoolean("luxium.noScaleScissor") ? 1f : pass.scale();
-            int areaW = isFinal ? target.width : areaScale < 1f ? Math.max(1, (int) (width * areaScale)) : width;
-            int areaH = isFinal ? target.height : areaScale < 1f ? Math.max(1, (int) (height * areaScale)) : height;
+            // The pass's own size: its buffers' (size.buffer.*; a pass's buffers share one size, as
+            // the game requires of a render pass's attachments), else the screen's.
+            int baseW = isFinal || pass.writes().isEmpty() ? width : targetWidth(pass.writes().getFirst());
+            int baseH = isFinal || pass.writes().isEmpty() ? height : targetHeight(pass.writes().getFirst());
+            int areaW = isFinal ? target.width : areaScale < 1f ? Math.max(1, (int) (baseW * areaScale)) : baseW;
+            int areaH = isFinal ? target.height : areaScale < 1f ? Math.max(1, (int) (baseH * areaScale)) : baseH;
             RenderPassDescriptor descriptor = d.withRenderArea(new RenderPass.RenderArea(0, 0, areaW, areaH)).build();
             try (RenderPass rp = encoder.createRenderPass(descriptor)) {
                 rp.setPipeline(pass.pipeline());
@@ -1109,7 +1321,7 @@ public final class PackChain {
         if (mip == null) {
             return;
         }
-        encoder.copyTextureToTexture(halves.get(index)[current.get(index)], mip, 0, 0, 0, 0, 0, width, height);
+        encoder.copyTextureToTexture(halves.get(index)[current.get(index)], mip, 0, 0, 0, 0, 0, targetWidth(index), targetHeight(index));
         if (MetalMips.generate(encoder, mip)) {
             return;
         }
@@ -1184,9 +1396,10 @@ public final class PackChain {
     }
 
     private static void ensureTargets(GpuDevice device, int w, int h) {
-        if (w == width && h == height && !halves.isEmpty()) {
+        if (w == width && h == height && !halves.isEmpty() && builtFullSize == fullSizeBuffers()) {
             return;
         }
+        builtFullSize = fullSizeBuffers();
         closeTargets();
         width = w;
         height = h;
@@ -1207,21 +1420,22 @@ public final class PackChain {
         for (Pass p : passes) {
             mipped.addAll(p.mipmapped());
         }
-        // A full chain down to 1x1 (glGenerateMipmap's levels).
-        int chainLevels = 1 + (31 - Integer.numberOfLeadingZeros(Math.max(1, Math.max(w, h))));
         for (int i : used) {
             RenderTargetPlan.Target t = plan.target(i);
-            GpuTexture a = device.createTexture("Luxium colortex" + i + " A", usage, t.format(), w, h, 1, 1);
-            GpuTexture b = device.createTexture("Luxium colortex" + i + " B", usage, t.format(), w, h, 1, 1);
+            int tw = targetWidth(i);
+            int th = targetHeight(i);
+            GpuTexture a = device.createTexture("Luxium colortex" + i + " A", usage, t.format(), tw, th, 1, 1);
+            GpuTexture b = device.createTexture("Luxium colortex" + i + " B", usage, t.format(), tw, th, 1, 1);
             halves.put(i, new GpuTexture[]{a, b});
             halfViews.put(i, new GpuTextureView[]{device.createTextureView(a), device.createTextureView(b)});
             if (mipped.contains(i) && filterable(t.format())) {
+                int levels = 1 + (31 - Integer.numberOfLeadingZeros(Math.max(1, Math.max(tw, th))));
                 GpuTexture mip = device.createTexture("Luxium colortex" + i + " mips", GpuTexture.USAGE_COPY_DST
-                        | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT, t.format(), w, h, 1, chainLevels);
+                        | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT, t.format(), tw, th, 1, levels);
                 mipTextures.put(i, mip);
                 chainViews.put(i, device.createTextureView(mip));
-                GpuTextureView[] perLevel = new GpuTextureView[chainLevels];
-                for (int l = 0; l < chainLevels; l++) {
+                GpuTextureView[] perLevel = new GpuTextureView[levels];
+                for (int l = 0; l < levels; l++) {
                     perLevel[l] = device.createTextureView(mip, l, 1);
                 }
                 levelViews.put(i, perLevel);
@@ -1242,16 +1456,14 @@ public final class PackChain {
             depthConvertedView.close();
             depthConverted.close();
         }
-        depthConverted = device.createTexture("Luxium depthtex0 (OpenGL convention)",
-                GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT | GpuTexture.USAGE_COPY_SRC | GpuTexture.USAGE_COPY_DST,
-                GpuFormat.R32_FLOAT, w, h, 1, 1);
+        depthConverted = device.createTexture("Luxium depthtex0 (OpenGL convention)", DEPTH_IMAGE_USAGE, GpuFormat.R32_FLOAT, w, h, 1, 1);
         depthConvertedView = device.createTextureView(depthConverted);
         if (depthPre != null) {
             depthPreView.close();
             depthPre.close();
         }
-        depthPre = device.createTexture("Luxium depthtex1/2 (before translucents)",
-                GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_COPY_DST, GpuFormat.R32_FLOAT, w, h, 1, 1);
+        depthPre = device.createTexture("Luxium depthtex1/2 (before translucents)", DEPTH_IMAGE_USAGE, GpuFormat.R32_FLOAT, w, h, 1, 1);
+        closeSpareDepth();
         depthPreView = device.createTextureView(depthPre);
         if (coverage != null) {
             coverageView.close();

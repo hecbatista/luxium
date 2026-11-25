@@ -120,11 +120,24 @@ public final class ShadowTargets {
         copyDepth(opaqueSampledView);
     }
 
-    /** After the shadow pass: the whole depth becomes shadowtex0. */
+    /**
+     * After the shadow pass: the whole depth becomes shadowtex0. The pack's passes read the depth
+     * image itself (a D32 depth image samples as a plain sampler2D, as Luxium's own passes read the
+     * game's depth); only shadowtex1, a snapshot before the translucents, needs a copy. Measured
+     * 2026-11-24: each copy is a 2048x2048 render pass, about 45 us plus an encoder boundary.
+     * luxium.oldShadowCopy=true (read every frame) or LUXIUM_OLD_SHADOW_COPY=1 copies as before.
+     */
     static void publish() {
-        copyDepth(depthSampledView);
+        copiedShadowtex0 = OLD_SHADOW_COPY_ENV || Boolean.getBoolean("luxium.oldShadowCopy");
+        if (copiedShadowtex0) {
+            copyDepth(depthSampledView);
+        }
         drawn = true;
     }
+
+    private static final boolean OLD_SHADOW_COPY_ENV = System.getenv("LUXIUM_OLD_SHADOW_COPY") != null;
+    /** Whether this frame's shadowtex0 is the copy (else the depth image itself). */
+    private static boolean copiedShadowtex0 = true;
 
     /** The depth copied into a float image the pack's passes sample. */
     private static void copyDepth(GpuTextureView into) {
@@ -173,7 +186,7 @@ public final class ShadowTargets {
             return null;
         }
         return switch (name) {
-            case "shadowtex0", "watershadow" -> depthSampledView;
+            case "shadowtex0", "watershadow" -> copiedShadowtex0 ? depthSampledView : depthView;
             case "shadowtex1", "shadow" -> opaqueSampledView;
             case "shadowcolor", "shadowcolor0" -> colorViews.get(0);
             case "shadowcolor1" -> colorViews.get(1);

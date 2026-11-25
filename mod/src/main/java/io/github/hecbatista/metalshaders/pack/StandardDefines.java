@@ -70,4 +70,22 @@ public final class StandardDefines {
         }
         return Collections.unmodifiableMap(defines);
     }
+
+    /**
+     * {@link #forMac()} for .properties files (shaders.properties, block.properties, ...), plus
+     * {@code IRIS_FEATURE_BLOCK_EMISSION_ATTRIBUTE}. Iris always claims that feature (FeatureFlags),
+     * and Complementary tests it only in shaders.properties, to shrink its reflection buffers
+     * colortex1 and colortex7 to REFLECTION_RES (size.buffer.*, which Luxium follows). The flag also
+     * promises at_midBlock.w, the block's light emission, which Luxium doesn't supply yet, so programs
+     * don't get it: a pack that tests it in GLSL takes its no-attribute road, which is right for
+     * Luxium. Measured 2026-11-25: Complementary's composite, which writes those buffers, cost twice
+     * LeadLight's at full size (0.10 against 0.05 ms).
+     */
+    public static Map<String, String> forProperties() {
+        Map<String, String> defines = new LinkedHashMap<>(forMac());
+        if (System.getenv("LUXIUM_NO_BUFFER_SIZES") == null) {
+            defines.put("IRIS_FEATURE_BLOCK_EMISSION_ATTRIBUTE", "");
+        }
+        return Collections.unmodifiableMap(defines);
+    }
 }
