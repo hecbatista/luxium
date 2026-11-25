@@ -19,6 +19,7 @@ import com.mojang.renderpearl.api.pipeline.RenderPipeline;
 import com.mojang.renderpearl.api.pipeline.ShaderType;
 import com.mojang.renderpearl.api.pipeline.UniformType;
 import com.mojang.renderpearl.api.textures.FilterMode;
+import com.mojang.renderpearl.api.textures.GpuSampler;
 import com.mojang.renderpearl.api.textures.GpuTexture;
 import com.mojang.renderpearl.api.textures.GpuTextureView;
 import io.github.hecbatista.metalshaders.MetalShadersClient;
@@ -58,8 +59,32 @@ public final class PackChain {
     /** One compiled pass. */
     private record Pass(String name, ProgramTranslator.Result program, Std140Layout.Layout layout,
                         Map<String, String> defaults, CompiledRenderPipeline pipeline, MappableRingBuffer ubo,
-                        List<Integer> writes, float scale) {
+                        List<Integer> writes, float scale, Set<Integer> mipmapped) {
     }
+
+    /**
+     * The buffers a program samples through a mip chain: {@code const bool colortexNMipmapEnabled = true;}
+     * or the legacy name (gcolor, gdepth, ..., gaux4), in the preprocessed fragment source, as Iris's
+     * ProgramDirectives reads them (see NOTICE).
+     */
+    static Set<Integer> mipmappedBuffers(String fragmentSource) {
+        Set<Integer> out = new TreeSet<>();
+        java.util.regex.Matcher m = MIPMAP_DIRECTIVE.matcher(fragmentSource);
+        while (m.find()) {
+            Integer index = targetIndex(m.group(1));
+            if (index != null) {
+                if (m.group(2).equals("true")) {
+                    out.add(index);
+                } else {
+                    out.remove(index);
+                }
+            }
+        }
+        return out;
+    }
+
+    private static final java.util.regex.Pattern MIPMAP_DIRECTIVE = java.util.regex.Pattern.compile(
+            "\\bconst\\s+bool\\s+(colortex\\d+|gcolor|gdepth|gnormal|composite|gaux[1-4])MipmapEnabled\\s*=\\s*(true|false)\\s*;");
 
     private static final Map<String, Integer> LEGACY = Map.of(
             "gcolor", 0, "gdepth", 1, "gnormal", 2, "composite", 3, "gaux1", 4, "gaux2", 5, "gaux3", 6, "gaux4", 7);
@@ -67,7 +92,17 @@ public final class PackChain {
     private static RenderTargetPlan plan;
     private static final List<Pass> passes = new ArrayList<>();
     private static final Map<Integer, GpuTexture[]> halves = new HashMap<>();
+    /** Each half's level-0 view: what passes write into and ordinary reads sample. */
     private static final Map<Integer, GpuTextureView[]> halfViews = new HashMap<>();
+    /**
+     * For buffers some pass mip-samples: a separate texture with the whole mip chain, its view, and
+     * single-level views (for the drawn fallback). The pack's buffers stay single-level, so the
+     * passes that write them and Metallum's clears touch one level only.
+     */
+    private static final Map<Integer, GpuTexture> mipTextures = new HashMap<>();
+    private static final Map<Integer, GpuTextureView> chainViews = new HashMap<>();
+    private static final Map<Integer, GpuTextureView[]> levelViews = new HashMap<>();
+    private static final Map<GpuFormat, CompiledRenderPipeline> downsamplePipelines = new HashMap<>();
     private static final Map<Integer, Integer> current = new HashMap<>();
     private static GpuTexture depthCopy;
     private static GpuTextureView depthCopyView;
@@ -109,6 +144,7 @@ public final class PackChain {
 
     /** A pass whose compile was started on the pool (step 7g). */
     private record StartedPass(String name, float scale, ProgramTranslator.Result result, List<Integer> writes,
+                               Set<Integer> mipmapped,
                                java.util.concurrent.CompletableFuture<CompiledRenderPipeline.Pending> compile) {
     }
 
@@ -178,7 +214,8 @@ public final class PackChain {
                     .put(shader, ShaderType.VERTEX, r.vertex())
                     .put(shader, ShaderType.FRAGMENT, r.fragment());
             try {
-                started.add(new StartedPass(name, scale, r, writes, PipelineCompiler.start(builder.build(), source)));
+                started.add(new StartedPass(name, scale, r, writes, mipmappedBuffers(p.getValue()[1]),
+                        PipelineCompiler.start(builder.build(), source)));
             } catch (RuntimeException e) {
                 discard(started);
                 fail(name + ": compile threw", e);
@@ -213,9 +250,9 @@ public final class PackChain {
             });
             MappableRingBuffer ubo = layout.size() == 0 ? null
                     : new MappableRingBuffer(() -> "Luxium " + name + " uniforms", GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_MAP_WRITE, layout.size());
-            passes.add(new Pass(name, r, layout, defaults, compiled, ubo, writes, scale));
-            MetalShadersClient.LOGGER.info("Chain pass {}: writes {}, reads {}, scale {}", name, writes,
-                    r.samplers().stream().map(ProgramTranslator.Sampler::name).toList(), scale);
+            passes.add(new Pass(name, r, layout, defaults, compiled, ubo, writes, scale, sp.mipmapped()));
+            MetalShadersClient.LOGGER.info("Chain pass {}: writes {}, reads {}, scale {}, mipmapped {}", name, writes,
+                    r.samplers().stream().map(ProgramTranslator.Sampler::name).toList(), scale, sp.mipmapped());
         }
         if (noiseImage != null) {
             GpuTexture t = device.createTexture("Luxium noisetex", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_TEXTURE_BINDING,
@@ -249,16 +286,7 @@ public final class PackChain {
             }
         }
         passes.clear();
-        halfViews.values().forEach(v -> {
-            v[0].close();
-            v[1].close();
-        });
-        halves.values().forEach(t -> {
-            t[0].close();
-            t[1].close();
-        });
-        halves.clear();
-        halfViews.clear();
+        closeTargets();
         current.clear();
         geometryTargets.clear();
         if (noiseTexture != null) {
@@ -629,9 +657,22 @@ public final class PackChain {
                 stopped = true;
                 return;
             }
+            // colortexNMipmapEnabled: fill the mip chain of the half this pass reads, as Iris's
+            // CompositeRenderer.setupMipmapping does with glGenerateMipmap just before the pass.
+            Set<Integer> mipmapped = mipsOff() ? Set.of() : pass.mipmapped();
+            for (int index : mipmapped) {
+                generateMips(device, encoder, index);
+            }
             Map<String, GpuTextureView> inputs = new HashMap<>();
+            Map<String, GpuSampler> samplers = new HashMap<>();
             for (ProgramTranslator.Sampler s : pass.program().samplers()) {
                 GpuTextureView custom = CustomTextures.override(stage, s.name(), writtenThisStage);
+                Integer index = custom == null ? targetIndex(s.name()) : null;
+                if (index != null && mipmapped.contains(index) && chainViews.containsKey(index)) {
+                    inputs.put(s.name(), chainViews.get(index));
+                    samplers.put(s.name(), RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR, true));
+                    continue;
+                }
                 inputs.put(s.name(), custom != null ? custom : input(device, encoder, s.name()));
             }
             if (pass.ubo() != null) {
@@ -650,8 +691,17 @@ public final class PackChain {
             if (pass.writes().isEmpty() && !pass.name().equals("final")) {
                 continue;   // a pass that writes nowhere (no DRAWBUFFERS): Vitrail leaves it empty too
             }
-            RenderPassDescriptor descriptor = d.withRenderArea(new RenderPass.RenderArea(0, 0,
-                    pass.name().equals("final") ? target.width : width, pass.name().equals("final") ? target.height : height)).build();
+            // A scaled pass (scale.<program>) covers only the 0..s corner: its projection maps the
+            // full-screen triangle there, but the triangle reaches twice that area, so the render area
+            // (a scissor in Metallum) keeps it to the corner, as Iris's viewport does (CompositeRenderer:
+            // (int) (viewWidth * scale)). Measured 2026-11-23: Complementary's composite4 (0.4) cost
+            // 3x LeadLight's without it. OpenGL's vertical convention holds end to end (step 6f), so
+            // the corner is row 0 in Metal's coordinates.
+            boolean isFinal = pass.name().equals("final");
+            float areaScale = isFinal || System.getenv("LUXIUM_NO_SCALE_SCISSOR") != null || Boolean.getBoolean("luxium.noScaleScissor") ? 1f : pass.scale();
+            int areaW = isFinal ? target.width : areaScale < 1f ? Math.max(1, (int) (width * areaScale)) : width;
+            int areaH = isFinal ? target.height : areaScale < 1f ? Math.max(1, (int) (height * areaScale)) : height;
+            RenderPassDescriptor descriptor = d.withRenderArea(new RenderPass.RenderArea(0, 0, areaW, areaH)).build();
             try (RenderPass rp = encoder.createRenderPass(descriptor)) {
                 rp.setPipeline(pass.pipeline());
                 if (pass.ubo() != null) {
@@ -659,7 +709,8 @@ public final class PackChain {
                 }
                 for (ProgramTranslator.Sampler s : pass.program().samplers()) {
                     GpuTextureView v = inputs.get(s.name());
-                    rp.setUniform(s.name(), v, CustomTextures.samplerFor(s.name(), v));
+                    GpuSampler sampler = samplers.get(s.name());
+                    rp.setUniform(s.name(), v, sampler != null ? sampler : CustomTextures.samplerFor(s.name(), v));
                 }
                 rp.draw(3, 1, 0, 0);
             }
@@ -1026,20 +1077,117 @@ public final class PackChain {
         };
     }
 
-    private static void ensureTargets(GpuDevice device, int w, int h) {
-        if (w == width && h == height && !halves.isEmpty()) {
+    private static final boolean NO_MIPMAPS_ENV = System.getenv("LUXIUM_NO_MIPMAPS") != null;
+
+    /**
+     * LUXIUM_NO_MIPMAPS=1, or the system property luxium.noMipmaps=true (read every frame, so the
+     * tour's quick A/B can flip it): ignore colortexNMipmapEnabled, as before mip chains existed.
+     */
+    private static boolean mipsOff() {
+        return NO_MIPMAPS_ENV || Boolean.getBoolean("luxium.noMipmaps");
+    }
+
+    /**
+     * Whether a format can be sampled with linear filtering (and so mip-mapped by averaging): not
+     * the integer formats.
+     */
+    private static boolean filterable(GpuFormat format) {
+        String n = format.name();
+        return !n.contains("UINT") && !n.contains("SINT");
+    }
+
+    /**
+     * Brings the half of buffer {@code index} that passes read now into its mip texture (level 0, a
+     * blit copy) and fills levels 1..n with Metal's blit generateMipmaps ({@link MetalMips}), what
+     * glGenerateMipmap does for Iris. If Metallum's blit isn't reachable, each level is drawn from
+     * the one above with a bilinear tap at the pixel centre (a 2x2 box), one render pass per level.
+     * Measured 2026-11-23 (quick A/B, overlook): drawn levels for colortex0 and colortex5 cost 7% of
+     * the frame rate; the blit is one command per texture.
+     */
+    private static void generateMips(GpuDevice device, CommandEncoder encoder, int index) {
+        GpuTexture mip = mipTextures.get(index);
+        if (mip == null) {
             return;
         }
+        encoder.copyTextureToTexture(halves.get(index)[current.get(index)], mip, 0, 0, 0, 0, 0, width, height);
+        if (MetalMips.generate(encoder, mip)) {
+            return;
+        }
+        GpuTextureView[] levels = levelViews.get(index);
+        CompiledRenderPipeline pipeline = downsamplePipeline(device, plan.target(index).format());
+        var linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
+        for (int l = 1; l < levels.length; l++) {
+            int level = l;
+            try (RenderPass rp = encoder.createRenderPass(() -> "Luxium mip colortex" + index + " level " + level, levels[l], Optional.empty())) {
+                rp.setPipeline(pipeline);
+                rp.setUniform("above", levels[l - 1], linear);
+                rp.draw(3, 1, 0, 0);
+            }
+        }
+    }
+
+    private static CompiledRenderPipeline downsamplePipeline(GpuDevice device, GpuFormat format) {
+        return downsamplePipelines.computeIfAbsent(format, f -> {
+            Identifier shader = Identifier.fromNamespaceAndPath("luxium", "pack/mip_downsample");
+            String vertex = """
+                    #version 450
+                    layout(location = 0) out vec2 uv;
+                    void main() {
+                        vec2 p = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
+                        uv = p;
+                        gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+                    }
+                    """;
+            String fragment = """
+                    #version 450
+                    uniform sampler2D above;
+                    layout(location = 0) in vec2 uv;
+                    layout(location = 0) out vec4 color;
+                    void main() {
+                        color = texture(above, uv);
+                    }
+                    """;
+            return device.compilePipeline(RenderPipeline.builder()
+                            .withLocation(Identifier.fromNamespaceAndPath("luxium", "pipeline/mip_downsample_" + f.name().toLowerCase(java.util.Locale.ROOT)))
+                            .withVertexShader(shader).withFragmentShader(shader)
+                            .withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
+                            .withBindGroupLayout(BindGroupLayout.builder().withUniform("above", UniformType.COMBINED_IMAGE_SAMPLER).build())
+                            .withColorTargetState(new ColorTargetState(Optional.empty(), f, ColorTargetState.WRITE_ALL))
+                            .build(),
+                    new LuxiumShaderSource().put(shader, ShaderType.VERTEX, vertex).put(shader, ShaderType.FRAGMENT, fragment),
+                    Runnable::run).join().finishCompile();
+        });
+    }
+
+    /** Closes every chain buffer, its views and its mip views. */
+    private static void closeTargets() {
         halfViews.values().forEach(v -> {
             v[0].close();
             v[1].close();
         });
+        halfViews.clear();
+        chainViews.values().forEach(GpuTextureView::close);
+        chainViews.clear();
+        levelViews.values().forEach(levels -> {
+            for (GpuTextureView l : levels) {
+                l.close();
+            }
+        });
+        levelViews.clear();
+        mipTextures.values().forEach(GpuTexture::close);
+        mipTextures.clear();
         halves.values().forEach(t -> {
             t[0].close();
             t[1].close();
         });
         halves.clear();
-        halfViews.clear();
+    }
+
+    private static void ensureTargets(GpuDevice device, int w, int h) {
+        if (w == width && h == height && !halves.isEmpty()) {
+            return;
+        }
+        closeTargets();
         width = w;
         height = h;
         Set<Integer> used = new TreeSet<>(plan.declared().keySet());
@@ -1055,12 +1203,29 @@ public final class PackChain {
         }
         used.add(0);
         int usage = GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_COPY_SRC | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT;
+        Set<Integer> mipped = new TreeSet<>();
+        for (Pass p : passes) {
+            mipped.addAll(p.mipmapped());
+        }
+        // A full chain down to 1x1 (glGenerateMipmap's levels).
+        int chainLevels = 1 + (31 - Integer.numberOfLeadingZeros(Math.max(1, Math.max(w, h))));
         for (int i : used) {
             RenderTargetPlan.Target t = plan.target(i);
             GpuTexture a = device.createTexture("Luxium colortex" + i + " A", usage, t.format(), w, h, 1, 1);
             GpuTexture b = device.createTexture("Luxium colortex" + i + " B", usage, t.format(), w, h, 1, 1);
             halves.put(i, new GpuTexture[]{a, b});
             halfViews.put(i, new GpuTextureView[]{device.createTextureView(a), device.createTextureView(b)});
+            if (mipped.contains(i) && filterable(t.format())) {
+                GpuTexture mip = device.createTexture("Luxium colortex" + i + " mips", GpuTexture.USAGE_COPY_DST
+                        | GpuTexture.USAGE_TEXTURE_BINDING | GpuTexture.USAGE_RENDER_ATTACHMENT, t.format(), w, h, 1, chainLevels);
+                mipTextures.put(i, mip);
+                chainViews.put(i, device.createTextureView(mip));
+                GpuTextureView[] perLevel = new GpuTextureView[chainLevels];
+                for (int l = 0; l < chainLevels; l++) {
+                    perLevel[l] = device.createTextureView(mip, l, 1);
+                }
+                levelViews.put(i, perLevel);
+            }
             current.putIfAbsent(i, 0);
             CommandEncoder e = device.createCommandEncoder();
             e.clearColorTexture(a, clearColor(t));

@@ -292,8 +292,25 @@ GNU Lesser General Public License version 3
   emptied in all maps wherever Sodium empties one, the light's list filled by Sodium's
   renderOutOfGraph walk, and the camera's lists, tree and task lists put back afterwards.
   Changed: our own code; the walk runs inside our shadow pass rather than through
-  SodiumWorldRenderer.setupTerrain, and its frustum is the shadow map's own box (the light's
-  clip space) instead of Iris's advanced shadow frustum.
+  SodiumWorldRenderer.setupTerrain. Its choice of frustum follows
+  shadows.ShadowRenderer.createShadowFrustum and shaderpack.properties.ShaderProperties
+  (shadow.culling: false = distance only, true = advanced; a shadow geometry program means
+  voxelization, so distance only). Changed: Luxium's distance-only frustum is the shadow map's own
+  box (the light's clip space), not Iris's BoxCuller, and it treats reversed/safe_zone as
+  distance only, since Luxium has no safe-zone frustum.
+
+  src/main/java/io/github/hecbatista/metalshaders/render/ShadowFrustum.java is adapted from
+  Iris's shadows.frustum.advanced.AdvancedShadowCullingFrustum, BaseClippingPlanes and
+  NeighboringPlaneSet (after L. Spiro's "Tightly Culling Shadow Casters for Directional
+  Lights"): the camera frustum's six planes from the transposed projection x view matrix,
+  normalized; the planes whose normal points toward the light (or is perpendicular to it) kept;
+  an edge plane, parallel to the light, through each line where a kept back plane meets a front
+  plane (the point on that line from Graphics Gems 1, as Iris computes it); and the
+  plane-by-plane AABB test with the nearest and farthest corners, after JOML's
+  FrustumIntersection. Changed: rewritten as a Sodium Frustum alone (no vanilla Frustum, no DH
+  or Immersive Portals hooks, no FMA switch); the shadow map's box (ShadowCulling.LightBox) is
+  tested as well, in place of Iris's BoxCuller; parallel planes are skipped instead of assumed
+  away; the light direction comes from the shadow model-view's third row.
 
   src/main/java/io/github/hecbatista/metalshaders/mixin/LevelExtractorMixin.java (with
   MetalShadersClient.keepImprovedTransparencyOff) follows
@@ -364,6 +381,17 @@ GNU Lesser General Public License version 3
   sampler2D, four gathered texels compared LEQUAL and blended with the bilinear weights) follows
   Vitrail's glsl/GlslTranslator (ofShadowCompare) as described in its comments. No Vitrail code
   was copied; the GLSL and Java are ours.
+
+  render/PackChain.java's mip chains follow Iris: which buffers a program mip-samples is read
+  as shaderpack.properties.ProgramDirectives does (const bool colortexNMipmapEnabled, and the
+  legacy gcolor..gaux4 names, the last directive winning), and the chain of the half the pass
+  reads is filled just before that pass and sampled with mipmap filtering, as
+  pipeline.CompositeRenderer.setupMipmapping does with glGenerateMipmap. Changed: our own code;
+  the pack's buffers stay single-level and a separate texture holds each chain (a copy of level
+  0, then Metal's blit generateMipmaps through render/MetalMips.java), and only the pass that
+  asks samples with mipmaps (Iris leaves them on for later passes that frame). A scaled pass's
+  render area is (int) (width * scale) x (int) (height * scale), the viewport Iris sets for it in
+  CompositeRenderer.
 
   render/PackChain.java cuts the chain as Vitrail's docs/frame.md describes ("The chain is cut in
   three"): the seed and deferred passes run after the opaque world, before translucents, and the

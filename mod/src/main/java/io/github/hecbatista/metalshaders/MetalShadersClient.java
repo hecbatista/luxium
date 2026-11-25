@@ -556,6 +556,11 @@ public final class MetalShadersClient implements ClientModInitializer {
                 constDirective(directiveText, "sunPathRotation", sd.sunPathRotation()));
         io.github.hecbatista.metalshaders.uniform.ShadowMatrices.setDirectives(shadowDirectives);
         LOGGER.info("Shadow directives: {}", shadowDirectives);
+        // Which frustum the light's terrain walk uses (Iris ShadowRenderer.createShadowFrustum):
+        // a shadow geometry program is Iris's sign that the pack voxelizes, so casters out of view count.
+        boolean shadowGeometry = PackPreprocessor.preprocessProgram(pack, path(folder, "shadow.gsh"), defines, packOptions).ok();
+        LOGGER.info("Shadow culling: {}", io.github.hecbatista.metalshaders.render.ShadowCulling.configure(
+                props.getProperty("shadow.culling"), shadowGeometry));
 
         // Steps 6d-2/6d-3: terrain drawn by the pack's gbuffers_terrain and gbuffers_water through Sodium.
         String[] terrain = program(pack, folder, "gbuffers_terrain", defines, props);
